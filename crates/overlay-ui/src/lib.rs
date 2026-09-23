@@ -81,6 +81,7 @@ pub mod remote_icons;
 pub mod render_content;
 pub mod restart;
 pub mod shortcuts;
+pub mod single_instance;
 pub mod startup;
 pub mod style;
 pub mod turn_watch;

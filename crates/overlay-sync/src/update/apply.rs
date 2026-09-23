@@ -60,6 +60,12 @@ pub fn stage(
     Ok(staged)
 }
 
+/// Posée sur tout processus que l'overlay relance lui-même (mise à jour ci-dessous, bouton
+/// « Redémarrer » d'`overlay-ui`) : le nouveau processus démarre AVANT que l'ancien ne sorte, et
+/// doit donc attendre le verrou d'instance unique au lieu de se croire en double
+/// (`overlay_ui::single_instance`, 2026-09-23).
+pub const RELAUNCH_ENV: &str = "WAKFU_OVERLAY_RELAUNCH";
+
 /// Remplace l'exe courant par `staged`, relance l'overlay avec `--updated-from <from_version>` et
 /// renvoie — c'est à l'appelant de sortir de sa boucle d'événements juste après. L'ancien exe
 /// n'est pas conservé par ce module : `self-replace` le déplace dans un fichier temporaire qu'il
@@ -70,6 +76,7 @@ pub fn install_and_relaunch(staged: &Path, from_version: &str) -> Result<(), Upd
         .map_err(|e| UpdateError::Io(format!("remplacement de {} : {e}", current.display())))?;
     let _ = fs::remove_file(staged);
     Command::new(&current)
+        .env(RELAUNCH_ENV, "1")
         .arg(UPDATED_FROM_FLAG)
         .arg(from_version)
         .spawn()

@@ -38,7 +38,7 @@ const APP_NAME: &str = "wakfu-companion-overlay-test";
 /// Miroir de `SYNC_BATCH_SIZE` (`sync-queue.service.ts`) — à garder ≤ `MAX_HISTORY_BATCH` côté
 /// serveur (`server/history/parse.ts`).
 const SYNC_BATCH_SIZE: usize = 50;
-/// Miroir de `MAX_ATTEMPTS` — seuls les échecs "permanents" (voir `is_permanent_rejection`)
+/// Miroir de `MAX_ATTEMPTS` — seuls les 4xx non classés (voir `Rejection::Counted`)
 /// comptent, jamais un simple problème réseau.
 const MAX_ATTEMPTS: i64 = 10;
 /// Âge au-delà duquel une entrée encore en file est abandonnée (`prune_older_than`, 2026-09-18)
@@ -82,26 +82,102 @@ fn now_ms() -> i64 {
 /// Résultat d'un `flush_once` — pilote le rythme de réessai côté appelant (voir la doc de module).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FlushOutcome {
-    /// Rien en file au moment de l'appel.
+    /// Rien en file au moment de l'appel (ou seulement des types suspendus, voir
+    /// [`SyncQueue::blocked_kinds`]).
     Idle,
-    /// Tout ce qui était en file au moment de l'appel a été envoyé avec succès.
+    /// Tout ce qui était en file au moment de l'appel (hors types suspendus) est parti — accepté,
+    /// ou écarté définitivement par le serveur (voir [`Rejection`]).
     Synced,
-    /// Un lot a échoué (réseau, 5xx, 401, 429 — réessayable — ou rejet permanent d'un lot, qui
-    /// n'empêche pas non plus un réessai ultérieur des lots suivants, voir la doc de module) :
-    /// rien de plus tenté ce passage, l'appelant programme un réessai (backoff). Porte la
-    /// description de l'échec (`Display` de `SyncError`) — **correctif du 2026-09-03** : cet échec
-    /// n'était jusqu'ici tracé nulle part côté `overlay-ui` (voir `spawn_sync_thread`), ce qui a
-    /// laissé un vrai blocage de synchronisation (jeton non transmis, voir `post_json_authenticated`)
-    /// totalement invisible pendant plusieurs jours.
-    Retry(String),
+    /// Un lot a échoué de façon **réessayable** (réseau, 5xx, 429, ou 4xx non classé — voir
+    /// [`Rejection`]) : rien de plus tenté ce passage. `after` est le délai imposé par le serveur
+    /// (`Retry-After` d'un 429, déjà borné par `client::parse_retry_after`) ; `None` : à l'appelant
+    /// d'appliquer son backoff. `reason` est le `Display` de la `SyncError` — **correctif du
+    /// 2026-09-03** : cet échec n'était jusqu'ici tracé nulle part côté `overlay-ui`, ce qui a
+    /// laissé un vrai blocage de synchronisation (jeton non transmis, voir
+    /// `post_json_authenticated`) totalement invisible pendant plusieurs jours.
+    Retry {
+        reason: String,
+        after: Option<std::time::Duration>,
+    },
+    /// **401 : le jeton n'est plus accepté** (session révoquée depuis « Mon compte », expirée —
+    /// plafond de 180 jours depuis l'appairage côté serveur). Rien n'est retiré de la file :
+    /// l'appelant cesse d'envoyer, fait effacer le jeton et propose de se reconnecter
+    /// (`overlay-ui`, `background::spawn_sync_thread`).
+    Unauthorized(String),
 }
 
-/// Un rejet HTTP 4xx (hors 401/429) signifie que le SERVEUR a refusé la charge utile elle-même —
-/// réessayer à l'identique ne changera rien, voir `MAX_ATTEMPTS`. Miroir exact de `permanent`
-/// (`SyncQueueService.send`). 401 : le client bascule déjà en mode invité ailleurs (voir la doc de
-/// `SyncQueue`, pas géré ici). 429 : throttling, réessayable par définition.
-fn is_permanent_rejection(err: &SyncError) -> bool {
-    matches!(err, SyncError::Http { status, .. } if (400..500).contains(status) && *status != 401 && *status != 429)
+/// **Classement d'un refus du serveur** (2026-09-23) — ce que `flush_once` fait du lot en échec.
+/// Jusque-là tout 4xx hors 401/429 comptait une « tentative » et le lot était renvoyé à
+/// l'identique toutes les 5 min, dix fois : un lot trop gros (413) ou refusé pour une seule entrée
+/// invalide (400) bloquait toute la file de son type pendant près d'une heure, pour finir jeté en
+/// entier — les entrées valides avec.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Rejection {
+    /// 401 — voir [`FlushOutcome::Unauthorized`].
+    SessionInvalid,
+    /// 403 — le serveur refuse ce TYPE d'envoi, pas ce lot : quota de combats atteint
+    /// (`history_quota_exceeded`, `server/history/guards.ts`), route réservée à une session de
+    /// navigateur (`browser_session_required`, `functions/api/_auth.ts`), ou tout autre refus
+    /// d'autorisation. Renvoyer ne changera rien avant un redémarrage ou une reconnexion : le type
+    /// est **suspendu** pour la session ([`SyncQueue::blocked_kinds`]), sa file conservée, les
+    /// autres types continuent.
+    KindBlocked,
+    /// 413 (lot trop volumineux) ou 400 (lot refusé à la validation — le serveur rejette le lot
+    /// entier dès la première entrée invalide, `server/history/parse.ts::parseBatch`) : le lot est
+    /// **redivisé** par moitié jusqu'à isoler l'entrée fautive, qui seule est retirée de la file.
+    Split,
+    /// 429 — limite de débit du compte ; `Retry-After` honoré.
+    Throttled(Option<std::time::Duration>),
+    /// Autre 4xx (404, 405, 409, 422…) : comportement historique, miroir de `permanent` côté web
+    /// — une tentative de plus pour chaque entrée, abandon au bout de `MAX_ATTEMPTS`.
+    Counted,
+    /// 5xx, réseau, réponse illisible : réessai après backoff, aucune tentative consommée.
+    Transient,
+}
+
+fn classify(err: &SyncError) -> Rejection {
+    match err {
+        SyncError::Http { status: 401, .. } => Rejection::SessionInvalid,
+        SyncError::Http { status: 403, .. } => Rejection::KindBlocked,
+        SyncError::Http {
+            status: 400 | 413, ..
+        } => Rejection::Split,
+        SyncError::Http {
+            status: 429,
+            retry_after,
+            ..
+        } => Rejection::Throttled(*retry_after),
+        SyncError::Http { status, .. } if (400..500).contains(status) => Rejection::Counted,
+        _ => Rejection::Transient,
+    }
+}
+
+/// Bornes des dates d'événement acceptées par le serveur (`HISTORY_MIN_DATE_MS`/
+/// `HISTORY_MAX_FUTURE_SKEW_MS`, `server/history/parse.ts`) : pas avant la sortie de Wakfu
+/// (2012-01-01), pas plus d'un jour dans le futur.
+const HISTORY_MIN_DATE_MS: i64 = 1_325_376_000_000;
+const HISTORY_MAX_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Champ de date que le serveur borne, selon le type d'événement.
+fn date_field(kind: HistoryEventKind) -> &'static str {
+    match kind {
+        HistoryEventKind::Fight => "startedAt",
+        HistoryEventKind::Purchase | HistoryEventKind::Trade | HistoryEventKind::Pact => {
+            "occurredAt"
+        }
+    }
+}
+
+/// La date de l'entrée est-elle dans les bornes du serveur ? Une date absente ou illisible ne
+/// l'est pas. Cas réel visé : un combat restauré d'un `fight-*.json` écrit avant que
+/// `started_at_ms` ne soit persisté, daté de l'époque Unix (`1970-01-01`) — le serveur refusait le
+/// lot entier en 400, et le combat bloquait tous ceux de son lot.
+fn date_in_server_range(kind: HistoryEventKind, payload: &Value, now_ms: i64) -> bool {
+    payload
+        .get(date_field(kind))
+        .and_then(Value::as_str)
+        .and_then(overlay_engine::log_time::parse_iso_utc_ms)
+        .is_some_and(|ms| (HISTORY_MIN_DATE_MS..=now_ms + HISTORY_MAX_FUTURE_SKEW_MS).contains(&ms))
 }
 
 struct QueuedEvent {
@@ -119,6 +195,10 @@ pub struct SyncQueue {
     /// persisté : redémarrer l'overlay repart d'un backoff neuf, ce qui est correct (voir sa doc
     /// côté web, même raisonnement).
     consecutive_failures: u32,
+    /// Types suspendus pour la session après un 403 (voir [`Rejection::KindBlocked`]), avec la
+    /// raison. En mémoire seulement : un redémarrage ou une reconnexion ([`Self::unblock_all`])
+    /// retente.
+    blocked: Vec<(HistoryEventKind, String)>,
 }
 
 impl SyncQueue {
@@ -140,7 +220,7 @@ impl SyncQueue {
     }
 
     fn from_connection(conn: Connection) -> Result<Self, SyncError> {
-        conn.execute(
+        conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS sync_queue (
                 id TEXT PRIMARY KEY,
                 kind TEXT NOT NULL,
@@ -148,13 +228,17 @@ impl SyncQueue {
                 signature TEXT NOT NULL,
                 queued_at INTEGER NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0
-            )",
-            [],
+            );
+            CREATE TABLE IF NOT EXISTS sync_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );",
         )
         .map_err(|err| SyncError::TokenStore(err.to_string()))?;
         Ok(Self {
             conn,
             consecutive_failures: 0,
+            blocked: Vec::new(),
         })
     }
 
@@ -164,6 +248,40 @@ impl SyncQueue {
     pub fn default_store_path() -> Option<std::path::PathBuf> {
         overlay_engine::app_dirs::project_dirs(APP_NAME)
             .map(|dirs| dirs.data_dir().join("sync-queue.sqlite3"))
+    }
+
+    /// **Rattache la file au compte `uid`** et rend le nombre d'entrées jetées (2026-09-23).
+    ///
+    /// La file ne mémorise pas de quel compte viennent ses entrées ; `clientKey` est calculé à
+    /// l'envoi avec l'`uid` du compte connecté À CE MOMENT-LÀ. Depuis qu'une session expirée (401)
+    /// laisse la file intacte pour la reconnexion, un AUTRE compte appairé ensuite aurait reçu
+    /// l'historique du premier. La file retient donc l'empreinte (SHA-256, jamais l'identifiant en
+    /// clair) du compte qu'elle sert : un compte différent la trouve vidée. Une file sans empreinte
+    /// (écrite avant ce correctif) est adoptée telle quelle.
+    pub fn claim_owner(&self, uid: &str) -> Result<usize, SyncError> {
+        let fingerprint = hex_encode(&Sha256::digest(uid.as_bytes()));
+        let current: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM sync_meta WHERE key = 'owner'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|err| SyncError::TokenStore(err.to_string()))?;
+        let dropped = match current {
+            Some(owner) if owner == fingerprint => return Ok(0),
+            Some(_) => self.clear()?,
+            None => 0,
+        };
+        self.conn
+            .execute(
+                "INSERT INTO sync_meta (key, value) VALUES ('owner', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [&fingerprint],
+            )
+            .map_err(|err| SyncError::TokenStore(err.to_string()))?;
+        Ok(dropped)
     }
 
     /// Met un événement en file — **synchrone et rapide** (une écriture SQLite), comme
@@ -249,21 +367,43 @@ impl SyncQueue {
         self.consecutive_failures
     }
 
+    /// Types d'événement suspendus pour la session (403, voir [`Rejection::KindBlocked`]) et la
+    /// raison du refus. Leur file est conservée.
+    pub fn blocked_kinds(&self) -> &[(HistoryEventKind, String)] {
+        &self.blocked
+    }
+
+    /// Lève toutes les suspensions — à chaque (re)connexion d'un compte : un quota libéré depuis
+    /// le site, ou un autre compte, a droit à un nouvel essai.
+    pub fn unblock_all(&mut self) {
+        self.blocked.clear();
+    }
+
     /// Envoie tout ce qui est en file, par lots de `SYNC_BATCH_SIZE`, un type d'événement après
-    /// l'autre (fight, purchase, trade — comme `HISTORY_ENDPOINTS`) — s'arrête au premier lot en
-    /// échec (réessayable ou rejet permanent, voir `is_permanent_rejection`) plutôt que
-    /// d'enchaîner sur les lots/types suivants : miroir exact de `drain()` côté web, qui `break`
-    /// sur le premier échec des deux boucles imbriquées.
+    /// l'autre (fight, purchase, trade, pact — comme `HISTORY_ENDPOINTS`).
+    ///
+    /// **Ce que devient un lot refusé** — voir [`Rejection`] (2026-09-23) : 401 arrête tout
+    /// ([`FlushOutcome::Unauthorized`]) ; 403 suspend ce type et passe au suivant ; 400/413
+    /// redivisent le lot jusqu'à isoler l'entrée fautive, retirée seule ; 429, 5xx et réseau
+    /// arrêtent le passage (réessayable, miroir de `drain()` côté web qui `break` sur le premier
+    /// échec) ; les autres 4xx consomment une tentative.
+    ///
+    /// Avant l'envoi, une entrée dont la date sort des bornes du serveur est retirée de la file
+    /// avec un avertissement (voir [`date_in_server_range`]) — sans quoi le lot entier repartirait
+    /// en 400. En 200, les entrées que le serveur a ignorées une à une (`rejected: [{ index,
+    /// clientKey?, error }]`, champ facultatif) sont journalisées puis retirées comme les autres :
+    /// les renvoyer n'y changerait rien.
     ///
     /// `send` reçoit le chemin d'API relatif (`"/api/v1/history/fights"`, etc.) et le corps
-    /// `{ "entries": [...] }` déjà construit (`clientKey` inclus) — production : `crate::client::
-    /// post_json` ; tests : un transport en mémoire (voir `tests` ci-dessous).
+    /// `{ "entries": [...] }` déjà construit (`clientKey` inclus) — production :
+    /// `crate::client::post_json_authenticated` ; tests : un transport en mémoire (voir `tests`).
     pub fn flush_once(
         &mut self,
         uid: &str,
         mut send: impl FnMut(&str, &Value) -> Result<Value, SyncError>,
     ) -> Result<FlushOutcome, SyncError> {
         let mut any_sent = false;
+        let now = now_ms();
 
         // Même ordre que le web (`drain`, parcours des clés d'`HISTORY_ENDPOINTS`) : un type
         // d'événement par requête, les endpoints étant distincts.
@@ -273,47 +413,26 @@ impl SyncQueue {
             HistoryEventKind::Trade,
             HistoryEventKind::Pact,
         ] {
+            if self.blocked.iter().any(|(blocked, _)| *blocked == kind) {
+                continue;
+            }
+            // Taille du lot pour CE type : réduite de moitié à chaque 400/413 (voir
+            // `Rejection::Split`), rétablie une fois l'entrée fautive écartée.
+            let mut limit = SYNC_BATCH_SIZE;
             loop {
-                let batch = self.select_batch(kind, SYNC_BATCH_SIZE)?;
-                if batch.is_empty() {
+                let rows = self.select_batch(kind, limit)?;
+                if rows.is_empty() {
                     break;
                 }
-
-                let entries: Vec<Value> = batch
-                    .iter()
-                    .map(|row| {
-                        let mut value: Value = serde_json::from_str(&row.payload_json)
-                            .expect("payload persisté par enqueue() est toujours un JSON valide");
-                        if let Value::Object(map) = &mut value {
-                            map.insert(
-                                "clientKey".to_string(),
-                                Value::String(client_key(uid, kind, &row.signature)),
-                            );
-                            // `dungeonRunSignature` (kind `Fight` uniquement, voir `FightPayload`)
-                            // n'est qu'une graine de contenu : jamais envoyée telle quelle, hachée
-                            // ICI en `dungeonRunKey` EXACTEMENT comme `clientKey` ci-dessus — miroir
-                            // vérifié dans `sync-queue.service.ts` (dépôt web) :
-                            // `payload['dungeonRunKey'] = await computeClientKey(uid, entry.kind,
-                            // dungeonRunSignature)`. C'est ce qui fait que tous les combats d'un
-                            // même run finissent par partager le `clientKey` de leur boss comme
-                            // `dungeonRunKey`, sans aller-retour serveur pour l'obtenir.
-                            if kind == HistoryEventKind::Fight {
-                                let run_key = match map.remove("dungeonRunSignature") {
-                                    Some(Value::String(signature)) => {
-                                        Value::String(client_key(uid, kind, &signature))
-                                    }
-                                    _ => Value::Null,
-                                };
-                                map.insert("dungeonRunKey".to_string(), run_key);
-                            }
-                        }
-                        value
-                    })
-                    .collect();
+                let (batch, entries) = self.prepare_batch(uid, kind, rows, now)?;
+                if batch.is_empty() {
+                    continue; // tout le lot était hors bornes, et vient d'être retiré
+                }
                 let body = serde_json::json!({ "entries": entries });
 
                 match send(kind.endpoint_path(), &body) {
                     Ok(response) => {
+                        let rejected = log_rejected_entries(kind, &response);
                         self.delete_batch(&batch)?;
                         any_sent = true;
                         // Seule trace d'un envoi RÉUSSI (2026-09-21) : jusqu'ici, seul l'échec
@@ -324,21 +443,68 @@ impl SyncQueue {
                         tracing::info!(
                             kind = kind.as_str(),
                             sent = batch.len(),
+                            rejected,
                             inserted = response.get("inserted").and_then(serde_json::Value::as_i64),
                             "lot d'historique envoyé au compte"
                         );
                         // Ce lot est parti : il peut y en avoir d'autres du même type derrière
                         // (`select_batch` re-sélectionne toujours les plus anciens en premier).
                     }
-                    Err(err) if is_permanent_rejection(&err) => {
-                        self.bump_attempts_and_prune(&batch)?;
-                        self.consecutive_failures += 1;
-                        return Ok(FlushOutcome::Retry(err.to_string()));
-                    }
-                    Err(err) => {
-                        self.consecutive_failures += 1;
-                        return Ok(FlushOutcome::Retry(err.to_string()));
-                    }
+                    Err(err) => match classify(&err) {
+                        Rejection::SessionInvalid => {
+                            return Ok(FlushOutcome::Unauthorized(err.to_string()));
+                        }
+                        Rejection::KindBlocked => {
+                            tracing::error!(
+                                kind = kind.as_str(),
+                                pending = batch.len(),
+                                %err,
+                                "envoi de ce type d'historique refusé par le serveur — suspendu jusqu'à la prochaine connexion, file conservée"
+                            );
+                            self.blocked.push((kind, err.to_string()));
+                            break;
+                        }
+                        Rejection::Split if batch.len() > 1 => {
+                            limit = batch.len() / 2;
+                            tracing::info!(
+                                kind = kind.as_str(),
+                                %err,
+                                next_batch = limit,
+                                "lot d'historique refusé — redivisé pour isoler l'entrée en cause"
+                            );
+                        }
+                        Rejection::Split => {
+                            self.delete_batch(&batch)?;
+                            limit = SYNC_BATCH_SIZE;
+                            tracing::warn!(
+                                kind = kind.as_str(),
+                                %err,
+                                "entrée d'historique refusée définitivement par le serveur — retirée de la file"
+                            );
+                        }
+                        Rejection::Throttled(after) => {
+                            self.consecutive_failures += 1;
+                            return Ok(FlushOutcome::Retry {
+                                reason: err.to_string(),
+                                after,
+                            });
+                        }
+                        Rejection::Counted => {
+                            self.bump_attempts_and_prune(&batch)?;
+                            self.consecutive_failures += 1;
+                            return Ok(FlushOutcome::Retry {
+                                reason: err.to_string(),
+                                after: None,
+                            });
+                        }
+                        Rejection::Transient => {
+                            self.consecutive_failures += 1;
+                            return Ok(FlushOutcome::Retry {
+                                reason: err.to_string(),
+                                after: None,
+                            });
+                        }
+                    },
                 }
             }
         }
@@ -351,16 +517,74 @@ impl SyncQueue {
         })
     }
 
+    /// Construit les entrées à envoyer (`clientKey`, `dungeonRunKey`) et **retire de la file** celles
+    /// dont la date sort des bornes du serveur — rend les lignes gardées et leurs entrées, dans le
+    /// même ordre.
+    fn prepare_batch(
+        &self,
+        uid: &str,
+        kind: HistoryEventKind,
+        rows: Vec<QueuedEvent>,
+        now_ms: i64,
+    ) -> Result<(Vec<QueuedEvent>, Vec<Value>), SyncError> {
+        let mut kept = Vec::with_capacity(rows.len());
+        let mut entries = Vec::with_capacity(rows.len());
+        let mut out_of_range = Vec::new();
+        for row in rows {
+            let mut value: Value = serde_json::from_str(&row.payload_json)
+                .expect("payload persisté par enqueue() est toujours un JSON valide");
+            if !date_in_server_range(kind, &value, now_ms) {
+                // Jamais la signature au journal : elle porte les noms des combattants.
+                tracing::warn!(
+                    kind = kind.as_str(),
+                    date = value.get(date_field(kind)).and_then(serde_json::Value::as_str).unwrap_or("absente"),
+                    "entrée d'historique à la date hors bornes (avant 2012 ou dans le futur) — jamais envoyée, retirée de la file"
+                );
+                out_of_range.push(row);
+                continue;
+            }
+            if let Value::Object(map) = &mut value {
+                map.insert(
+                    "clientKey".to_string(),
+                    Value::String(client_key(uid, kind, &row.signature)),
+                );
+                // `dungeonRunSignature` (kind `Fight` uniquement, voir `FightPayload`) n'est
+                // qu'une graine de contenu : jamais envoyée telle quelle, hachée ICI en
+                // `dungeonRunKey` EXACTEMENT comme `clientKey` ci-dessus — miroir vérifié dans
+                // `sync-queue.service.ts` (dépôt web) : `payload['dungeonRunKey'] = await
+                // computeClientKey(uid, entry.kind, dungeonRunSignature)`. C'est ce qui fait que
+                // tous les combats d'un même run finissent par partager le `clientKey` de leur boss
+                // comme `dungeonRunKey`, sans aller-retour serveur pour l'obtenir.
+                if kind == HistoryEventKind::Fight {
+                    let run_key = match map.remove("dungeonRunSignature") {
+                        Some(Value::String(signature)) => {
+                            Value::String(client_key(uid, kind, &signature))
+                        }
+                        _ => Value::Null,
+                    };
+                    map.insert("dungeonRunKey".to_string(), run_key);
+                }
+            }
+            kept.push(row);
+            entries.push(value);
+        }
+        self.delete_batch(&out_of_range)?;
+        Ok((kept, entries))
+    }
+
     fn select_batch(
         &self,
         kind: HistoryEventKind,
         limit: usize,
     ) -> Result<Vec<QueuedEvent>, SyncError> {
+        // `id` départage deux entrées mises en file à la même milliseconde : l'ordre doit être
+        // stable d'un appel à l'autre pour que la redivision d'un lot (`Rejection::Split`)
+        // reprenne bien la première moitié du lot précédent.
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT id, signature, payload_json, attempts FROM sync_queue
-                 WHERE kind = ?1 ORDER BY queued_at ASC LIMIT ?2",
+                 WHERE kind = ?1 ORDER BY queued_at ASC, id ASC LIMIT ?2",
             )
             .map_err(|err| SyncError::TokenStore(err.to_string()))?;
         let rows = stmt
@@ -389,9 +613,7 @@ impl SyncQueue {
     /// Miroir de la branche `permanent` de `send()` côté web : chaque entrée du lot voit son
     /// compteur de tentatives incrémenté, celles qui atteignent `MAX_ATTEMPTS` sont abandonnées
     /// (retirées de la file) — les autres restent, avec leur `payload_json` intact, prêtes à être
-    /// réessayées plus tard (peu utile pour un vrai rejet 4xx qui échouera identiquement, mais
-    /// c'est exactement le choix du web : ne PAS deviner côté client si un futur changement serveur
-    /// rendrait le même payload acceptable).
+    /// réessayées plus tard. Ne sert plus qu'aux 4xx non classés (voir [`Rejection::Counted`]).
     fn bump_attempts_and_prune(&self, batch: &[QueuedEvent]) -> Result<(), SyncError> {
         for event in batch {
             let attempts = event.attempts + 1;
@@ -410,6 +632,29 @@ impl SyncQueue {
         }
         Ok(())
     }
+}
+
+/// Journalise les entrées qu'une réponse 200 déclare ignorées (`rejected: [{ index, clientKey?,
+/// error }]`) et rend leur nombre — 0 sans le champ (serveur antérieur à son ajout). Elles
+/// quittent la file avec le reste du lot : invalides aux yeux du serveur, les renvoyer n'y
+/// changerait rien.
+fn log_rejected_entries(kind: HistoryEventKind, response: &Value) -> usize {
+    let Some(rejected) = response.get("rejected").and_then(Value::as_array) else {
+        return 0;
+    };
+    for entry in rejected {
+        tracing::warn!(
+            kind = kind.as_str(),
+            index = entry.get("index").and_then(serde_json::Value::as_i64),
+            client_key = entry.get("clientKey").and_then(serde_json::Value::as_str),
+            error = entry
+                .get("error")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?"),
+            "entrée d'historique ignorée par le serveur — retirée de la file"
+        );
+    }
+    rejected.len()
 }
 
 fn serialize_payload(payload: &HistoryPayload) -> String {
@@ -637,26 +882,25 @@ mod tests {
             .flush_once("uid-1", |p, b| transport.send(p, b))
             .unwrap();
 
-        assert!(matches!(outcome, FlushOutcome::Retry(_)));
+        assert!(matches!(outcome, FlushOutcome::Retry { .. }));
         assert_eq!(queue.consecutive_failures(), 1);
         // Toujours en file : un échec réseau ne consomme jamais `attempts`.
         assert_eq!(queue.pending_count().unwrap(), 1);
     }
 
+    /// 4xx non classé (ici 404, route absente d'un déploiement en retard) : comportement
+    /// historique, une tentative consommée par refus, abandon au bout de `MAX_ATTEMPTS`.
     #[test]
-    fn rejet_permanent_abandonne_lentree_apres_max_attempts() {
+    fn rejet_non_classe_abandonne_lentree_apres_max_attempts() {
         let mut queue = SyncQueue::open_in_memory().unwrap();
         queue.enqueue(&purchase_event("sig", "Eclat")).unwrap();
 
         for attempt in 1..=MAX_ATTEMPTS {
-            let transport = FakeTransport::new(vec![Err(SyncError::Http {
-                status: 400,
-                path: "/api/v1/history/purchases".to_string(),
-            })]);
+            let transport = FakeTransport::new(vec![Err(http_err(404, None, None))]);
             let outcome = queue
                 .flush_once("uid-1", |p, b| transport.send(p, b))
                 .unwrap();
-            assert!(matches!(outcome, FlushOutcome::Retry(_)));
+            assert!(matches!(outcome, FlushOutcome::Retry { .. }));
             if attempt < MAX_ATTEMPTS {
                 assert_eq!(queue.pending_count().unwrap(), 1, "tentative {attempt}");
             }
@@ -722,5 +966,367 @@ mod tests {
         let paths: Vec<&str> = calls.iter().map(|(p, _)| p.as_str()).collect();
         assert!(paths.contains(&"/api/v1/history/fights"));
         assert!(paths.contains(&"/api/v1/history/purchases"));
+    }
+
+    fn http_err(
+        status: u16,
+        code: Option<&str>,
+        retry_after: Option<std::time::Duration>,
+    ) -> SyncError {
+        SyncError::Http {
+            status,
+            path: "/api/v1/history/x".to_string(),
+            code: code.map(str::to_string),
+            retry_after,
+        }
+    }
+
+    fn fight_started_at(signature: &str, started_at: &str) -> SyncEvent {
+        let mut event = fight_event(signature, 1);
+        if let HistoryPayload::Fight(fight) = &mut event.payload {
+            fight.started_at = started_at.to_string();
+        }
+        event
+    }
+
+    fn sent_item_names(body: &Value) -> Vec<String> {
+        body["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["itemName"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// 401 : tout s'arrête, rien n'est consommé — la file attend la reconnexion.
+    #[test]
+    fn un_401_arrete_tout_sans_toucher_a_la_file() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&fight_event("f", 1)).unwrap();
+        queue.enqueue(&purchase_event("p", "Eclat")).unwrap();
+        let transport = FakeTransport::new(vec![Err(http_err(401, None, None))]);
+
+        let outcome = queue
+            .flush_once("uid-1", |p, b| transport.send(p, b))
+            .unwrap();
+
+        assert!(matches!(outcome, FlushOutcome::Unauthorized(_)));
+        assert_eq!(transport.calls.borrow().len(), 1, "aucun autre type tenté");
+        assert_eq!(queue.pending_count().unwrap(), 2);
+        let attempts: i64 = queue
+            .conn
+            .query_row("SELECT MAX(attempts) FROM sync_queue", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(attempts, 0);
+    }
+
+    /// 403 quota : le type est suspendu, sa file conservée ; les autres types partent. Au passage
+    /// suivant, le type suspendu n'est même plus tenté — jusqu'à `unblock_all`.
+    #[test]
+    fn un_403_quota_suspend_le_type_sans_vider_sa_file() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&fight_event("f", 1)).unwrap();
+        queue.enqueue(&purchase_event("p", "Eclat")).unwrap();
+        let transport = FakeTransport::new(vec![
+            Err(http_err(403, Some("history_quota_exceeded"), None)),
+            Ok(serde_json::json!({ "inserted": 1 })),
+        ]);
+
+        let outcome = queue
+            .flush_once("uid-1", |p, b| transport.send(p, b))
+            .unwrap();
+
+        assert_eq!(outcome, FlushOutcome::Synced);
+        assert_eq!(queue.pending_count().unwrap(), 1, "le combat reste en file");
+        assert_eq!(queue.blocked_kinds().len(), 1);
+        assert_eq!(queue.blocked_kinds()[0].0, HistoryEventKind::Fight);
+        assert!(queue.blocked_kinds()[0]
+            .1
+            .contains("history_quota_exceeded"));
+
+        let second = FakeTransport::new(vec![]);
+        assert_eq!(
+            queue.flush_once("uid-1", |p, b| second.send(p, b)).unwrap(),
+            FlushOutcome::Idle
+        );
+        assert!(
+            second.calls.borrow().is_empty(),
+            "type suspendu : aucun envoi"
+        );
+
+        queue.unblock_all();
+        let third = FakeTransport::new(vec![]);
+        assert_eq!(
+            queue.flush_once("uid-1", |p, b| third.send(p, b)).unwrap(),
+            FlushOutcome::Synced
+        );
+        assert_eq!(queue.pending_count().unwrap(), 0);
+    }
+
+    /// 403 `browser_session_required` : refus définitif de la requête, mais jamais une purge.
+    #[test]
+    fn un_403_session_navigateur_ne_purge_rien() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&purchase_event("p", "Eclat")).unwrap();
+        let transport = FakeTransport::new(vec![Err(http_err(
+            403,
+            Some("browser_session_required"),
+            None,
+        ))]);
+        queue
+            .flush_once("uid-1", |p, b| transport.send(p, b))
+            .unwrap();
+        assert_eq!(queue.pending_count().unwrap(), 1);
+        assert_eq!(queue.blocked_kinds()[0].0, HistoryEventKind::Purchase);
+        assert_eq!(queue.consecutive_failures(), 0, "pas un échec réessayable");
+    }
+
+    /// 413 : le lot est redivisé par moitié jusqu'à passer, rien n'est perdu.
+    #[test]
+    fn un_413_redivise_le_lot_jusqu_a_ce_qu_il_passe() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        for i in 0..5 {
+            queue
+                .enqueue(&purchase_event(&format!("p{i}"), &format!("Objet {i}")))
+                .unwrap();
+        }
+        let mut sizes = Vec::new();
+        let mut sent = Vec::new();
+        let outcome = queue
+            .flush_once("uid-1", |_, body| {
+                let names = sent_item_names(body);
+                sizes.push(names.len());
+                if names.len() > 2 {
+                    return Err(http_err(413, None, None));
+                }
+                sent.extend(names);
+                Ok(serde_json::json!({}))
+            })
+            .unwrap();
+
+        assert_eq!(outcome, FlushOutcome::Synced);
+        assert_eq!(queue.pending_count().unwrap(), 0);
+        assert_eq!(sizes, vec![5, 2, 2, 1]);
+        sent.sort();
+        assert_eq!(sent.len(), 5, "chaque entrée envoyée une et une seule fois");
+        sent.dedup();
+        assert_eq!(sent.len(), 5);
+    }
+
+    /// 413 sur une entrée seule : trop grosse pour le serveur, retirée de la file.
+    #[test]
+    fn un_413_sur_une_entree_seule_la_retire() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&purchase_event("p", "Eclat")).unwrap();
+        let transport = FakeTransport::new(vec![Err(http_err(413, None, None))]);
+        let outcome = queue
+            .flush_once("uid-1", |p, b| transport.send(p, b))
+            .unwrap();
+        assert_eq!(outcome, FlushOutcome::Idle);
+        assert_eq!(queue.pending_count().unwrap(), 0);
+    }
+
+    /// 400 : l'entrée invalide est isolée par redivision et retirée seule — les quatre autres
+    /// partent, au lieu d'être jetées avec elle au bout de dix tentatives.
+    #[test]
+    fn un_400_isole_l_entree_invalide_sans_perdre_les_autres() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        for i in 0..5 {
+            queue
+                .enqueue(&purchase_event(&format!("p{i}"), &format!("Objet {i}")))
+                .unwrap();
+        }
+        let mut sent = Vec::new();
+        let outcome = queue
+            .flush_once("uid-1", |_, body| {
+                let names = sent_item_names(body);
+                if names.iter().any(|name| name == "Objet 3") {
+                    return Err(http_err(400, None, None));
+                }
+                sent.extend(names);
+                Ok(serde_json::json!({}))
+            })
+            .unwrap();
+
+        assert_eq!(outcome, FlushOutcome::Synced);
+        assert_eq!(queue.pending_count().unwrap(), 0);
+        sent.sort();
+        assert_eq!(sent, vec!["Objet 0", "Objet 1", "Objet 2", "Objet 4"]);
+    }
+
+    /// 429 : réessayable, avec le délai imposé par le serveur ; la file est intacte.
+    #[test]
+    fn un_429_rend_le_delai_retry_after() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&purchase_event("p", "Eclat")).unwrap();
+        let delay = std::time::Duration::from_secs(30);
+        let transport = FakeTransport::new(vec![Err(http_err(429, None, Some(delay)))]);
+        let outcome = queue
+            .flush_once("uid-1", |p, b| transport.send(p, b))
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            FlushOutcome::Retry { after: Some(after), .. } if after == delay
+        ));
+        assert_eq!(queue.pending_count().unwrap(), 1);
+        assert_eq!(queue.consecutive_failures(), 1);
+    }
+
+    /// 5xx : backoff ordinaire (aucun délai imposé), aucune tentative consommée.
+    #[test]
+    fn un_5xx_est_reessayable_sans_consommer_de_tentative() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&purchase_event("p", "Eclat")).unwrap();
+        let transport = FakeTransport::new(vec![Err(http_err(503, None, None))]);
+        let outcome = queue
+            .flush_once("uid-1", |p, b| transport.send(p, b))
+            .unwrap();
+        assert!(matches!(outcome, FlushOutcome::Retry { after: None, .. }));
+        assert_eq!(queue.pending_count().unwrap(), 1);
+        let attempts: i64 = queue
+            .conn
+            .query_row("SELECT attempts FROM sync_queue", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(attempts, 0);
+    }
+
+    /// 200 avec `rejected` : les entrées ignorées quittent la file comme les acceptées.
+    #[test]
+    fn les_entrees_rejetees_en_200_quittent_la_file() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&purchase_event("a", "Eclat")).unwrap();
+        queue.enqueue(&purchase_event("b", "Plume")).unwrap();
+        let transport = FakeTransport::new(vec![Ok(serde_json::json!({
+            "accepted": ["x"],
+            "inserted": 1,
+            "rejected": [{ "index": 1, "clientKey": "y", "error": "itemName trop long" }]
+        }))]);
+        let outcome = queue
+            .flush_once("uid-1", |p, b| transport.send(p, b))
+            .unwrap();
+        assert_eq!(outcome, FlushOutcome::Synced);
+        assert_eq!(queue.pending_count().unwrap(), 0);
+        assert_eq!(
+            log_rejected_entries(HistoryEventKind::Purchase, &serde_json::json!({})),
+            0,
+            "compatible sans le champ"
+        );
+    }
+
+    /// Un combat daté de l'époque Unix (restauré d'un vieux `fight-*.json`) ou du futur n'est
+    /// jamais envoyé — retiré de la file — et n'empêche pas les autres de partir.
+    #[test]
+    fn les_dates_hors_bornes_ne_partent_jamais() {
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue
+            .enqueue(&fight_started_at("epoch", "1970-01-01T00:00:00.000Z"))
+            .unwrap();
+        queue
+            .enqueue(&fight_started_at("futur", "2999-01-01T00:00:00.000Z"))
+            .unwrap();
+        queue
+            .enqueue(&fight_started_at("illisible", "hier"))
+            .unwrap();
+        queue
+            .enqueue(&fight_started_at("ok", "2026-09-01T12:00:00.000Z"))
+            .unwrap();
+        let transport = FakeTransport::new(vec![]);
+        let outcome = queue
+            .flush_once("uid-1", |p, b| transport.send(p, b))
+            .unwrap();
+
+        assert_eq!(outcome, FlushOutcome::Synced);
+        assert_eq!(queue.pending_count().unwrap(), 0);
+        let calls = transport.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        let entries = calls[0].1["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["startedAt"], "2026-09-01T12:00:00.000Z");
+    }
+
+    #[test]
+    fn bornes_de_date_du_serveur() {
+        let now = 1_790_000_000_000; // 2026-09
+        let kind = HistoryEventKind::Purchase;
+        let at = |date: &str| serde_json::json!({ "occurredAt": date });
+        assert!(date_in_server_range(
+            kind,
+            &at("2012-01-01T00:00:00.000Z"),
+            now
+        ));
+        assert!(!date_in_server_range(
+            kind,
+            &at("2011-12-31T23:59:59.999Z"),
+            now
+        ));
+        let edge = overlay_engine::log_time::format_iso_utc(now + HISTORY_MAX_FUTURE_SKEW_MS);
+        assert!(date_in_server_range(kind, &at(&edge), now));
+        let beyond = overlay_engine::log_time::format_iso_utc(now + HISTORY_MAX_FUTURE_SKEW_MS + 1);
+        assert!(!date_in_server_range(kind, &at(&beyond), now));
+        assert!(!date_in_server_range(kind, &serde_json::json!({}), now));
+        assert_eq!(
+            HISTORY_MIN_DATE_MS,
+            overlay_engine::log_time::utc_ms_from_civil(2012, 1, 1, 0)
+        );
+    }
+
+    /// Les extractions de pacte partent sur `/history/pacts`, au format que lit
+    /// `parsePactExtractionsBody` (`server/history/parse.ts`) : `clientKey`, `occurredAt`,
+    /// `gameServer`, `items[{ itemId, itemName, quantity }]`.
+    #[test]
+    fn une_extraction_de_pacte_part_au_format_du_serveur() {
+        use overlay_engine::{PactExtractionItemPayload, PactExtractionPayload};
+        let mut queue = SyncQueue::open_in_memory().unwrap();
+        queue
+            .enqueue(&SyncEvent {
+                kind: HistoryEventKind::Pact,
+                signature: "12:00:00,000|eclatx2".to_string(),
+                payload: HistoryPayload::PactExtraction(PactExtractionPayload {
+                    occurred_at: "2026-09-01T12:00:00.000Z".to_string(),
+                    game_server: None,
+                    items: vec![PactExtractionItemPayload {
+                        item_id: None,
+                        item_name: Some("Eclat".to_string()),
+                        quantity: 2,
+                    }],
+                }),
+            })
+            .unwrap();
+        let transport = FakeTransport::new(vec![]);
+        queue
+            .flush_once("uid-1", |p, b| transport.send(p, b))
+            .unwrap();
+        let calls = transport.calls.borrow();
+        assert_eq!(calls[0].0, "/api/v1/history/pacts");
+        let entry = &calls[0].1["entries"][0];
+        assert_eq!(
+            entry["clientKey"],
+            client_key("uid-1", HistoryEventKind::Pact, "12:00:00,000|eclatx2")
+        );
+        assert_eq!(entry["occurredAt"], "2026-09-01T12:00:00.000Z");
+        assert!(entry["gameServer"].is_null());
+        assert_eq!(
+            entry["items"],
+            serde_json::json!([{ "itemId": null, "itemName": "Eclat", "quantity": 2 }])
+        );
+    }
+
+    /// La file suit son compte : le même la retrouve intacte, un autre la trouve vide.
+    #[test]
+    fn la_file_est_videe_quand_un_autre_compte_la_reprend() {
+        let queue = SyncQueue::open_in_memory().unwrap();
+        queue.enqueue(&purchase_event("a", "Eclat")).unwrap();
+        assert_eq!(queue.claim_owner("uid-1").unwrap(), 0, "file adoptée");
+        assert_eq!(queue.claim_owner("uid-1").unwrap(), 0, "même compte");
+        assert_eq!(queue.pending_count().unwrap(), 1);
+        assert_eq!(queue.claim_owner("uid-2").unwrap(), 1, "autre compte");
+        assert_eq!(queue.pending_count().unwrap(), 0);
+        let stored: String = queue
+            .conn
+            .query_row("SELECT value FROM sync_meta WHERE key = 'owner'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(!stored.contains("uid-2"), "jamais l'identifiant en clair");
     }
 }

@@ -269,18 +269,12 @@ pub fn icon_url(path: &str) -> String {
 /// (repli sur l'icône générique).
 pub fn fetch_bytes(url: &str) -> Result<Vec<u8>, SyncError> {
     let token = session_token()?;
-    let mut response = agent()
+    let response = agent()
         .get(url)
         .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
-    let status = response.status().as_u16();
-    if !(200..300).contains(&status) {
-        return Err(SyncError::Http {
-            status,
-            path: url.to_string(),
-        });
-    }
+    let mut response = ensure_success(url, response)?;
     response
         .body_mut()
         .read_to_vec()
@@ -289,21 +283,129 @@ pub fn fetch_bytes(url: &str) -> Result<Vec<u8>, SyncError> {
 
 fn parse_json_body(
     path: &str,
-    mut response: ureq::http::Response<ureq::Body>,
+    response: ureq::http::Response<ureq::Body>,
 ) -> Result<Value, SyncError> {
     // Statut AVANT le corps : une réponse d'erreur n'est pas forcément du JSON (page HTML d'un
     // proxy, corps vide), et un 401 doit remonter comme `Http`, jamais comme `Json`.
-    let status = response.status().as_u16();
-    if !(200..300).contains(&status) {
-        return Err(SyncError::Http {
-            status,
-            path: path.to_string(),
-        });
-    }
+    let mut response = ensure_success(path, response)?;
     response
         .body_mut()
         .read_json()
         .map_err(|err| SyncError::Json(err.to_string()))
+}
+
+/// Plafond d'un `Retry-After` honoré (2026-09-23) : au-delà, la file réessaie quand même au bout
+/// d'une heure — un en-tête aberrant (proxy, horloge serveur décalée) ne doit pas geler l'envoi
+/// pour la journée.
+pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(3600);
+
+/// Taille maximale lue du corps d'une réponse d'erreur, pour y chercher son `code` : une page HTML
+/// de proxy n'a pas à être chargée en entier.
+const ERROR_BODY_LIMIT: u64 = 16 * 1024;
+
+/// Rend la réponse telle quelle si son statut est 2xx, sinon `SyncError::Http` — avec le `code`
+/// du corps JSON d'erreur (`{ "error": "...", "code": "history_quota_exceeded" }`, voir
+/// `server/history/guards.ts` et `functions/api/_auth.ts` côté web) et l'en-tête `Retry-After`
+/// (429, `server/http/api-guards.ts`). Le seul endroit qui construit une `SyncError::Http` : toutes
+/// les routes classent leurs refus de la même façon.
+fn ensure_success(
+    path: &str,
+    mut response: ureq::http::Response<ureq::Body>,
+) -> Result<ureq::http::Response<ureq::Body>, SyncError> {
+    let status = response.status().as_u16();
+    if (200..300).contains(&status) {
+        return Ok(response);
+    }
+    let retry_after = response
+        .headers()
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| parse_retry_after(value, now_ms()));
+    let code = response
+        .body_mut()
+        .with_config()
+        .limit(ERROR_BODY_LIMIT)
+        .read_to_string()
+        .ok()
+        .and_then(|body| error_code(&body));
+    Err(SyncError::Http {
+        status,
+        path: path.to_string(),
+        code,
+        retry_after,
+    })
+}
+
+/// Le champ `code` d'un corps d'erreur JSON — `None` si le corps n'est pas du JSON ou n'en porte
+/// pas (ancienne version du serveur, page d'un proxy).
+fn error_code(body: &str) -> Option<String> {
+    serde_json::from_str::<Value>(body)
+        .ok()?
+        .get("code")?
+        .as_str()
+        .map(str::to_string)
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// **`Retry-After` interprété** (RFC 9110 §10.2.3) : un nombre de secondes, ou une date HTTP
+/// (`Sun, 06 Nov 1994 08:49:37 GMT`, seule forme qu'un serveur doit produire — les formes
+/// obsolètes RFC 850/asctime rendent `None`, et la file retombe sur son backoff ordinaire).
+/// Borné à `[1 s, MAX_RETRY_AFTER]` : zéro ou une date passée ne doit pas faire boucler l'envoi
+/// sans pause, une valeur démesurée ne doit pas le suspendre des jours.
+pub fn parse_retry_after(value: &str, now_ms: i64) -> Option<Duration> {
+    let value = value.trim();
+    let delay = if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
+        // Au-delà de u64 : forcément plus que le plafond.
+        Duration::from_secs(value.parse::<u64>().unwrap_or(u64::MAX))
+    } else {
+        let at = parse_http_date_ms(value)?;
+        Duration::from_millis(u64::try_from(at - now_ms).unwrap_or(0))
+    };
+    Some(delay.clamp(Duration::from_secs(1), MAX_RETRY_AFTER))
+}
+
+/// IMF-fixdate (`Sun, 06 Nov 1994 08:49:37 GMT`) → ms époque Unix.
+fn parse_http_date_ms(value: &str) -> Option<i64> {
+    let parts: Vec<&str> = value.split_ascii_whitespace().collect();
+    let [weekday, day, month, year, time, "GMT"] = parts.as_slice() else {
+        return None;
+    };
+    if !weekday.ends_with(',') {
+        return None;
+    }
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let month = MONTHS.iter().position(|m| m == month)? as i64 + 1;
+    let digits = |s: &str, len: usize| -> Option<i64> {
+        if s.len() != len || !s.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        s.parse().ok()
+    };
+    let day = digits(day, 2)?;
+    let year = digits(year, 4)?;
+    let mut hms = time.split(':');
+    let (h, m, s) = (
+        digits(hms.next()?, 2)?,
+        digits(hms.next()?, 2)?,
+        digits(hms.next()?, 2)?,
+    );
+    if hms.next().is_some() || !(1..=31).contains(&day) || h > 23 || m > 59 || s > 60 {
+        return None;
+    }
+    Some(overlay_engine::log_time::utc_ms_from_civil(
+        year,
+        month,
+        day,
+        ((h * 60 + m) * 60 + s) * 1000,
+    ))
 }
 
 /// Ce qu'`overlay-engine` a besoin de connaître du compte au démarrage — un seul
@@ -342,22 +444,12 @@ pub struct AccountSettings {
 /// (`attempt_connect`), jamais recalculé par événement.
 pub fn fetch_account_id(token: &str) -> Result<String, SyncError> {
     let url = format!("{}/api/v1/auth/me", base_url());
-    let mut response = agent()
+    let response = agent()
         .get(&url)
         .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
-    let status = response.status().as_u16();
-    if !(200..300).contains(&status) {
-        return Err(SyncError::Http {
-            status,
-            path: "/api/v1/auth/me".to_string(),
-        });
-    }
-    let body: Value = response
-        .body_mut()
-        .read_json()
-        .map_err(|err| SyncError::Json(err.to_string()))?;
+    let body = parse_json_body("/api/v1/auth/me", response)?;
     body.get("user")
         .and_then(|user| user.get("id"))
         .and_then(Value::as_str)
@@ -432,22 +524,12 @@ pub fn rotate_native_session(token: &str) -> Result<RotatedSession, SyncError> {
 pub fn delete_native_session(token: &str) -> Result<bool, SyncError> {
     const PATH: &str = "/api/v1/auth/native/session";
     let url = format!("{}{PATH}", base_url());
-    let mut response = agent()
+    let response = agent()
         .delete(&url)
         .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
-    let status = response.status().as_u16();
-    if !(200..300).contains(&status) {
-        return Err(SyncError::Http {
-            status,
-            path: PATH.to_string(),
-        });
-    }
-    let body: Value = response
-        .body_mut()
-        .read_json()
-        .map_err(|err| SyncError::Json(err.to_string()))?;
+    let body = parse_json_body(PATH, response)?;
     Ok(body
         .get("deleted")
         .and_then(Value::as_bool)
@@ -460,22 +542,12 @@ pub fn delete_native_session(token: &str) -> Result<bool, SyncError> {
 /// pas la réponse entière — voir leur doc respective.
 pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
     let url = format!("{}/api/v1/settings", base_url());
-    let mut response = agent()
+    let response = agent()
         .get(&url)
         .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
-    let status = response.status().as_u16();
-    if !(200..300).contains(&status) {
-        return Err(SyncError::Http {
-            status,
-            path: "/api/v1/settings".to_string(),
-        });
-    }
-    let body: Value = response
-        .body_mut()
-        .read_json()
-        .map_err(|err| SyncError::Json(err.to_string()))?;
+    let body = parse_json_body("/api/v1/settings", response)?;
     let data = body.get("data").cloned().unwrap_or(Value::Null);
     Ok(AccountSettings {
         roster: RosterIndex::from_settings_json(&data),
@@ -569,7 +641,70 @@ pub fn fetch_game_servers() -> Result<Value, SyncError> {
 
 #[cfg(test)]
 mod tests {
-    use super::DEFAULT_BASE_URL;
+    use super::{error_code, parse_retry_after, DEFAULT_BASE_URL, MAX_RETRY_AFTER};
+    use std::time::Duration;
+
+    /// 1994-11-06T08:49:37Z — l'exemple de la RFC 9110.
+    const RFC_EXAMPLE_MS: i64 = 784_111_777_000;
+
+    #[test]
+    fn retry_after_en_secondes() {
+        assert_eq!(parse_retry_after("120", 0), Some(Duration::from_secs(120)));
+        assert_eq!(parse_retry_after(" 7 ", 0), Some(Duration::from_secs(7)));
+    }
+
+    #[test]
+    fn retry_after_borne_entre_une_seconde_et_une_heure() {
+        assert_eq!(parse_retry_after("0", 0), Some(Duration::from_secs(1)));
+        assert_eq!(parse_retry_after("86400", 0), Some(MAX_RETRY_AFTER));
+        assert_eq!(
+            parse_retry_after("99999999999999999999999", 0),
+            Some(MAX_RETRY_AFTER)
+        );
+    }
+
+    #[test]
+    fn retry_after_en_date_http() {
+        let header = "Sun, 06 Nov 1994 08:49:37 GMT";
+        assert_eq!(
+            parse_retry_after(header, RFC_EXAMPLE_MS - 90_000),
+            Some(Duration::from_secs(90))
+        );
+        // Date déjà passée : réessai au plus tôt, mais jamais sans pause.
+        assert_eq!(
+            parse_retry_after(header, RFC_EXAMPLE_MS + 5_000),
+            Some(Duration::from_secs(1))
+        );
+        // Lointaine : plafonnée.
+        assert_eq!(parse_retry_after(header, 0), Some(MAX_RETRY_AFTER));
+    }
+
+    #[test]
+    fn retry_after_illisible() {
+        for value in [
+            "",
+            "demain",
+            "-5",
+            "1.5",
+            "Sunday, 06-Nov-94 08:49:37 GMT",
+            "Sun Nov  6 08:49:37 1994",
+            "Sun, 06 Foo 1994 08:49:37 GMT",
+            "Sun, 06 Nov 1994 08:49:37 UTC",
+        ] {
+            assert_eq!(parse_retry_after(value, 0), None, "{value}");
+        }
+    }
+
+    #[test]
+    fn code_d_erreur_lu_dans_le_corps_json() {
+        assert_eq!(
+            error_code(r#"{"error":"quota","code":"history_quota_exceeded"}"#).as_deref(),
+            Some("history_quota_exceeded")
+        );
+        assert_eq!(error_code(r#"{"error":"non authentifié"}"#), None);
+        assert_eq!(error_code("<html>502</html>"), None);
+        assert_eq!(error_code(""), None);
+    }
 
     /// Le défaut compilé est l'une des deux origines connues, jamais une valeur vide ni un
     /// `http://` ; en profil de développement (`cargo test` nu, comme `ci.yml`), c'est le

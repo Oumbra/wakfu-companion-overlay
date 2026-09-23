@@ -25,8 +25,17 @@ pub use queue::{client_key, FlushOutcome, SyncQueue, MAX_PENDING_AGE};
 pub enum SyncError {
     #[error("erreur réseau : {0}")]
     Network(String),
-    #[error("réponse HTTP {status} inattendue pour {path}")]
-    Http { status: u16, path: String },
+    /// Réponse non 2xx. `code` est le champ `code` du corps JSON d'erreur quand le serveur en pose
+    /// un (`history_quota_exceeded`, `browser_session_required`, `rate_limited`…) ; `retry_after`
+    /// l'en-tête `Retry-After` interprété (secondes ou date HTTP, plafonné — voir
+    /// `client::parse_retry_after`). Les deux pilotent la file d'envoi (`queue::flush_once`).
+    #[error("réponse HTTP {status} inattendue pour {path}{}", code.as_deref().map(|c| format!(" ({c})")).unwrap_or_default())]
+    Http {
+        status: u16,
+        path: String,
+        code: Option<String>,
+        retry_after: Option<std::time::Duration>,
+    },
     #[error("réponse JSON invalide : {0}")]
     Json(String),
     #[error("l'appairage a expiré avant confirmation")]

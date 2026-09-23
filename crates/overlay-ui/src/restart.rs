@@ -15,10 +15,10 @@
 //!
 //! **Le nouveau process est lancé AVANT que l'ancien ne sorte**, comme à l'installation d'une mise
 //! à jour (`apply::install_and_relaunch`) : les deux se croisent le temps que la boucle
-//! d'événements s'arrête et que les fenêtres tombent. C'est sans conséquence — l'overlay ne prend
-//! aucun verrou exclusif au démarrage (fenêtres créées par-dessus le jeu, journal ouvert en
-//! lecture, fichiers d'état écrits par remplacement) — et c'est la seule façon de relancer sans
-//! dépendre d'un script externe ou d'un service.
+//! d'événements s'arrête et que les fenêtres tombent. Le seul verrou exclusif de l'overlay, celui
+//! d'instance unique (`single_instance`, 2026-09-23), est attendu par le process neuf, qui porte
+//! `RELAUNCH_ENV` — c'est la seule façon de relancer sans dépendre d'un script externe ou d'un
+//! service.
 
 use std::process::Command;
 
@@ -35,6 +35,9 @@ pub fn relaunch() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|err| format!("exe courant introuvable : {err}"))?;
     let args = forwarded_args(std::env::args().skip(1));
     Command::new(&exe)
+        // Le process neuf attend que celui-ci relâche le verrou d'instance unique
+        // (`single_instance`) au lieu de se prendre pour un doublon et de sortir.
+        .env(crate::single_instance::RELAUNCH_ENV, "1")
         .args(&args)
         .spawn()
         .map_err(|err| format!("relance de {} : {err}", exe.display()))?;

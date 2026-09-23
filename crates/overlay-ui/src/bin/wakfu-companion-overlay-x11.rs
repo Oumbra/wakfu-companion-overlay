@@ -3869,6 +3869,12 @@ mod linux_main {
         // Avant TOUTE écriture sur le disque — voir la même ligne dans `main.rs` et
         // `local_data::has_user_data`.
         build_info::mark_process_start();
+        // **Une seule instance** (2026-09-23, `overlay_ui::single_instance`) : AVANT le journal,
+        // qu'une seconde instance ne doit pas toucher. Le verrou vit jusqu'à la fin de `run`.
+        let _instance = match overlay_ui::single_instance::guard() {
+            overlay_ui::single_instance::Startup::Proceed(lock) => lock,
+            overlay_ui::single_instance::Startup::Exit => return,
+        };
         let log_dir = logging::init();
         logging::install_ctrlc_handler();
         logging::install_panic_hook();
@@ -3945,7 +3951,7 @@ mod linux_main {
         let (settings_tx, settings_rx) = mpsc::channel();
         let (auth_command_tx, auth_command_rx) = mpsc::channel();
         let (sync_tx, sync_rx) = mpsc::channel();
-        spawn_sync_thread(sync_rx);
+        spawn_sync_thread(sync_rx, auth_command_tx.clone());
         spawn_auth_thread(
             settings_tx.clone(),
             sync_tx.clone(),

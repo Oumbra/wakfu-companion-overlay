@@ -281,6 +281,10 @@ pub struct AuthFailure {
 /// - `Disconnect` — bouton « Déconnecter » de la fenêtre Options ou de l'icône de zone de
 ///   notification : efface le jeton, l'overlay revient à sa fenêtre de connexion. Sans effet si
 ///   pas connecté (mais vaut annulation pendant un appairage).
+/// - `SessionExpired` — émise par le thread Sync (`background::spawn_sync_thread`), jamais par
+///   l'interface : le serveur a refusé le jeton en 401 en cours de session (révoqué depuis « Mon
+///   compte », ou expiré — plafond de 180 jours depuis l'appairage). Le jeton est effacé et la
+///   fenêtre de connexion revient sur « Se connecter ». Sans effet si pas connecté.
 ///
 /// Un seul thread Auth, un seul point d'attente (`command_rx.recv()`) : toutes les origines
 /// convergent sur ce même type.
@@ -289,6 +293,7 @@ pub enum AuthCommand {
     Retry,
     CancelPairing,
     Disconnect,
+    SessionExpired,
 }
 
 /// Puits pour les commandes émises par `build_ui` vers le thread Auth — abstraction minimale

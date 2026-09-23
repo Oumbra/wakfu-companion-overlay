@@ -302,7 +302,16 @@ pub fn spawn_game_servers_thread(servers: Arc<ArcSwap<GameServers>>) {
 /// instantané reçu PENDANT l'attente (débounce ou backoff) remplace le précédent et relance un
 /// débounce complet — rien n'est perdu (`WatchlistState` garde de toute façon le fichier local
 /// comme vérité, voir sa doc), seul le nombre de requêtes est réduit.
-pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
+///
+/// **Session refusée en cours de route** (401, 2026-09-23) : historique ou Suivi, le thread cesse
+/// aussitôt d'envoyer (`account = None` — ce qui arrive ensuite patiente en mémoire, comme au
+/// démarrage) et signale `AuthCommand::SessionExpired` au thread Auth par `auth_tx`, qui efface le
+/// jeton et ramène la fenêtre de connexion. La file SQLite, elle, est **conservée** pour la
+/// reconnexion ; `SyncQueue::claim_owner` la vide si c'est un autre compte qui se reconnecte.
+pub fn spawn_sync_thread(
+    command_rx: mpsc::Receiver<SyncCommand>,
+    auth_tx: mpsc::Sender<AuthCommand>,
+) {
     thread::Builder::new()
         .name("overlay-sync".into())
         .spawn(move || {
@@ -358,6 +367,18 @@ pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
                             held = held.len(),
                             "file de synchro activée (compte connecté, lot L5)"
                         );
+                        // Un autre compte que celui que la file servait (reconnexion après une
+                        // session expirée) : ce qui attendait ne lui appartient pas.
+                        match queue.claim_owner(&uid) {
+                            Ok(0) => {}
+                            Ok(dropped) => tracing::info!(
+                                dropped,
+                                "file de synchro vidée — elle appartenait à un autre compte"
+                            ),
+                            Err(err) => tracing::warn!(%err, "propriétaire de la file de synchro illisible"),
+                        }
+                        // Nouvelle session : un type suspendu (403) a droit à un nouvel essai.
+                        queue.unblock_all();
                         account = Some((uid, token));
                         // Ce qui attendait depuis plus d'un mois n'a plus de sens — voir
                         // `MAX_PENDING_AGE` ; ensuite seulement, ce que le démarrage a retenu.
@@ -412,15 +433,22 @@ pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
                                 std::time::Duration::from_secs(3600)
                             }
                             // **Correctif du 2026-09-03** : cet échec n'était auparavant tracé
-                            // nulle part — un blocage persistant (401/429/réseau/5xx) restait
+                            // nulle part — un blocage persistant (429/réseau/5xx) restait
                             // invisible, backoff après backoff, jusqu'à 5 min entre essais.
-                            Ok(overlay_sync::FlushOutcome::Retry(reason)) => {
+                            // Un 429 impose son propre délai (`Retry-After`, plafonné à 1 h).
+                            Ok(overlay_sync::FlushOutcome::Retry { reason, after }) => {
+                                let delay = retry_delay(after, queue.consecutive_failures());
                                 tracing::warn!(
                                     reason = %reason,
                                     consecutive_failures = queue.consecutive_failures(),
-                                    "échec d'envoi de l'historique — nouvel essai après un backoff"
+                                    delay_s = delay.as_secs(),
+                                    "échec d'envoi de l'historique — nouvel essai après un délai"
                                 );
-                                backoff_delay(queue.consecutive_failures())
+                                delay
+                            }
+                            Ok(overlay_sync::FlushOutcome::Unauthorized(reason)) => {
+                                session_refused(&mut account, &auth_tx, &reason);
+                                std::time::Duration::from_secs(3600)
                             }
                             Err(err) => {
                                 tracing::warn!(%err, "erreur de file de synchro (SQLite)");
@@ -430,17 +458,50 @@ pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
                     }
                 };
 
-                let watchlist_wait = flush_watchlist_once(
+                let watchlist_wait = match flush_watchlist_once(
                     &account,
                     &mut pending_watchlist,
                     &mut watchlist_ready_at,
                     &mut watchlist_consecutive_failures,
-                );
+                ) {
+                    WatchlistFlush::Wait(delay) => delay,
+                    WatchlistFlush::Unauthorized(reason) => {
+                        session_refused(&mut account, &auth_tx, &reason);
+                        std::time::Duration::from_secs(3600)
+                    }
+                };
 
                 wait = history_wait.min(watchlist_wait);
             }
         })
         .expect("échec de création du thread Sync");
+}
+
+/// **401 en cours de session** — voir la doc de `spawn_sync_thread` : plus rien ne part avec ce
+/// jeton, le thread Auth est prévenu. Une seule fois par session : `account` repasse à `None`, et
+/// seul un nouvel `Activate` le rétablit.
+fn session_refused(
+    account: &mut Option<(String, String)>,
+    auth_tx: &mpsc::Sender<AuthCommand>,
+    reason: &str,
+) {
+    if account.take().is_none() {
+        return;
+    }
+    tracing::warn!(
+        reason,
+        "[compte] jeton refusé par le serveur (401) en cours de session — synchronisation suspendue, reconnexion proposée ; la file d'envoi est conservée"
+    );
+    let _ = auth_tx.send(AuthCommand::SessionExpired);
+}
+
+/// Délai avant le prochain passage après un échec réessayable : celui qu'impose le serveur
+/// (`Retry-After` d'un 429), sinon le backoff ordinaire.
+fn retry_delay(
+    after: Option<std::time::Duration>,
+    consecutive_failures: u32,
+) -> std::time::Duration {
+    after.unwrap_or_else(|| backoff_delay(consecutive_failures))
 }
 
 /// Nombre maximal d'événements d'historique retenus en mémoire sans compte connecté (voir `held`
@@ -474,23 +535,25 @@ const WATCHLIST_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis
 /// Renvoie le délai avant le PROCHAIN passage utile pour CE mécanisme (à combiner par l'appelant
 /// avec celui de l'historique, voir `wait`) : 1 h tant que rien n'est en attente ou qu'aucun
 /// compte n'est connu (réveillé immédiatement par la prochaine commande), le temps restant avant
-/// `ready_at` pendant un débounce/backoff en cours, ou le nouveau backoff après un échec.
+/// `ready_at` pendant un débounce/backoff en cours, ou le nouveau backoff après un échec — ou
+/// `Unauthorized` sur un 401 (l'instantané reste en attente pour la reconnexion).
 fn flush_watchlist_once(
     account: &Option<(String, String)>,
     pending: &mut Option<Vec<WatchlistEntry>>,
     ready_at: &mut Option<std::time::Instant>,
     consecutive_failures: &mut u32,
-) -> std::time::Duration {
+) -> WatchlistFlush {
     let Some(entries) = pending.as_ref() else {
-        return std::time::Duration::from_secs(3600);
+        return WatchlistFlush::Wait(std::time::Duration::from_secs(3600));
     };
     let Some((_, token)) = account else {
-        return std::time::Duration::from_secs(3600); // pas de compte : rien à tenter avant `Activate`
+        // pas de compte : rien à tenter avant `Activate`
+        return WatchlistFlush::Wait(std::time::Duration::from_secs(3600));
     };
     let now = std::time::Instant::now();
     if let Some(at) = ready_at {
         if now < *at {
-            return *at - now;
+            return WatchlistFlush::Wait(*at - now);
         }
     }
 
@@ -499,7 +562,10 @@ fn flush_watchlist_once(
             *pending = None;
             *ready_at = None;
             *consecutive_failures = 0;
-            std::time::Duration::from_secs(3600)
+            WatchlistFlush::Wait(std::time::Duration::from_secs(3600))
+        }
+        Err(err @ overlay_sync::SyncError::Http { status: 401, .. }) => {
+            WatchlistFlush::Unauthorized(err.to_string())
         }
         Err(err) => {
             *consecutive_failures += 1;
@@ -508,11 +574,23 @@ fn flush_watchlist_once(
                 consecutive_failures = *consecutive_failures,
                 "échec de synchro des compteurs de Suivi — nouvel essai après un backoff"
             );
-            let delay = backoff_delay(*consecutive_failures);
+            let retry_after = match &err {
+                overlay_sync::SyncError::Http { retry_after, .. } => *retry_after,
+                _ => None,
+            };
+            let delay = retry_delay(retry_after, *consecutive_failures);
             *ready_at = Some(now + delay);
-            delay
+            WatchlistFlush::Wait(delay)
         }
     }
+}
+
+/// Ce que `flush_watchlist_once` demande au thread Sync.
+enum WatchlistFlush {
+    /// Prochain passage utile dans ce délai.
+    Wait(std::time::Duration),
+    /// 401 — voir `session_refused`.
+    Unauthorized(String),
 }
 
 /// Miroir de `RETRY_BASE_DELAY_MS`/`RETRY_MAX_DELAY_MS`/le calcul de `scheduleRetry`
@@ -624,6 +702,24 @@ pub fn spawn_auth_thread(
                             // l'efface en voyant le statut changer
                             // (`recap_session::RecapSession::purge`).
                             let _ = crate::local_data::purge(crate::local_data::Scope::OnDisconnect);
+                        }
+                        Ok(AuthCommand::SessionExpired) if connected => {
+                            // **Jeton refusé en cours de session** (401 vu par le thread Sync,
+                            // 2026-09-23) : même issue que le 401 au démarrage (`attempt_connect`)
+                            // — jeton effacé, état neutre, la fenêtre de connexion revient sur
+                            // « Se connecter » et un clic relance l'appairage (`pair_if_needed`).
+                            // Rien d'autre n'est effacé : pas de révocation serveur (le jeton n'y
+                            // est déjà plus valide), ni purge des données locales — ce n'est pas
+                            // l'utilisateur qui a demandé à partir. La file d'envoi attend la
+                            // reconnexion (voir `spawn_sync_thread`).
+                            overlay_sync::token_store::clear_token();
+                            overlay_sync::session::clear();
+                            connected = false;
+                            status.store(Arc::new(AuthStatus::Disconnected { failure: None }));
+                            let _ = proxy.send_event(UserEvent::AuthStatusChanged);
+                            tracing::warn!(
+                                "[compte] session refusée par le serveur (révoquée ou expirée) — jeton effacé, reconnexion proposée."
+                            );
                         }
                         Ok(_) => continue, // commande sans effet dans l'état courant — ignorée
                         Err(_) => return,  // App fermée (canal fermé avec l'émetteur) — rien à faire.
@@ -1137,5 +1233,36 @@ fn download_and_stage(
             });
         }
         Err(err) => fail(&err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Un 429 impose son délai ; sans lui, backoff ordinaire (15 s doublés, plafond 5 min).
+    #[test]
+    fn le_delai_du_serveur_prime_sur_le_backoff() {
+        assert_eq!(
+            retry_delay(Some(Duration::from_secs(42)), 1),
+            Duration::from_secs(42)
+        );
+        assert_eq!(retry_delay(None, 1), Duration::from_secs(15));
+        assert_eq!(retry_delay(None, 3), Duration::from_secs(60));
+        assert_eq!(retry_delay(None, 30), Duration::from_secs(300));
+    }
+
+    /// Un 401 prévient le thread Auth UNE fois, et coupe l'envoi : le compte est oublié jusqu'au
+    /// prochain `Activate`.
+    #[test]
+    fn un_401_previent_le_thread_auth_une_seule_fois() {
+        let (tx, rx) = mpsc::channel();
+        let mut account = Some(("uid".to_string(), "jeton".to_string()));
+        session_refused(&mut account, &tx, "HTTP 401");
+        session_refused(&mut account, &tx, "HTTP 401");
+        assert!(account.is_none());
+        assert_eq!(rx.try_recv(), Ok(AuthCommand::SessionExpired));
+        assert!(rx.try_recv().is_err(), "pas de second signal");
     }
 }
