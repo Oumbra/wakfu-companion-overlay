@@ -187,15 +187,20 @@ fn load_token_file() -> Option<String> {
 ///
 /// ⚠️ Écrit PUIS relit immédiatement avant de faire confiance au trousseau (`verify_keyring_write`)
 /// — un `keyring::Entry::set_password` peut renvoyer `Ok` sans que l'écriture soit réellement
-/// relisible par une `Entry` construite séparément (observé en session : reproductible même en
-/// mono-processus, deux `Entry` indépendantes créées à la suite — cause exacte non élucidée,
-/// probablement un trousseau système restreint/virtualisé dans un environnement d'exécution
-/// contraint). Sans cette vérification, un jeton silencieusement non persisté ferait recommencer
-/// l'appairage à **chaque** lancement sans que rien ne le signale — exactement ce que §7.2 du plan
-/// interdit ("jamais silencieux").
+/// relisible par une `Entry` construite séparément. Cause élucidée par l'audit du 2026-09-23 :
+/// `keyring` était compilé sans aucune feature de backend, donc sur son magasin `mock` (en
+/// mémoire, propre à chaque `Entry`). Les backends sont désormais déclarés (`Cargo.toml`), mais
+/// la vérification reste : un Secret Service absent ou verrouillé sous Linux doit toujours
+/// retomber sur le fichier de repli, jamais sur un jeton silencieusement perdu (§7.2 du plan,
+/// "jamais silencieux").
+///
+/// Une fois le jeton dans le trousseau, un fichier de repli laissé par une sauvegarde antérieure
+/// est supprimé : il contiendrait un jeton en clair, périmé, et l'avis des Options resterait
+/// affiché à tort.
 pub fn save_token(token: &str) -> Result<(), SyncError> {
     record_issued_now();
     if verify_keyring_write(token) {
+        remove_token_file();
         return Ok(());
     }
     tracing::warn!("trousseau OS indisponible ou écriture non relisible — repli fichier");
@@ -217,10 +222,28 @@ fn verify_keyring_write(token: &str) -> bool {
 /// `None` si aucun jeton n'a jamais été enregistré (ou trousseau ET fichier absents/illisibles) —
 /// jamais une erreur : l'overlay doit pouvoir démarrer sans compte lié et afficher sa fenêtre de connexion.
 pub fn load_token() -> Option<String> {
-    entry()
-        .ok()
-        .and_then(|e| e.get_password().ok())
-        .or_else(load_token_file)
+    if let Some(token) = entry().ok().and_then(|e| e.get_password().ok()) {
+        return Some(token);
+    }
+    let token = load_token_file()?;
+    // Jeton resté dans le fichier de repli (sauvegardé avant que le trousseau ne soit réellement
+    // compilé, ou pendant une indisponibilité passagère) : migré dès que le trousseau répond.
+    if verify_keyring_write(&token) {
+        remove_token_file();
+        tracing::info!("jeton natif migré du fichier de repli vers le trousseau OS");
+    }
+    Some(token)
+}
+
+fn remove_token_file() {
+    let path = token_file_path();
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            tracing::warn!(path = %path.display(), %err, "fichier de repli du jeton non supprimé")
+        }
+    }
 }
 
 /// Efface le jeton **du déploiement courant** des deux emplacements possibles, et sa date
@@ -320,9 +343,8 @@ mod tests {
 
     /// Garde-fou de non-régression : trouvé en session (2026-09-01) en testant contre un vrai
     /// déploiement — `keyring::Entry::set_password` peut renvoyer `Ok` sans que l'écriture soit
-    /// relisible par une `Entry` FRAÎCHE (reproductible même en mono-processus, deux `Entry`
-    /// indépendantes créées à la suite ; cause exacte non élucidée, probablement un trousseau
-    /// système restreint/virtualisé selon l'environnement d'exécution). `save_token`/`load_token`
+    /// relisible par une `Entry` FRAÎCHE (cause trouvée le 2026-09-23 : aucun backend compilé,
+    /// magasin `mock` ; reste possible avec un Secret Service absent ou verrouillé). `save_token`/`load_token`
     /// doivent rester cohérents entre eux quel que soit le backend réellement utilisé derrière —
     /// exécuté depuis un thread dédié (comme le vrai `spawn_auth_thread` d'`overlay-ui`, jamais le
     /// thread de test lui-même) pour rester fidèle au contexte réel.

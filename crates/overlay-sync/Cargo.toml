@@ -8,7 +8,11 @@ description = "Auth native par appairage (lot L4, docs/plan-architecture.md §7.
 
 [dependencies]
 overlay-engine = { path = "../overlay-engine" }
-keyring = "3"
+# Backends EXPLICITES : sans feature, keyring 3 ne compile que son magasin `mock` (en mémoire, rien
+# n'est persisté ni même relisible d'une `Entry` à l'autre) — le jeton finissait donc TOUJOURS dans
+# le fichier de repli en clair (audit de sécurité du 2026-09-23). Credential Manager sous Windows ;
+# Secret Service via zbus (Rust pur : aucune bibliothèque système à installer) sous Linux.
+keyring = { version = "3", features = ["windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 open = "5"
 # `bundled` : compile sqlite3 depuis ses sources C plutôt que de dépendre d'une lib système —
 # indispensable pour un binaire livré tel quel sur Windows (pas de sqlite3.dll garanti présent) et
