@@ -80,8 +80,9 @@ fn override_base() -> Option<String> {
     }
 }
 
-/// `https://` partout, `http://` vers `127.0.0.1`, `localhost` ou `[::1]` uniquement.
-fn override_allowed(base: &str) -> bool {
+/// `https://` partout, `http://` vers `127.0.0.1`, `localhost` ou `[::1]` uniquement. Même règle
+/// pour l'origine de l'API (`client::base_url_override`).
+pub(crate) fn override_allowed(base: &str) -> bool {
     if base.starts_with("https://") {
         return true;
     }

@@ -41,8 +41,23 @@ pub fn base_url() -> String {
 /// parle au déploiement de son profil de compilation. Sert à le dire à l'utilisateur (« À propos »,
 /// constat C16 de `docs/analyse-rgpd.md`, 2026-09-19) : c'est là que partent ses données, il doit
 /// pouvoir le voir sans ouvrir le journal.
+///
+/// **Schéma imposé** (audit de sécurité du 2026-09-23), comme `WAKFU_OVERLAY_UPDATE_URL` :
+/// `https://`, ou `http://` vers la boucle locale (`wrangler pages dev`) seulement. Une origine
+/// `http://` distante ferait voyager en clair le jeton porteur et tout l'historique. Valeur
+/// refusée : ignorée (un `warn!` au premier appel), l'overlay parle à son déploiement par défaut.
 pub fn base_url_override() -> Option<String> {
-    std::env::var("WAKFU_COMPANION_API_URL").ok()
+    let value = std::env::var("WAKFU_COMPANION_API_URL").ok()?;
+    if crate::update::override_allowed(&value) {
+        return Some(value);
+    }
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED.call_once(|| {
+        tracing::warn!(
+            "WAKFU_COMPANION_API_URL ignorée : seul https:// (ou http:// vers la boucle locale) est accepté"
+        );
+    });
+    None
 }
 
 /// **Un seul agent pour tout le processus**, cloné à chaque appel (`ureq::Agent` est un `Arc`
