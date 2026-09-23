@@ -17,10 +17,13 @@
 # relancé), rien n'est reconstruit ni republié.
 #
 # Signature : `MINISIGN_SECRET_KEY` (contenu du fichier de clé privée, chiffré) et
-# `MINISIGN_PASSWORD` sont des secrets du dépôt ; `xtask dist` déchiffre la clé EN MÉMOIRE, signe,
+# `MINISIGN_PASSWORD` sont des secrets de l'ENVIRONNEMENT GitHub `release` (pas du dépôt), restreint
+# à la branche `main` ; `xtask dist` déchiffre la clé EN MÉMOIRE, signe,
 # puis REVÉRIFIE avec `wakfu-overlay.pub` — un secret qui ne correspondrait pas à la clé publique
 # commitée fait échouer le job ici, pas chez l'utilisateur. Sans ces secrets, le job `publish`
-# échoue : une Release non signée ne part jamais.
+# échoue : une Release non signée ne part jamais. `xtask` est COMPILÉ dans une étape sans secret
+# (les build.rs et proc-macros de ses dépendances n'y voient jamais la clé), puis seul le binaire
+# compilé est exécuté avec les secrets.
 #
 # Différentiel (décision 4 du plan, « après mesure ») : le job télécharge les assets de la Release
 # précédente et `xtask dist --previous` MESURE ce qu'aurait pesé un patch bsdiff — rapport dans le
@@ -82,10 +85,12 @@ jobs:
           echo "version à publier : $version (${GITHUB_SHA::7})"
       - name: le tag existe-t-il déjà ?
         id: tag
+        env:
+          TAG: ${{ steps.read.outputs.tag }}
         run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/${{ steps.read.outputs.tag }}" >/dev/null; then
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${{ steps.read.outputs.tag }} existe déjà — rien à publier"
+            echo "::notice::$TAG existe déjà — rien à publier"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
@@ -97,6 +102,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - uses: ./.github/actions/vendor-wgpu-hal
@@ -126,6 +133,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - name: dépendances système (son rodio/alsa)
@@ -162,6 +171,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          # Aucune étape ne pousse par git : `gh release` et `action-gh-release` passent par l'API
+          # avec leur propre jeton. Ne pas laisser le jeton d'écriture dans `.git/config` pendant
+          # la compilation et l'exécution de `xtask`.
+          persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: binaries
@@ -179,26 +192,37 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: xtask -> target
-      - name: xtask dist
+      - name: compiler xtask (sans aucun secret)
+        # Étape séparée, volontairement SANS `MINISIGN_*` dans l'environnement : les build.rs et
+        # proc-macros des dépendances de xtask s'exécutent ici et ne doivent jamais voir la clé.
+        run: cargo build --release --manifest-path xtask/Cargo.toml
+      - name: xtask dist (signature)
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          VERSION: ${{ needs.version.outputs.version }}
+          COMMIT: ${{ needs.version.outputs.commit }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
           chmod +x binaries/linux-x86_64/wakfu-companion-overlay-x11
-          cargo run --manifest-path xtask/Cargo.toml --release -- dist \
-            --version "${{ needs.version.outputs.version }}" \
-            --commit "${{ needs.version.outputs.commit }}" \
+          # Exécute le binaire déjà compilé : aucune compilation (donc aucun code tiers de
+          # build) n'a lieu dans l'étape qui détient la clé.
+          xtask/target/release/xtask dist \
+            --version "$VERSION" \
+            --commit "$COMMIT" \
             --asset "windows-x86_64=binaries/windows-x86_64/wakfu-companion-overlay.exe" \
             --asset "linux-x86_64=binaries/linux-x86_64/wakfu-companion-overlay-x11" \
             --previous previous \
             --public-key wakfu-overlay.pub \
-            --notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/${{ needs.version.outputs.tag }}" \
+            --notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
             --out dist
           ls -l dist
       - name: résumé du job (tailles, mesure du différentiel)
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
           {
-            echo "## Release ${{ needs.version.outputs.tag }}"
+            echo "## Release $TAG"
             echo
             echo '| Asset | Taille |'
             echo '|---|---|'
@@ -209,11 +233,13 @@ jobs:
             cat dist/delta-measure.md 2>/dev/null || true
           } >> "$GITHUB_STEP_SUMMARY"
       - name: notes de version (commits Conventional Commits depuis la Release précédente)
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           previous="$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)"
           range="${previous:+$previous..}HEAD"
           {
-            echo "## Version ${{ needs.version.outputs.version }}"
+            echo "## Version $VERSION"
             echo
             if [ -n "$previous" ]; then echo "Depuis $previous." ; else echo "Première publication." ; fi
             echo
