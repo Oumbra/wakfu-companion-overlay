@@ -675,6 +675,23 @@ backoff **15 s → 5 min** (doublement, `backoff_delay` côté `overlay-ui`), ab
 après **10 tentatives non réseau** (`MAX_ATTEMPTS`) — seul un rejet HTTP 4xx (hors 401/429) compte
 comme tentative, exactement comme `permanent` côté web.
 
+**Écart assumé depuis le 2026-09-23 — refus classés** (`queue::Rejection`) : jusque-là tout 4xx
+comptait une tentative et le lot repartait à l'identique toutes les 5 min, dix fois, avant d'être
+jeté en entier. Désormais : **401** arrête l'envoi, efface le jeton et ramène « Se connecter »
+(`AuthCommand::SessionExpired`), la file étant conservée pour la reconnexion et vidée si un autre
+compte la reprend (`SyncQueue::claim_owner`) ; **403** (`history_quota_exceeded`,
+`browser_session_required`, autre) suspend ce type d'événement pour la session sans vider sa file ;
+**400/413** redivisent le lot par moitié jusqu'à isoler l'entrée fautive, seule retirée ; **429**
+respecte `Retry-After` (secondes ou date HTTP, plafond 1 h) ; 5xx et réseau gardent le backoff ;
+les autres 4xx gardent `MAX_ATTEMPTS`. Une entrée dont la date sort des bornes du serveur (avant
+2012-01-01, après maintenant + 1 j) n'est jamais envoyée, et un 200 portant
+`rejected: [{ index, clientKey?, error }]` journalise ces entrées avant de les retirer.
+
+**Instance unique** (même date, `overlay_ui::single_instance`) : un verrou de fichier
+(`File::try_lock`, dans `%TEMP%` ou `$XDG_RUNTIME_DIR`) empêche deux overlays de partager jeton et
+file d'envoi ; un processus relancé par l'overlay lui-même (`RELAUNCH_ENV`) attend le verrou
+jusqu'à 30 s.
+
 **Écart assumé : pas de vrai debounce de 2 s** (`FLUSH_DEBOUNCE_MS` côté web) — chaque
 `SyncCommand::Enqueue` reçu par le thread Sync (`overlay-ui::spawn_sync_thread`) déclenche une
 tentative d'envoi immédiate de TOUT ce qui est en file à cet instant (pas seulement ce qui vient
