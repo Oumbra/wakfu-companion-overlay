@@ -87,13 +87,33 @@ pub fn default_lock_path() -> Option<PathBuf> {
     {
         if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
-            .filter(|dir| dir.is_absolute() && dir.is_dir())
+            .filter(|dir| runtime_dir_is_private(dir))
         {
             return Some(dir.join(file_name));
         }
         overlay_engine::app_dirs::project_dirs(APP_NAME)
             .map(|dirs| dirs.data_dir().join("instance.lock"))
     }
+}
+
+/// `$XDG_RUNTIME_DIR` n'est retenu que s'il est **à nous et privé** (audit de sécurité du
+/// 2026-09-23, O10) : chemin absolu, vrai dossier (pas un lien symbolique), propriété de
+/// l'utilisateur effectif, mode exactement `0700` — ce que la spécification XDG impose et que
+/// `systemd-logind` fournit. Une variable héritée d'un autre compte (`sudo -E`, `su` sans `-`) ou
+/// pointant vers un dossier partagé laisserait un tiers poser ou bloquer le verrou ; on retombe
+/// alors sur le dossier de données.
+#[cfg(not(windows))]
+fn runtime_dir_is_private(dir: &Path) -> bool {
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+    if !dir.is_absolute() {
+        return false;
+    }
+    let Ok(meta) = std::fs::symlink_metadata(dir) else {
+        return false;
+    };
+    // SAFETY: `geteuid` ne lit que l'identité du processus, sans effet de bord ni échec possible.
+    let euid = unsafe { libc::geteuid() };
+    meta.is_dir() && meta.uid() == euid && meta.permissions().mode() & 0o777 == 0o700
 }
 
 /// Combien attendre le verrou : [`RELAUNCH_WAIT`] si ce processus a été relancé par l'overlay
@@ -115,14 +135,21 @@ pub fn acquire_at(path: &Path, wait: Duration) -> Result<InstanceLock, AcquireEr
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(AcquireError::Io)?;
     }
-    let mut file = OpenOptions::new()
+    let mut options = OpenOptions::new();
+    options
         .read(true)
         .write(true)
         .create(true)
         // Jamais tronqué à l'ouverture : c'est peut-être le fichier d'une instance en cours.
-        .truncate(false)
-        .open(path)
-        .map_err(AcquireError::Io)?;
+        .truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        // Jamais à travers un lien symbolique (O10) : un lien planté à la place du verrou ferait
+        // écrire notre PID dans le fichier qu'il désigne. Fichier créé privé (`0600`).
+        options.custom_flags(libc::O_NOFOLLOW).mode(0o600);
+    }
+    let mut file = options.open(path).map_err(AcquireError::Io)?;
     let deadline = Instant::now() + wait;
     loop {
         match file.try_lock() {
@@ -237,6 +264,50 @@ mod tests {
         std::env::temp_dir()
             .join(format!("single-instance-{}-{name}", std::process::id()))
             .join("instance.lock")
+    }
+
+    /// O10 : `$XDG_RUNTIME_DIR` n'est retenu que privé (`0700`, à nous, pas un lien).
+    #[cfg(unix)]
+    #[test]
+    fn dossier_d_execution_retenu_seulement_prive() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let base = std::env::temp_dir().join(format!("single-instance-{}-xdg", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let private = base.join("prive");
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(runtime_dir_is_private(&private));
+
+        let shared = base.join("partage");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!runtime_dir_is_private(&shared));
+
+        let link = base.join("lien");
+        std::os::unix::fs::symlink(&private, &link).unwrap();
+        assert!(!runtime_dir_is_private(&link), "lien symbolique refusé");
+        assert!(!runtime_dir_is_private(Path::new("relatif")));
+        assert!(!runtime_dir_is_private(&base.join("absent")));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// O10 : le fichier de verrou ne s'ouvre jamais à travers un lien symbolique.
+    #[cfg(unix)]
+    #[test]
+    fn verrou_refuse_un_lien_symbolique() {
+        let path = temp_lock("lien");
+        let dir = path.parent().unwrap().to_path_buf();
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("cible");
+        std::fs::write(&target, "ne pas toucher").unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(matches!(
+            acquire_at(&path, Duration::ZERO),
+            Err(AcquireError::Io(_))
+        ));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "ne pas toucher");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Le second verrou échoue tant que le premier est détenu, et réussit dès qu'il est relâché —

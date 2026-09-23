@@ -115,3 +115,7 @@ image = { version = "0.25", default-features = false, features = ["png", "ico"] 
 # `compat::block_on` interne — `async-io` plutôt que `tokio` (défaut de la crate) : ce binaire n'a
 # par ailleurs aucun besoin de tokio.
 ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+# `geteuid` et `O_NOFOLLOW` pour le verrou d'instance unique (`single_instance`, audit de
+# sécurité du 2026-09-23) : propriétaire du dossier `$XDG_RUNTIME_DIR` vérifié, fichier de verrou
+# jamais ouvert à travers un lien symbolique. Déjà présent dans l'arbre de dépendances.
+libc = "0.2"
