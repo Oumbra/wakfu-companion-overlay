@@ -1,5 +1,7 @@
 # Publication d'une Release GitHub — docs/plan-mise-a-jour.md §6 (phase 1), décisions §10 :
-# déclenchée par la FUSION DE `dev` DANS `main` faite par le mainteneur (décision 2), jamais par un
+# déclenchée par la FUSION DE `dev` DANS `main` (décision 2) — à la main par le mainteneur (push sur
+# `main`), ou par `release-pr.yml` pour une branche de release du skill `release` (fusion par le
+# GITHUB_TOKEN, qui ne déclenche pas `push` : il lance ce workflow par `workflow_dispatch`) —, jamais par un
 # commit sur `dev` (le hook `post-commit` y bumpe la version à chaque `feat:`/`fix:`, une Release
 # par commit n'aurait aucun sens). La version publiée est celle que `[workspace.package] version`
 # porte à cet instant ; les sauts (0.19.0 → 0.27.2) sont normaux.

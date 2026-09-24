@@ -58,6 +58,10 @@ on:
       - '**/*.md'
       - '.claude/**'
   workflow_dispatch:
+  # Appelé aussi par `release-pr.yml` (job `ci`) : une branche de release n'est fusionnée dans
+  # `main` qu'après ce CI complet sur son commit de tête — sans `paths-ignore`, une release de
+  # pure documentation doit avoir un verdict elle aussi.
+  workflow_call:
 
 # Le travail se fait par rafales de petits commits successifs sur `dev` (voir l'historique) : sans
 # ce garde-fou, chaque push d'une rafale lançait cinq jobs complets dont seul le dernier importait.

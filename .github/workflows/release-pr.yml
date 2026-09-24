@@ -1,0 +1,148 @@
+# Mise en production automatisée à partir d'une branche de release poussée par le skill `release`
+# (.claude/skills/release/SKILL.md) : `release-AAAA-MM-JJ` (suffixe `-2`, `-3`... pour une 2e
+# release le même jour), créée depuis `main`, dans laquelle `dev` a déjà été fusionnée et les
+# conflits éventuels résolus. Les filtres `branches` de GitHub sont des globs, pas des regex : ils
+# prennent tout `release-*`, et le job `format` vérifie le format exact (RELEASE_BRANCH_REGEX).
+#
+# Déroulé, sur un seul run déclenché par le push de la branche :
+# 1. `open-pr` — ouvre la PR vers `main`, description = corps du commit de merge (rapport du skill :
+#    contenu livré, conflits résolus, vérifications) ;
+# 2. `ci` — rejoue `ci.yml` EN ENTIER sur ce commit (workflow réutilisable, `workflow_call`) ;
+# 3. `merge-and-publish` — si les deux sont verts : fusionne la PR en merge commit, lance
+#    `release.yml` sur `main` (binaires, manifeste signé, Release GitHub), supprime la branche.
+#
+# Pourquoi appeler `ci.yml` plutôt qu'attendre son run sur push (`workflow_run`) :
+# - `ci.yml` ignore les push qui ne touchent que `docs/**`, `**/*.md`, `.claude/**` : une release
+#   de pure documentation n'aurait jamais eu de verdict, donc jamais été fusionnée ;
+# - `workflow_run` exécute la version de ce fichier présente sur la branche par défaut : la première
+#   release qui l'apporte n'aurait pas pu se fusionner seule. Un appel réutilisable prend la version
+#   du commit poussé.
+#
+# Tout passe par le GITHUB_TOKEN, sans GitHub App ni PAT. Une PR créée ou fusionnée par ce jeton ne
+# déclenche aucun workflow : ni CI sur `pull_request` (d'où le job `ci` ci-dessus), ni `release.yml`
+# sur le push vers `main` que produit la fusion — d'où le `gh workflow run` explicite
+# (`workflow_dispatch` est l'exception que le GITHUB_TOKEN a le droit de déclencher ; `release.yml`
+# refuse toute autre ref que `main` et reste idempotent si le tag `v{version}` existe déjà).
+#
+# Prérequis dépôt : Settings → Actions → General → « Allow GitHub Actions to create and approve
+# pull requests » (création de la PR). Si `main` exige des checks nommés par une règle de
+# protection, les checks produits ici s'appellent `ci / fmt`, `ci / test-linux`... : les ajouter à
+# la règle, sinon la fusion par le workflow est refusée (voir « Si le workflow ne fusionne pas »
+# dans le skill).
+name: Release PR
+
+on:
+  push:
+    branches:
+      - 'release-*'
+
+# Pas de groupe `concurrency` au niveau du workflow : celui de `ci.yml` (par ref) annule déjà le
+# run CI d'un push remplacé, ce qui saute la fusion de ce run-là ; `--match-head-commit` garantit
+# de ne jamais fusionner un commit que ce run n'a pas validé.
+permissions:
+  contents: read
+
+env:
+  RELEASE_BRANCH_REGEX: '^release-[0-9]{4}-[0-9]{2}-[0-9]{2}(-[0-9]+)?$'
+
+jobs:
+  format:
+    # `deleted` : la suppression de la branche (fin de `merge-and-publish`) émet aussi un push.
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-24.04
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+    env:
+      BRANCH: ${{ github.ref_name }}
+    steps:
+      - name: format release-AAAA-MM-JJ(-N)
+        id: check
+        run: |
+          if [[ "$BRANCH" =~ $RELEASE_BRANCH_REGEX ]]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$BRANCH ne respecte pas le format release-AAAA-MM-JJ(-N) : ignorée."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  open-pr:
+    needs: format
+    if: needs.format.outputs.ok == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      BRANCH: ${{ github.ref_name }}
+      # Passé par variable d'environnement, jamais interpolé dans le script (injection).
+      MESSAGE: ${{ github.event.head_commit.message }}
+    steps:
+      - name: Open pull request to main
+        run: |
+          # `isCrossRepository` : une PR ouverte depuis un fork sous le même nom de branche n'est
+          # jamais la nôtre (même garde que sur Oumbra/wakfu-companion, audit du 2026-09-23).
+          existing=$(gh pr list --head "$BRANCH" --base main --state open --json number,isCrossRepository --jq '[.[] | select(.isCrossRepository | not)][0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "PR #$existing déjà ouverte pour $BRANCH : mise à jour par ce push, rien à créer."
+            exit 0
+          fi
+          # Corps du commit de merge (sans la ligne de sujet) = rapport du skill `release`.
+          {
+            printf '%s\n' "$MESSAGE" | tail -n +2
+            printf '\n---\nPR ouverte par release-pr.yml : fusion automatique dès que `ci.yml` est vert sur ce commit, puis publication de la Release signée (release.yml).\n'
+          } > body.md
+          gh pr create --base main --head "$BRANCH" --title "chore(release): $BRANCH" --body-file body.md
+
+  ci:
+    needs: format
+    if: needs.format.outputs.ok == 'true'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  merge-and-publish:
+    needs: [open-pr, ci]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      BRANCH: ${{ github.ref_name }}
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Merge pull request
+        id: merge
+        run: |
+          pr=$(gh pr list --head "$BRANCH" --base main --state open --json number,headRefOid,isCrossRepository --jq '[.[] | select(.isCrossRepository | not)][0] // empty')
+          if [ -z "$pr" ]; then
+            echo "::error::Aucune PR ouverte de $BRANCH vers main."
+            exit 1
+          fi
+          number=$(jq -r .number <<<"$pr")
+          head=$(jq -r .headRefOid <<<"$pr")
+          # Un push plus récent sur la branche : c'est le run de ce nouveau commit qui fusionnera.
+          if [ "$head" != "$SHA" ]; then
+            echo "::notice::CI verte sur $SHA mais la PR #$number pointe sur $head : fusion laissée au run de $head."
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh pr merge "$number" --merge --match-head-commit "$SHA"
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        if: steps.merge.outputs.merged == 'true'
+        env:
+          NUMBER: ${{ steps.merge.outputs.number }}
+        run: |
+          gh workflow run release.yml --ref main
+          gh pr comment "$NUMBER" --body "Fusionnée dans \`main\`, publication de la Release lancée : https://github.com/$GH_REPO/actions/workflows/release.yml"
+
+      - name: Delete release branch
+        if: steps.merge.outputs.merged == 'true'
+        run: gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$BRANCH"
