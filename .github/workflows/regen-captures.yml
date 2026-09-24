@@ -118,7 +118,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ca-certificates curl git
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # `fetch-depth: 0` n'est pas requis (`bump-version.sh` ne lit que HEAD), mais un clone
           # superficiel refuse le push quand la branche a avancé entre-temps — le coût est de
