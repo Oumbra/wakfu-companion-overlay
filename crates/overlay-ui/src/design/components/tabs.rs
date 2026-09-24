@@ -88,11 +88,11 @@
 //! Les boutons, eux, n'en ont pas — vérifié sur `large-button-cancel.png` et
 //! `large-button-validate.png`, où l'anneau autour du libellé ne s'écarte du fond que de 4 %.
 //!
-//! ## Largeur : parts égales, sur toute la largeur disponible
+//! ## Largeur : toute la largeur disponible, une marge égale autour de chaque libellé
 //!
-//! **Par défaut, la barre occupe toute la largeur qu'on lui donne et ses onglets s'y partagent la
-//! place à égalité**, gouttières déduites. C'est un choix de l'overlay, pas un relevé, et il
-//! s'écarte du jeu en connaissance de cause.
+//! **Par défaut, la barre occupe toute la largeur qu'on lui donne, et chaque onglet y reçoit
+//! l'encre de son libellé plus une marge identique pour tous**, gouttières déduites. C'est un
+//! choix de l'overlay, pas un relevé, et il s'écarte du jeu en connaissance de cause.
 //!
 //! Le jeu dimensionne chaque onglet sur son libellé : ses six onglets font 77, 83, 103, 83, 133 et
 //! 106 px pour des encres de 26, 44, 73, 28, 100 et 35 px. **La règle qui produit ces largeurs
@@ -100,10 +100,21 @@
 //! minimale unique n'en rendent compte. Et sa barre ne remplit pas la fenêtre : elle s'arrête à
 //! x=636 sur 705, parce que le **bouton de réinitialisation** occupe la droite.
 //!
-//! Appliquer une règle qu'on n'a pas mesurée à trois onglets qui n'ont pas ce bouton donnerait une
-//! barre courte, calée à gauche, sous un panneau pleine largeur. Les parts égales remplissent le
-//! panneau, restent stables quand un libellé change, et ne prétendent pas mesurer ce qui ne l'est
-//! pas.
+//! Appliquer une règle qu'on n'a pas mesurée à des onglets qui n'ont pas ce bouton donnerait une
+//! barre courte, calée à gauche, sous un panneau pleine largeur. La marge égale remplit le
+//! panneau et ne prétend pas mesurer ce qui ne l'est pas.
+//!
+//! **Ce fut des parts égales jusqu'au 2026-09-18**, chaque onglet recevant le même septième — ou
+//! sixième — de la barre quel que soit son mot. La règle tenait tant que les libellés restaient
+//! courts ; à sept onglets sur les 700 px de la fenêtre Options, chaque part tombait à 98 px et
+//! « Personnages » (encre 100) débordait de sa case pendant que « Chat » nageait dans la sienne.
+//! La marge égale donne à chaque mot la place qu'il demande et partage le reste — un long libellé
+//! élargit son onglet, jamais celui du voisin. Si la barre est plus étroite que la somme des
+//! encres, la marge tombe à zéro et les onglets rétrécissent au prorata de leur libellé : les mots
+//! s'écrêtent, mais uniformément.
+//!
+//! Un onglet **à pictogramme** compte pour l'emprise de son glyphe ([`tokens::TAB_HEIGHT`] ×
+//! [`tokens::TAB_ICON_RATIO`]) : entre pictogrammes, les onglets restent donc de même largeur.
 //!
 //! [`Tabs::fit_content`] rend l'autre comportement — chaque onglet à la largeur de son libellé
 //! ([`tokens::TAB_PADDING_X`], plancher [`tokens::TAB_MIN_WIDTH`]). C'est ce qu'il faut pour
@@ -293,11 +304,11 @@ impl<'a, T: PartialEq + Copy> Tabs<'a, T> {
         self
     }
 
-    /// Dimensionne chaque onglet sur son libellé au lieu de partager la largeur à égalité.
+    /// Dimensionne chaque onglet sur son libellé au lieu de remplir la largeur disponible.
     ///
     /// **L'inverse du défaut**, qui étire la barre sur toute la largeur disponible — voir la doc de
-    /// module pour pourquoi les parts égales l'emportent dans l'overlay. À réserver aux barres qui
-    /// ne doivent pas s'étirer, et aux planches de comparaison avec une capture du jeu.
+    /// module pour pourquoi la marge égale l'emporte dans l'overlay. À réserver aux barres qui ne
+    /// doivent pas s'étirer, et aux planches de comparaison avec une capture du jeu.
     pub fn fit_content(mut self) -> Self {
         self.fit_content = true;
         self
@@ -325,55 +336,80 @@ impl<'a, T: PartialEq + Copy> Tabs<'a, T> {
         }
 
         if self.fit_content {
-            let font = text::label_font(ui.ctx(), tokens::TAB_FONT_SIZE);
             return self
                 .entries
                 .iter()
                 .map(|entry| {
-                    let ink = ui
-                        .fonts_mut(|f| {
-                            f.layout_no_wrap(
-                                entry.label.clone(),
-                                font.clone(),
-                                tokens::TAB_LABEL_ACTIVE,
-                            )
-                        })
-                        .size()
-                        .x;
                     // Un pictogramme n'a pas de mot à contenir : sa largeur est celle du jeu, pas
                     // celle de son libellé — qui n'est ici qu'une infobulle.
                     if entry.icon.is_some() {
                         return tokens::TAB_ICON_WIDTH;
                     }
-                    (ink + 2.0 * tokens::TAB_PADDING_X).max(tokens::TAB_MIN_WIDTH)
+                    (self.ink(ui, entry) + 2.0 * tokens::TAB_PADDING_X).max(tokens::TAB_MIN_WIDTH)
                 })
                 .collect();
         }
 
-        equal_widths(ui.available_width(), count)
+        let contents: Vec<f32> = self
+            .entries
+            .iter()
+            .map(|entry| {
+                if entry.icon.is_some() {
+                    tokens::TAB_HEIGHT * tokens::TAB_ICON_RATIO
+                } else {
+                    self.ink(ui, entry)
+                }
+            })
+            .collect();
+        fill_widths(ui.available_width(), &contents)
+    }
+
+    /// Largeur de l'encre d'un libellé, dans la police des onglets.
+    fn ink(&self, ui: &mut Ui, entry: &Entry<T>) -> f32 {
+        let font = text::label_font(ui.ctx(), tokens::TAB_FONT_SIZE);
+        ui.fonts_mut(|f| f.layout_no_wrap(entry.label.clone(), font, tokens::TAB_LABEL_ACTIVE))
+            .size()
+            .x
     }
 }
 
-/// Largeurs d'onglets **à parts égales** sur `available`, gouttières déduites.
+/// Largeurs d'onglets qui **remplissent** `available`, gouttières déduites : chaque onglet reçoit
+/// son contenu (`contents[i]`, l'encre de son libellé) plus une marge identique pour tous.
+///
+/// Si la place utile est plus petite que la somme des contenus, la marge est nulle et chaque onglet
+/// reçoit sa part **au prorata** de son contenu — les mots s'écrêtent, mais tous dans la même
+/// proportion, et la barre tombe toujours pile sur le bord du panneau.
 ///
 /// Les bords sont arrondis **en cumulé** plutôt que chaque largeur séparément : sinon les arrondis
 /// s'additionnent et la barre finit un ou deux pixels avant — ou après — le bord du panneau. Ici la
-/// somme des largeurs vaut exactement la place utile, et les onglets ne diffèrent au plus que d'un
-/// pixel entre eux.
+/// somme des largeurs vaut exactement la place utile.
 ///
 /// Fonction libre plutôt que corps de [`Tabs::widths`] : c'est le calcul qui peut se tromper en
 /// silence, et il s'éprouve sans contexte egui (voir les tests en bas de ce fichier).
-fn equal_widths(available: f32, count: usize) -> Vec<f32> {
+fn fill_widths(available: f32, contents: &[f32]) -> Vec<f32> {
+    let count = contents.len();
     if count == 0 {
         return Vec::new();
     }
     let gutters = tokens::TAB_SEPARATOR_WIDTH * (count - 1) as f32;
     let usable = (available - gutters).max(0.0);
-    (0..count)
-        .map(|index| {
-            let start = (usable * index as f32 / count as f32).round();
-            let end = (usable * (index + 1) as f32 / count as f32).round();
-            end - start
+    let content_total: f32 = contents.iter().sum();
+    // `usable >= 0`, donc dans la seconde branche `content_total > 0` : pas de division par zéro.
+    let (scale, margin) = if usable >= content_total {
+        (1.0, (usable - content_total) / count as f32)
+    } else {
+        (usable / content_total, 0.0)
+    };
+    let mut cumulative = 0.0;
+    let mut previous_edge = 0.0;
+    contents
+        .iter()
+        .map(|content| {
+            cumulative += content * scale + margin;
+            let edge = cumulative.round();
+            let width = edge - previous_edge;
+            previous_edge = edge;
+            width
         })
         .collect()
 }
@@ -670,26 +706,52 @@ mod tests {
 
     /// **Le bug que ce test verrouille** : arrondir chaque largeur séparément fait dériver la somme,
     /// et la barre d'onglets finit un ou deux pixels avant — ou après — le bord de son panneau. Le
-    /// jeu, lui, la fait tomber pile. Trois onglets sur 520 px est le cas de la modale Options.
+    /// jeu, lui, la fait tomber pile. Sept encres sur 700 px est le cas de la modale Options.
     #[test]
     fn la_somme_des_largeurs_vaut_exactement_la_place_utile() {
-        for (available, count) in [(520.0, 3), (520.0, 2), (333.0, 3), (777.0, 6), (100.0, 7)] {
-            let widths = equal_widths(available, count);
-            let gutters = tokens::TAB_SEPARATOR_WIDTH * (count - 1) as f32;
+        for (available, contents) in [
+            (520.0, vec![44.0, 100.0, 88.0]),
+            (520.0, vec![30.0, 30.0]),
+            (333.0, vec![26.0, 44.0, 73.0]),
+            (700.0, vec![38.0, 55.0, 34.0, 100.0, 82.0, 88.0, 68.0]),
+            (100.0, vec![26.0, 44.0, 73.0, 28.0, 100.0, 35.0, 60.0]),
+        ] {
+            let widths = fill_widths(available, &contents);
+            let gutters = tokens::TAB_SEPARATOR_WIDTH * (contents.len() - 1) as f32;
             let total: f32 = widths.iter().sum::<f32>() + gutters;
             assert!(
                 (total - available).abs() < EPS,
-                "{count} onglets sur {available} px : la barre fait {total}",
+                "{} onglets sur {available} px : la barre fait {total}",
+                contents.len(),
             );
         }
     }
 
-    /// Deux onglets voisins ne peuvent pas différer de plus d'un pixel : c'est la contrepartie de
-    /// l'arrondi cumulé, et ce qui rend la barre régulière à l'œil.
+    /// La marge est la même pour tous : deux onglets diffèrent de ce que leurs encres diffèrent, à
+    /// l'arrondi près. C'est ce qui empêche un long libellé de déborder pendant qu'un court nage.
     #[test]
-    fn deux_onglets_ne_different_au_plus_que_d_un_pixel() {
+    fn chaque_onglet_recoit_son_encre_plus_la_meme_marge() {
+        let contents = [38.0, 55.0, 34.0, 100.0, 82.0, 88.0, 68.0];
+        let widths = fill_widths(700.0, &contents);
+        let margins: Vec<f32> = widths.iter().zip(&contents).map(|(w, c)| w - c).collect();
+        let min = margins.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max = margins.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            max - min <= 1.0 + EPS,
+            "marges de {min} à {max} : {margins:?}"
+        );
+        assert!(
+            min > 0.0,
+            "sur 700 px, sept libellés laissent une marge à chacun"
+        );
+    }
+
+    /// Des contenus égaux — une barre de pictogrammes — donnent des onglets égaux, au pixel près :
+    /// la marge égale ne change rien à ce que faisaient les parts égales dans ce cas.
+    #[test]
+    fn des_contenus_egaux_donnent_des_onglets_egaux() {
         for (available, count) in [(520.0, 3), (333.0, 3), (777.0, 6), (101.0, 4)] {
-            let widths = equal_widths(available, count);
+            let widths = fill_widths(available, &vec![20.0; count]);
             let min = widths.iter().cloned().fold(f32::INFINITY, f32::min);
             let max = widths.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
             assert!(
@@ -699,23 +761,29 @@ mod tests {
         }
     }
 
-    /// Une barre plus étroite que ses gouttières ne produit aucune largeur négative — un rectangle
-    /// inversé se peindrait n'importe où.
+    /// Une barre plus étroite que ses gouttières — ou que ses encres — ne produit aucune largeur
+    /// négative : un rectangle inversé se peindrait n'importe où. Et quand les encres ne tiennent
+    /// pas, chacune est écrêtée dans la même proportion.
     #[test]
     fn une_barre_trop_etroite_ne_produit_pas_de_largeur_negative() {
-        for width in [0.0, 1.0, 3.0] {
-            for widths in [equal_widths(width, 3), equal_widths(width, 8)] {
+        for width in [0.0, 1.0, 3.0, 50.0] {
+            for widths in [
+                fill_widths(width, &[26.0, 44.0, 73.0]),
+                fill_widths(width, &[26.0; 8]),
+            ] {
                 assert!(
                     widths.iter().all(|w| *w >= 0.0),
                     "largeur négative sur {width} px : {widths:?}",
                 );
             }
         }
+        // 50 px utiles pour 100 px d'encre : chaque onglet garde la moitié de son mot.
+        assert_eq!(fill_widths(52.0, &[25.0, 75.0]), vec![13.0, 37.0]);
     }
 
     /// Aucune entrée : aucune largeur, et surtout pas une division par zéro.
     #[test]
     fn une_barre_sans_onglet_ne_rend_aucune_largeur() {
-        assert!(equal_widths(520.0, 0).is_empty());
+        assert!(fill_widths(520.0, &[]).is_empty());
     }
 }

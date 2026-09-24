@@ -33,7 +33,7 @@ use overlay_ui::design::{self, tokens, AutocompleteEntry, AutocompleteFilter};
 #[path = "../examples/shared/wakassets_fixtures.rs"]
 mod wakassets_fixtures;
 
-use wakassets_fixtures::{CategoryFilter, CategoryIcons, ItemIcons, RarityGems, GEM_NATIVE};
+use wakassets_fixtures::{CategoryFilter, CategoryIcons, ItemIcons, RarityGems};
 
 /// Ce que le test pilote d'une frame à l'autre, et ce qu'il relit après coup.
 struct Etat {
@@ -86,9 +86,8 @@ fn habille(
         .enumerate()
         .map(|(rang, (label, categorie))| {
             let mut entry = AutocompleteEntry::new(label.clone(), *categorie);
-            entry.gem = Some(gems.texture_id(overlay_engine::WakfuRarity::Rare));
-            entry.gem_size = GEM_NATIVE;
-            entry.image = Some(objets.texture_id(rang));
+            entry.gem = Some(gems.sized_texture(overlay_engine::WakfuRarity::Rare));
+            entry.image = Some(objets.sized_texture(rang));
             if deja.contains(&rang) {
                 entry.disabled = true;
                 entry.mention = Some("déjà dans vos alertes".to_owned());
@@ -98,13 +97,13 @@ fn habille(
         .collect();
     let mut filtres = vec![AutocompleteFilter::all(
         "Toutes les catégories",
-        Some(cats.texture_id(CategoryFilter::All)),
+        Some(cats.sized_texture(CategoryFilter::All)),
     )];
     for &c in bande {
         filtres.push(AutocompleteFilter::category(
             c,
             icone(c).label(),
-            Some(cats.texture_id(icone(c))),
+            Some(cats.sized_texture(icone(c))),
         ));
     }
     (entrees, filtres)

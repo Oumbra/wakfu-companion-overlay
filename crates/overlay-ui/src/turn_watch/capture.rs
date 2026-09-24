@@ -89,7 +89,11 @@ pub fn capture_bottom_band(hwnd: HWND) -> Option<Band> {
                 DIB_RGB_COLORS,
             );
             if lines == band_h {
-                for px in bgra.chunks_exact_mut(4) {
+                // `as_chunks_mut` plutôt que `chunks_exact_mut(4)` : la taille est une constante,
+                // le compilateur la connaît donc au lieu de la déduire à l'exécution (et clippy
+                // le réclame). Ce lint n'était vu de personne — `clippy-linux` ne compile pas ce
+                // fichier, réservé à Windows, et le job `build-windows` ne lançait que `build`.
+                for px in bgra.as_chunks_mut::<4>().0 {
                     px.swap(0, 2);
                     px[3] = 255;
                 }

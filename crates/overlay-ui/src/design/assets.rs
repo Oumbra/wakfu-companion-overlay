@@ -73,6 +73,32 @@ pub const ICON_SLICE: NineSlice = NineSlice::new(Insets::same(0.0), Fill::Stretc
 /// seul qui ne déforme rien si un jour quelqu'un peint la planche par `DesignSystem::paint`.
 pub const LOADER_SLICE: NineSlice = ICON_SLICE;
 
+/// Découpage du **corps** d'une boîte de confirmation : 6px figés sur les quatre côtés.
+///
+/// Six et non cinquante : contrairement aux boutons, ce corps **n'a pas d'embout décoratif**. Le
+/// filigrane en arcs de ses coins est mesuré à un écart de 2 niveaux au fond, contre 1 au centre,
+/// pour un bruit de fond de 8 — sous le seuil du visible, et `component.py insets` rend d'ailleurs
+/// un `decor_span` de 2px. Les marges n'ont donc à couvrir que le rayon des coins (2px) et le
+/// biseau clair du bord (2px), plus deux pixels de sécurité ; étirer la bande médiane ne déforme
+/// rien qui se voie.
+///
+/// Ce qui **ne** s'étire pas, en revanche, ce sont les deux ornements — la crête et le filet de
+/// pied. Ils sont centrés et de largeur fixe, et ne sont pas dans cette texture : voir
+/// [`CONFIRM_ORNAMENT_SLICE`].
+pub const CONFIRM_BODY_SLICE: NineSlice =
+    NineSlice::new(Insets::same(6.0), Fill::Stretch, Fill::Stretch);
+
+/// Découpage d'un **ornement** de boîte de confirmation : aucune marge, et jamais d'étirement.
+///
+/// La crête (médaillon « ? », losange, volutes, bandeau doré) et le filet de pied sont peints à
+/// leur **taille native**, centrés sur le corps. C'est un relevé, pas un choix : sur la capture le
+/// bandeau de la crête s'arrête à 250px quand le corps en fait 420, et au-delà le corps n'a qu'un
+/// biseau clair comme sur ses trois autres côtés. Des marges assez larges pour contenir cet
+/// ornement (250px de chaque côté) ne laisseraient aucune bande médiane ; le laisser dans la bande
+/// médiane l'étirerait. Le sortir du 9-slice est la seule réponse juste — la même que pour les
+/// embouts de bouton, poussée jusqu'à une texture séparée.
+pub const CONFIRM_ORNAMENT_SLICE: NineSlice = ICON_SLICE;
+
 /// Découpage d'un onglet : **4px figés sur les quatre côtés**, tout le reste étiré.
 ///
 /// Pas de long embout ici, contrairement aux boutons : un onglet n'a pas de hachures d'extrémité,
@@ -109,6 +135,43 @@ pub const TAB_SLICE_FIRST: NineSlice = tab_end_slice(8.0, 4.0);
 
 /// Dernier onglet de la barre — arrondi à droite.
 pub const TAB_SLICE_LAST: NineSlice = tab_end_slice(4.0, 8.0);
+
+/// Découpage d'une case de **switch** : **8px figés du côté arrondi, 4 du côté séparateur, 6 en
+/// haut et en bas**.
+///
+/// Même construction que [`tab_end_slice`], et pour la même raison : l'arrondi (rayon 6) est
+/// celui du **cadre** du switch, porté par l'alpha de chaque case d'extrémité. 8 = les 2px de
+/// liseré + les 5px d'escalier d'alpha (`0, 8, 112, 203, 251` sur la première ligne) + 1 de
+/// sécurité. 6 en vertical = liseré 2 + biseau clair 2 + 2 de sécurité — la case active porte un
+/// biseau de 2px en haut et en bas, la case inactive une ombre intérieure de 2px du côté du liseré
+/// (couverte par les 8 du côté arrondi). 4 du côté séparateur : rien à figer, un pixel de
+/// transition et du remplissage.
+///
+/// **Pas d'embout** : `component.py insets` rend un `decor_span` au niveau du bruit (pic 1,7 pour
+/// un bruit de 1,1) sur les quatre cases — le remplissage est une texture sourde, `Fill::Stretch`
+/// sur les deux axes comme pour un onglet.
+const fn switch_slot_slice(left: f32, right: f32) -> NineSlice {
+    NineSlice::new(
+        Insets {
+            left,
+            top: 6.0,
+            right,
+            bottom: 6.0,
+        },
+        Fill::Stretch,
+        Fill::Stretch,
+    )
+}
+
+/// Première case d'un switch — arrondie à gauche.
+pub const SWITCH_SLICE_FIRST: NineSlice = switch_slot_slice(8.0, 4.0);
+
+/// Dernière case d'un switch — arrondie à droite.
+pub const SWITCH_SLICE_LAST: NineSlice = switch_slot_slice(4.0, 8.0);
+
+/// Case du **milieu** d'un switch à trois positions ou plus — 4px de chaque côté, rien
+/// d'arrondi : la texture n'a que ses liserés haut et bas et du remplissage.
+pub const SWITCH_SLICE: NineSlice = switch_slot_slice(4.0, 4.0);
 
 /// Découpage d'une case à cocher : **5px figés sur les quatre côtés**.
 ///
@@ -313,6 +376,41 @@ pub enum DsTexture {
     TabInactiveLast,
     /// Onglet inactif en PREMIÈRE position — miroir horizontal de [`DsTexture::TabInactiveLast`].
     TabInactiveFirst,
+    /// Case ACTIVE d'un switch en PREMIÈRE position (`switch-slot-active-first.png`, 42 × 44) —
+    /// kaki `#635a47` texturé, biseau clair en haut et en bas, coins gauches arrondis.
+    ///
+    /// Découpée de `switch-first-slot-active.png` (88 × 44, générique : le glyphe ♂ retiré), sur
+    /// `x 0..42` — le liseré gauche et les 40px de remplissage, **sans** le séparateur. Comme pour
+    /// les onglets, l'arrondi appartient au cadre du switch et il est porté par l'alpha : d'où une
+    /// texture par extrémité et par état, quatre en tout, tirées des deux captures du jeu.
+    SwitchSlotActiveFirst,
+    /// Case ACTIVE en SECONDE position (`switch-slot-active-last.png`, 42 × 44) — découpée de
+    /// `switch-second-slot-active.png` sur `x 46..88`. Ce n'est **pas** un miroir : le jeu a
+    /// capturé les deux états.
+    SwitchSlotActiveLast,
+    /// Case INACTIVE en PREMIÈRE position (`switch-slot-inactive-first.png`, 44 × 44) — gris-brun
+    /// `#514b44` quasi uni, ombre intérieure de 2px côté liseré. Découpée de
+    /// `switch-second-slot-active.png` sur `x 0..44`.
+    ///
+    /// **2px plus large que la case active** (42), et ce sont les captures qui le disent : la
+    /// case inactive est « enfoncée », son ombre intérieure s'ajoute au remplissage, et le
+    /// séparateur se déplace de 2px selon l'état. Le composant donne la même largeur aux deux
+    /// cases ; le 9-slice absorbe l'écart d'un pixel de chaque côté.
+    SwitchSlotInactiveFirst,
+    /// Case INACTIVE en SECONDE position (`switch-slot-inactive-last.png`, 44 × 44) — découpée de
+    /// `switch-first-slot-active.png` sur `x 44..88`.
+    SwitchSlotInactiveLast,
+    /// Case ACTIVE du MILIEU (`switch-slot-active.png`, 40 × 44) — les 40px de remplissage de
+    /// [`DsTexture::SwitchSlotActiveFirst`] (`x 2..42`), **coin redressé** : les dix pixels
+    /// d'escalier d'alpha que l'arrondi laissait dans ces colonnes ont été recopiés depuis
+    /// l'intérieur, la même opération que pour `tab-active.png`. Le jeu n'a pas de switch à trois
+    /// cases dans les captures relevées ; cette texture est une dérivation, pas un relevé.
+    SwitchSlotActive,
+    /// Case INACTIVE du MILIEU (`switch-slot-inactive.png`, 40 × 44) — les 40 premiers pixels de
+    /// [`DsTexture::SwitchSlotInactiveLast`], avant son ombre intérieure et son liseré, coin
+    /// redressé de même. Une case inactive du milieu n'a donc pas d'ombre : l'ombre des captures
+    /// est toujours du côté du liseré extérieur, une case sans liseré n'en porte pas.
+    SwitchSlotInactive,
     /// Case à cocher COCHÉE (`checkbox-true.png`, 20 × 20) — cadre doré vif, carré blanc plein.
     CheckboxChecked,
     /// Case à cocher DÉCOCHÉE (`checkbox-false.png`, 20 × 20) — cadre kaki sombre, intérieur noir.
@@ -367,6 +465,28 @@ pub enum DsTexture {
     /// dernière raison d'exister de `OptionsModalAssets`, de sa fonction de décodage et du champ
     /// `options_assets` que `RenderContent` promenait jusqu'au panneau.
     ModalHeader,
+    /// Corps d'une boîte de confirmation (`confirm-box-body.png`, 420 × 148) — le rectangle gris
+    /// clair qui porte la question et les deux réponses, **sans aucun de ses deux ornements**.
+    ///
+    /// Détouré de `interfaces/interface-confirm-box.png` le 2026-09-15, puis nettoyé de l'empreinte
+    /// dorée que la crête laisse sur ses 21 premiers pixels — sans ce nettoyage, le corps porterait
+    /// cette empreinte en pleine bande supérieure et l'étirerait avec lui.
+    ///
+    /// Étirable dans les deux sens ([`CONFIRM_BODY_SLICE`]). Ses quatre coins arrondis (rayon 2)
+    /// sont portés par l'alpha de la texture, comme ceux d'un bouton.
+    ConfirmBody,
+    /// Crête d'une boîte de confirmation (`confirm-box-crest.png`, 250 × 57) — médaillon « ? » sur
+    /// son losange, deux volutes, et le bandeau doré qui les relie.
+    ///
+    /// **Peinte à sa taille native, centrée** ([`CONFIRM_ORNAMENT_SLICE`]) : sur la capture ce
+    /// bandeau s'arrête à 250px quand le corps en fait 420. Elle descend de 21px DANS le corps —
+    /// la pointe basse du losange et son cerne sombre — et se peint donc **après** lui.
+    ConfirmCrest,
+    /// Filet de pied d'une boîte de confirmation (`confirm-box-foot.png`, 98 × 9) — le petit filet
+    /// beige et ses deux tirets, sous le bord inférieur du corps.
+    ///
+    /// Même règle que [`DsTexture::ConfirmCrest`] : taille native, centré, jamais étiré.
+    ConfirmFoot,
     /// Socle d'un bouton de pas (`button-stepper.png`, 32 × 32) — le carré sombre qui porte le
     /// « − » et le « + » d'un pas numérique (`design::stepper`).
     ///
@@ -506,6 +626,12 @@ impl DsTexture {
         DsTexture::TabActiveLast,
         DsTexture::TabInactiveFirst,
         DsTexture::TabInactiveLast,
+        DsTexture::SwitchSlotActiveFirst,
+        DsTexture::SwitchSlotActiveLast,
+        DsTexture::SwitchSlotInactiveFirst,
+        DsTexture::SwitchSlotInactiveLast,
+        DsTexture::SwitchSlotActive,
+        DsTexture::SwitchSlotInactive,
         DsTexture::CheckboxChecked,
         DsTexture::CheckboxUnchecked,
         DsTexture::SelectFace,
@@ -517,6 +643,9 @@ impl DsTexture {
         DsTexture::ModalBody,
         DsTexture::ModalSection,
         DsTexture::ModalHeader,
+        DsTexture::ConfirmBody,
+        DsTexture::ConfirmCrest,
+        DsTexture::ConfirmFoot,
         DsTexture::ButtonStepper,
         DsTexture::CollapseBlock,
         DsTexture::CollapseBlockHover,
@@ -633,6 +762,36 @@ impl DsTexture {
                 bytes: ds_asset!("tab-inactive-last.png"),
                 slice: TAB_SLICE_LAST,
             },
+            DsTexture::SwitchSlotActiveFirst => DsTextureSpec {
+                name: "ds-switch-slot-active-first",
+                bytes: ds_asset!("switch-slot-active-first.png"),
+                slice: SWITCH_SLICE_FIRST,
+            },
+            DsTexture::SwitchSlotActiveLast => DsTextureSpec {
+                name: "ds-switch-slot-active-last",
+                bytes: ds_asset!("switch-slot-active-last.png"),
+                slice: SWITCH_SLICE_LAST,
+            },
+            DsTexture::SwitchSlotInactiveFirst => DsTextureSpec {
+                name: "ds-switch-slot-inactive-first",
+                bytes: ds_asset!("switch-slot-inactive-first.png"),
+                slice: SWITCH_SLICE_FIRST,
+            },
+            DsTexture::SwitchSlotInactiveLast => DsTextureSpec {
+                name: "ds-switch-slot-inactive-last",
+                bytes: ds_asset!("switch-slot-inactive-last.png"),
+                slice: SWITCH_SLICE_LAST,
+            },
+            DsTexture::SwitchSlotActive => DsTextureSpec {
+                name: "ds-switch-slot-active",
+                bytes: ds_asset!("switch-slot-active.png"),
+                slice: SWITCH_SLICE,
+            },
+            DsTexture::SwitchSlotInactive => DsTextureSpec {
+                name: "ds-switch-slot-inactive",
+                bytes: ds_asset!("switch-slot-inactive.png"),
+                slice: SWITCH_SLICE,
+            },
             DsTexture::CheckboxChecked => DsTextureSpec {
                 name: "ds-checkbox-checked",
                 bytes: ds_asset!("checkbox-true.png"),
@@ -687,6 +846,21 @@ impl DsTexture {
                 name: "ds-modal-header",
                 bytes: ds_asset!("modal-header.png"),
                 slice: BANNER_SLICE,
+            },
+            DsTexture::ConfirmBody => DsTextureSpec {
+                name: "ds-confirm-body",
+                bytes: ds_asset!("confirm-box-body.png"),
+                slice: CONFIRM_BODY_SLICE,
+            },
+            DsTexture::ConfirmCrest => DsTextureSpec {
+                name: "ds-confirm-crest",
+                bytes: ds_asset!("confirm-box-crest.png"),
+                slice: CONFIRM_ORNAMENT_SLICE,
+            },
+            DsTexture::ConfirmFoot => DsTextureSpec {
+                name: "ds-confirm-foot",
+                bytes: ds_asset!("confirm-box-foot.png"),
+                slice: CONFIRM_ORNAMENT_SLICE,
             },
             DsTexture::ButtonStepper => DsTextureSpec {
                 name: "ds-button-stepper",

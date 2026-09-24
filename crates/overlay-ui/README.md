@@ -7,7 +7,7 @@ sur un vrai `wakfu.log` — voir [`docs/plan-architecture.md`](../../docs/plan-a
 
 ## Prévisualisation à tout moment
 
-**Windows** (binaire `overlay-ui`) :
+**Windows** (binaire `wakfu-companion-overlay`) :
 
 ```
 cd crates\overlay-ui
@@ -16,8 +16,8 @@ cd crates\overlay-ui
 .\preview.ps1 -Debug                   # build debug, plus rapide à itérer
 ```
 
-**Linux / X11** (binaire `overlay-ui-x11`, voir « Portage Linux » plus bas) — même contrat, en
-bash, sans PowerShell :
+**Linux / X11** (binaire `wakfu-companion-overlay-x11`, voir « Portage Linux » plus bas) — même
+contrat, en bash, sans PowerShell :
 
 ```bash
 bash crates/overlay-ui/preview.sh              # découverte automatique du wakfu.log
@@ -45,15 +45,18 @@ demande des réglages de compte — voir `App::force_refresh`, `main.rs`) : dema
 explicite 2026-09-02 pour récupérer un overlay bloqué (mauvaise taille, plus au premier plan, Suivi
 resté vide) sans relancer tout le processus.
 
-`Ctrl+Shift+Q` (hotkey global) pour quitter — ou Ctrl+C dans le terminal. Pas Échap : retour
-utilisateur 2026-09-02, contraint de faire un Ctrl+C dans le terminal (` STATUS_CONTROL_C_EXIT` en
-sortie, normal dans ce cas mais ressemble à un plantage) car Échap ne fonctionnait jamais malgré ce
-qu'annonçait la bannière — cause trouvée : les fenêtres overlay portent `WS_EX_NOACTIVATE` (jamais
-désactivé, y compris en mode interactif, pour ne jamais voler le focus au jeu) donc ne reçoivent
-JAMAIS `WindowEvent::KeyboardInput`. `Ctrl+Shift+Q` règle ça en restant, comme `Ctrl+Shift+W`/
-`Ctrl+Shift+R`, un hotkey GLOBAL indépendant du focus (à l'origine en Ctrl+Alt, harmonisés sur
-Ctrl+Shift le 2026-09-06). `Ctrl+Alt+D` (déconnexion) a existé jusqu'au 2026-09-13 : c'est
-désormais un bouton de l'onglet « Paramètres », section « Compte ».
+Pour quitter : le bouton « Fermer l'overlay » en pied de l'onglet « Paramètres » de la fenêtre
+Options (confirmé), l'entrée « Quitter » de la zone de notification — ou Ctrl+C dans le terminal.
+Pas Échap : retour utilisateur 2026-09-02, contraint de faire un Ctrl+C dans le terminal
+(` STATUS_CONTROL_C_EXIT` en sortie, normal dans ce cas mais ressemble à un plantage) car Échap ne
+fonctionnait jamais malgré ce qu'annonçait la bannière — cause trouvée : les fenêtres overlay
+portent `WS_EX_NOACTIVATE` (jamais désactivé, y compris en mode interactif, pour ne jamais voler le
+focus au jeu) donc ne reçoivent JAMAIS `WindowEvent::KeyboardInput`. Un hotkey GLOBAL `Ctrl+Shift+Q`
+(à l'origine en Ctrl+Alt, harmonisé sur Ctrl+Shift le 2026-09-06 comme `Ctrl+Shift+W`/
+`Ctrl+Shift+R`) a réglé ça jusqu'au 2026-09-17, puis a été retiré à la demande de l'utilisateur :
+une combinaison qui tue l'overlay d'un geste, sans confirmation, n'a pas sa place derrière un
+raccourci global. `Ctrl+Alt+D` (déconnexion) a existé de même jusqu'au 2026-09-13 : c'est désormais
+un bouton de l'onglet « Paramètres », section « Compte ».
 
 ## Raccourcis personnalisables (onglet « Raccourcis » de la fenêtre Options)
 
@@ -66,10 +69,11 @@ de chacun, la lecture/écriture de la config, l'enregistrement auprès de l'OS),
 décisions : modificateur obligatoire, doublons refusés, raccourcis suspendus tant que la fenêtre
 est ouverte, échec d'enregistrement non fatal.
 
-Persisté dans la table `[shortcuts]` du même `config.toml` que le chemin de `wakfu.log` ; un
-fichier écrit par une version antérieure reste lisible tel quel. Le binaire Linux
-(`src/bin/overlay-ui-x11.rs`) n'enregistre que quatre de ces actions (bascule, quitter, Options,
-sélection multiple du bandeau) faute de câblage pour les autres — les huit restent éditables et
+Persisté dans la table `[shortcuts]` du même `config.toml` que le chemin de `wakfu.log` ; un fichier
+écrit par une version antérieure reste lisible tel quel. Le binaire Linux
+(`src/bin/wakfu-companion-overlay-x11.rs`) n'enregistre que les actions de
+`ShortcutAction::LINUX_SUPPORTED` (bascule, Options, sélection multiple du bandeau, invitation et
+suivi de l'autre personnage) faute de câblage pour les autres — toutes restent éditables et
 persistées.
 
 ## Deux fenêtres overlay indépendantes par personnage
@@ -139,8 +143,7 @@ pilotant le libellé) affiché sous la bande de tuiles pendant `TOAST_DURATION` 
 interactif. Réduit par rapport au web (`loot-alert.component.ts` : confettis, durée configurable) —
 un seul emplacement de toast, le plus récent des deux déclencheurs écrase l'autre.
 
-Voir §9 du plan pour le contenu complet visé : **État de synchro** n'est pas encore câblé — le
-pairing reste console-only pour l'instant (voir plus bas), dépend de L5. **Récap de session**
+Voir §9 du plan pour le contenu complet visé. **Récap de session**
 (kamas/XP/combats/butin) a été retiré (retour utilisateur 2026-09-01 : n'apportait plus rien une
 fois le reste simplifié) — sera repensé dans un autre chantier, `overlay_engine::session::
 SessionTotals` existe toujours côté moteur. **Disposition persistée par écran** : retirée (décision

@@ -3,6 +3,7 @@
 //! voir `engine-js/`) puis en `SessionSnapshot` agrégé (Rust, voir `session.rs`) — les deux
 //! premières briques que les panneaux de l'UI (L2) afficheront.
 
+pub mod app_dirs;
 pub mod catalog;
 pub mod chat_alert;
 pub mod class_breed;
@@ -32,21 +33,26 @@ pub use chat_alert::{
 };
 pub use dungeon::{DungeonEntry, DungeonIndex, WakfuDungeonType};
 pub use history::{
-    fight_signature, purchase_signature, trade_signature, FightLootPayload,
-    FightParticipantPayload, FightPayload, FightSide, FightSpellPayload, HistoryEventKind,
-    HistoryPayload, PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
+    fight_signature, pact_extraction_signature, purchase_signature, trade_signature,
+    FightLootPayload, FightParticipantPayload, FightPayload, FightSide, FightSpellPayload,
+    HistoryEventKind, HistoryPayload, PactExtractionItemPayload, PactExtractionPayload,
+    PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
     HDV_KAMAS_SALE_ITEM,
 };
-pub use model::{ChatChannel, DamageElement, FightResult, LogEntry, TradeItem, TradeSide};
+pub use model::{
+    ChatChannel, ClientLifecycleEvent, DamageElement, FightResult, LogEntry, TradeItem, TradeSide,
+};
 pub use monster_family::{MonsterFamilyEntry, MonsterFamilyIndex};
 pub use profile::{
-    find_enabled_sound_item, profile_patch_entry, AlertProfile, LootAlert, SoundItemEntry,
-    DEFAULT_ALERT_DURATION_SECONDS, DEFAULT_SOUND_ITEM_NAMES, MAX_ALERT_DURATION_SECONDS,
-    MIN_ALERT_DURATION_SECONDS,
+    find_enabled_sound_item, find_sound_item, profile_patch_entry, AlertProfile, LootAlert,
+    SoundItemEntry, DEFAULT_ALERT_DURATION_SECONDS, DEFAULT_SOUND_ITEM_NAMES,
+    MAX_ALERT_DURATION_SECONDS, MIN_ALERT_DURATION_SECONDS,
 };
 pub use quickjs_engine::{EngineError, LogParserEngine};
 pub use recipe::{flatten_for_tracking, resolve_recipe, RecipeIngredient};
-pub use roster::{Gender, RosterCharacter, RosterIndex};
+pub use roster::{
+    roster_patch_entry, Gender, Roster, RosterAccount, RosterCharacter, RosterIndex, RosterPatch,
+};
 pub use session::{
     Engine, FightSnapshot, FighterDamage, LootItem, SessionSnapshot, SessionTotals,
     SpellCastRecord, MAX_LAST_TURN_CASTS,
@@ -56,6 +62,6 @@ pub use spells::{
     ResolvedSpell, SpellEntry, SpellIndex, SpellTable,
 };
 pub use watchlist::{
-    watchlist_from_settings_json, watchlist_patch_entry, WatchlistAlert, WatchlistEntry,
-    WatchlistKind, WatchlistMode,
+    watchlist_from_settings_json, watchlist_patch_entry, WatchlistAlert, WatchlistAlertReason,
+    WatchlistEntry, WatchlistKind, WatchlistMode,
 };

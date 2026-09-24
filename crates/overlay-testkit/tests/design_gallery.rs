@@ -26,7 +26,8 @@ use overlay_engine::ChatChannel;
 use overlay_ui::design::{
     self, ButtonSize, ButtonState, ButtonVariant, CheckboxState, DsIcon, DsTexture,
     IconButtonState, IconContext, InfoTone, InputSize, InputState, LoaderSize, PaginationStep,
-    SelectState, SliderState, TabState, TableAlign, TableBody, TableColumn,
+    SelectState, SliderState, SwitchState, SwitchVariant, TabState, TableAlign, TableBody,
+    TableColumn,
 };
 
 /// Fond de la planche — `neutrals.panel_fill` (`docs/design-tokens.json`), le fond de panneau du
@@ -304,7 +305,7 @@ fn gallery(ui: &mut egui::Ui) {
 
     heading(
         ui,
-        "Barre d'onglets — 44 px, pleine largeur à parts égales, quatre états",
+        "Barre d'onglets — 44 px, pleine largeur à marge égale, quatre états",
         "Le survolé a EXACTEMENT le fond de l'actif : seul le libellé les distingue (blanc pour l'actif, doré pour les autres). Un portage qui ne jouerait que sur le fond les rendrait indiscernables.",
     );
     // Une valeur de sélection par barre : un `&mut` partagé afficherait quatre fois le même état.
@@ -401,7 +402,7 @@ fn gallery(ui: &mut egui::Ui) {
             .log_name("galerie.onglets-icone-etires")
             .show(ui);
         ui.label(
-            RichText::new("par défaut — parts égales sur la largeur disponible")
+            RichText::new("par défaut — pleine largeur, une marge égale autour de chaque glyphe")
                 .color(CAPTION)
                 .size(12.0),
         );
@@ -554,6 +555,7 @@ fn gallery(ui: &mut egui::Ui) {
                 (DsIcon::BagOut, "sac-sortie"),
                 (DsIcon::Filter, "filtre"),
                 (DsIcon::Lock, "cadenas"),
+                (DsIcon::LockOpen, "cadenas-ouvert"),
                 (DsIcon::Order, "classement"),
                 (DsIcon::Pact, "pacte"),
                 (DsIcon::Save, "enregistrer"),
@@ -714,6 +716,7 @@ fn gallery(ui: &mut egui::Ui) {
             DsIcon::BagOut,
             DsIcon::Filter,
             DsIcon::Lock,
+            DsIcon::LockOpen,
             DsIcon::Order,
             DsIcon::Pact,
             DsIcon::Save,
@@ -787,9 +790,9 @@ fn gallery(ui: &mut egui::Ui) {
         use overlay_ui::design::PortraitShape;
         // Un glyphe du manifeste tient lieu de portrait : la galerie n'a ni atlas de classes ni
         // catalogue distant. Ce qu'on vérifie ici est la FORME, le grisé et le pourcentage.
-        let faux = design::DesignSystem::get(ui.ctx())
-            .icon(DsIcon::Characters)
-            .id();
+        let faux = egui::load::SizedTexture::from_handle(
+            design::DesignSystem::get(ui.ctx()).icon(DsIcon::Characters),
+        );
         ui.horizontal(|ui| {
             for (shape, dimmed, percent, nom) in [
                 (PortraitShape::Square, false, None, "carré"),
@@ -870,7 +873,9 @@ fn gallery(ui: &mut egui::Ui) {
         use overlay_ui::design::{ItemRarity, SlotCount, SlotFrame};
         // Une icône factice : la galerie n'a pas de catalogue distant. Le glyphe du manifeste tient
         // ce rôle — ce qu'on vérifie ici est le CADRE et son ordre, pas l'icône.
-        let faux_icone = design::DesignSystem::get(ui.ctx()).icon(DsIcon::Kamas).id();
+        let faux_icone = egui::load::SizedTexture::from_handle(
+            design::DesignSystem::get(ui.ctx()).icon(DsIcon::Kamas),
+        );
         ui.horizontal_wrapped(|ui| {
             for (rarity, nom) in [
                 (ItemRarity::Common, "Common"),
@@ -1081,7 +1086,11 @@ fn gallery(ui: &mut egui::Ui) {
                 .size(cote)
                 .field_width(champ)
                 .range(borne)
-                .log_name("galerie.pas"),
+                // **Un nom par instance**, et pas trois fois « galerie.pas » : depuis que le champ
+                // est éditable (2026-09-16), le `log_name` porte aussi l'identité du champ et son
+                // brouillon de saisie — trois pas homonymes dans le même `Ui` se les
+                // partageraient. Voir la doc de module de `design::stepper`.
+                .log_name(format!("galerie.pas-{cote}")),
         );
     }
     // Les deux bornes : à la borne basse le « − » est désactivé, à la haute le « + ».
@@ -1587,6 +1596,318 @@ fn galerie_de_la_confirmation() {
     harness.snapshot("design_gallery_confirm");
 }
 
+/// **Le voile modal** (`design::scrim`, 2026-09-17) — sa propre planche, pour la même raison que
+/// la confirmation : posé dans le canevas de la galerie, il assombrirait tout.
+///
+/// Un conteneur : il se montre avec du contenu (§1 bis du contrat) — ici une fenêtre du design
+/// system centrée par `centered`, dont le pied de page dépasse volontairement de rien : c'est le
+/// cas nominal, celui de la fenêtre de recette et des modales de l'onglet « Personnages ». Et du
+/// contenu factice dessous, comme pour la confirmation : c'est lui que le voile assombrit, et
+/// c'est lui qu'il faut juger. Les trois couches (`ScrimLayer`) ne se distinguent pas sur une
+/// capture — elles ne changent que ce qui passe au-dessus.
+#[test]
+fn galerie_du_voile() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(640.0, 420.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            let fenetre = ui.max_rect();
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+                    ui.add(design::heading("Objets suivis"));
+                    ui.add_space(6.0);
+                    let mut saisie = "Pierre ultime".to_owned();
+                    ui.add(
+                        design::input(&mut saisie)
+                            .width(400.0)
+                            .log_name("galerie.scrim-fond-champ"),
+                    );
+                    ui.add_space(10.0);
+                    ui.add(
+                        design::button("Valider")
+                            .variant(design::ButtonVariant::Primary)
+                            .size(design::ButtonSize::Compact)
+                            .width(180.0)
+                            .log_name("galerie.scrim-fond-valider"),
+                    );
+                    // Le voile sur la fenêtre ENTIÈRE, et une fenêtre du design system dedans.
+                    design::scrim(fenetre)
+                        .centered(Vec2::new(420.0, 300.0))
+                        .log_name("galerie.scrim")
+                        .show(ui, |ui| {
+                            let chrome = design::window("Objets de la recette")
+                                .footer("Annuler", "Suivre")
+                                .log_name("galerie.scrim-fenetre")
+                                .show(ui);
+                            design::panel().show(ui, chrome.content, |ui, _panel| {
+                                ui.add(design::label("Ce que le voile épargne reste cliquable."));
+                            });
+                        });
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_scrim");
+}
+
+/// **Une image de contenu qui n'est pas carrée** — la planche qui verrouille `design::fit`.
+///
+/// Le CDN `wakassets` ne sert pas que des carrés : un monstre absent de `monsters/` est servi par
+/// `monsterIllustrations/`, qui porte des **bannières rectangulaires** (34 des 61 monstres d'un
+/// fichier utilisateur, voir `IconRef::image_paths`). Peintes dans un carré, elles y étaient
+/// **étirées** — retour utilisateur du 2026-09-17 : « les images provenant de
+/// `wakassets/monsterIllustrations` sont déformées ».
+///
+/// Chaque rangée montre le MÊME composant avec trois images : une carrée (le cas courant, qui ne
+/// doit RIEN changer), une bannière large et une haute. Une capture suffit alors à dire si la
+/// règle tient : la bannière doit rester entière et à son rapport, jamais remplir le carré.
+#[test]
+fn galerie_des_images_non_carrees() {
+    let mut harness = Harness::builder()
+        // 330 : les deux rangées et leurs légendes, plus la marge basse du cadre.
+        .with_size(Vec2::new(760.0, 330.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+                    section_images_non_carrees(ui);
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_images_non_carrees");
+}
+
+/// **La célébration de complétion** — sa propre planche, parce qu'elle ne tient pas dans une
+/// rangée : c'est une séquence, et une capture d'un seul instant ne dirait pas si l'ordre est bon.
+///
+/// La rangée du haut fige sept instants de `design::item_slot().completion(...)` : au repos, le
+/// soulèvement, la couronne qui tourne, la condensation sur la rareté, l'éclat, la dissolution qui
+/// commence, la dissolution avancée. La rangée du bas montre les sept sceaux côte à côte, tous au
+/// même instant — c'est là qu'on voit si une teinte mesurée est fausse.
+///
+/// **Un temps figé rend toujours la même image** : aucune horloge n'intervient (l'appelant passe
+/// des secondes, les particules sont hachées sur leur index), le test compare donc comme les
+/// autres.
+#[test]
+fn galerie_de_la_completion() {
+    let mut harness = Harness::builder()
+        // 300 : les deux rangées de 64 px, leurs légendes, les deux titres et la marge du cadre.
+        .with_size(Vec2::new(880.0, 300.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+                    section_completion(ui);
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_completion");
+}
+
+fn section_completion(ui: &mut egui::Ui) {
+    heading(
+        ui,
+        "Complétion — la couronne se condense sur la rareté, puis l'emplacement se dissout",
+        "Un décompte arrivé à 0 ou un objectif atteint ne disparaît pas sans rien dire. Les instants ci-dessous sont ceux que `completion_phase` découpe ; l'hôte retire l'entrée au terme des 3,5 s.",
+    );
+
+    let instants = [
+        (None, "au repos"),
+        (Some(0.15), "0,15 s — soulèvement"),
+        (Some(1.20), "1,20 s — la couronne tourne"),
+        (Some(1.95), "1,95 s — condensation"),
+        (Some(2.10), "2,10 s — éclat et onde"),
+        (Some(2.60), "2,60 s — dissolution"),
+        (Some(3.10), "3,10 s — presque partie"),
+    ];
+    ui.horizontal(|ui| {
+        for (elapsed, nom) in instants {
+            ui.vertical(|ui| {
+                ui.add(
+                    design::item_slot()
+                        .frame(design::SlotFrame::Rarity(design::ItemRarity::Legendary))
+                        .count(design::SlotCount::Fraction {
+                            current: 0,
+                            target: 20,
+                        })
+                        .completion(elapsed)
+                        .log_name("galerie.completion.sequence"),
+                );
+                ui.label(RichText::new(nom).color(CAPTION).size(10.0));
+            });
+            ui.add_space(12.0);
+        }
+    });
+
+    ui.add_space(10.0);
+    ui.label(
+        RichText::new(
+            "Le sceau de chaque rareté, au même instant — et l'or d'un ennemi, qui n'en a pas",
+        )
+        .color(CAPTION)
+        .size(11.0),
+    );
+    let raretes = [
+        (Some(design::ItemRarity::Common), "commun"),
+        (Some(design::ItemRarity::Rare), "rare"),
+        (Some(design::ItemRarity::Mythical), "mythique"),
+        (Some(design::ItemRarity::Legendary), "légendaire"),
+        (Some(design::ItemRarity::Memory), "souvenir"),
+        (Some(design::ItemRarity::Epic), "épique"),
+        (Some(design::ItemRarity::Relic), "relique"),
+        (None, "ennemi"),
+    ];
+    ui.horizontal(|ui| {
+        for (rarete, nom) in raretes {
+            ui.vertical(|ui| {
+                ui.add(
+                    design::item_slot()
+                        .frame(match rarete {
+                            Some(r) => design::SlotFrame::Rarity(r),
+                            None => design::SlotFrame::Plain,
+                        })
+                        // Juste après la condensation : la couronne porte la teinte pleine.
+                        .completion(Some(2.15))
+                        .log_name("galerie.completion.sceau"),
+                );
+                ui.label(RichText::new(nom).color(CAPTION).size(10.0));
+            });
+            ui.add_space(12.0);
+        }
+    });
+}
+
+/// Une image factice de `taille` pixels : un damier à bord clair, qui rend une déformation
+/// LISIBLE sur la capture — un carré étiré y devient un rectangle aux cases allongées, ce qu'une
+/// silhouette de monstre ne montrerait pas aussi nettement.
+///
+/// Rend la **poignée**, que l'appelant doit garder vivante le temps du rendu : un
+/// `egui::TextureHandle` libère sa texture dès son dernier exemplaire tombé, et la planche ne
+/// montrerait plus que des cases vides (piège déjà payé sur `UiIcons`, voir les fixtures
+/// `wakassets`).
+fn fausse_image(ctx: &egui::Context, nom: &str, taille: [usize; 2]) -> egui::TextureHandle {
+    let [w, h] = taille;
+    let mut pixels = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            let bord = x < 2 || y < 2 || x + 2 >= w || y + 2 >= h;
+            let case = ((x / 8) + (y / 8)) % 2 == 0;
+            pixels.push(match (bord, case) {
+                (true, _) => Color32::from_rgb(0xF4, 0xD8, 0x9F),
+                (_, true) => Color32::from_rgb(0x3C, 0x5A, 0x6E),
+                (_, false) => Color32::from_rgb(0x8A, 0x4B, 0x3C),
+            });
+        }
+    }
+    let image = egui::ColorImage {
+        size: taille,
+        pixels,
+        source_size: Vec2::new(w as f32, h as f32),
+    };
+    ctx.load_texture(nom, image, egui::TextureOptions::LINEAR)
+}
+
+fn section_images_non_carrees(ui: &mut egui::Ui) {
+    heading(
+        ui,
+        "Image de contenu — inscrite dans sa boîte, jamais étirée",
+        "Tout ce qui vient du CDN est peint à son rapport natif (`design::fit`, l'`object-fit: contain` du web) : une bannière de `monsterIllustrations` reste entière et centrée, une icône carrée remplit sa boîte comme avant.",
+    );
+    // **Gardées en mémoire egui**, comme les fixtures `wakassets` de la grande planche : le rendu
+    // a lieu APRÈS cette fonction, et une poignée locale aurait déjà libéré sa texture — la
+    // planche ne montrerait que des cases vides (essayé, et c'est bien ce qu'elle a montré).
+    let carree = charge_une_fois(ui, "galerie.fit.carree", |ctx| {
+        fausse_image(ctx, "fit-carree", [64, 64])
+    });
+    let large = charge_une_fois(ui, "galerie.fit.large", |ctx| {
+        fausse_image(ctx, "fit-large", [96, 32])
+    });
+    let haute = charge_une_fois(ui, "galerie.fit.haute", |ctx| {
+        fausse_image(ctx, "fit-haute", [32, 96])
+    });
+    let cas = [
+        (
+            egui::load::SizedTexture::from_handle(&carree),
+            "carrée 64 × 64",
+        ),
+        (
+            egui::load::SizedTexture::from_handle(&large),
+            "bannière 96 × 32",
+        ),
+        (
+            egui::load::SizedTexture::from_handle(&haute),
+            "haute 32 × 96",
+        ),
+    ];
+
+    ui.label(
+        RichText::new("Portrait — carré, rond")
+            .color(CAPTION)
+            .size(11.0),
+    );
+    ui.horizontal(|ui| {
+        for (texture, nom) in cas {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.add(design::portrait(texture).size(48.0));
+                    ui.add(
+                        design::portrait(texture)
+                            .shape(design::PortraitShape::Round)
+                            .size(48.0),
+                    );
+                });
+                ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+            });
+            ui.add_space(18.0);
+        }
+    });
+
+    ui.add_space(8.0);
+    ui.label(
+        RichText::new("Emplacement d'objet — cadre de rareté, cadre simple")
+            .color(CAPTION)
+            .size(11.0),
+    );
+    ui.horizontal(|ui| {
+        for (texture, nom) in cas {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        design::item_slot()
+                            .frame(design::SlotFrame::Rarity(design::ItemRarity::Rare))
+                            .icon(texture)
+                            .size(48.0)
+                            .log_name("galerie.fit.rarete"),
+                    );
+                    ui.add(
+                        design::item_slot()
+                            .frame(design::SlotFrame::Plain)
+                            .icon(texture)
+                            .size(48.0)
+                            .log_name("galerie.fit.simple"),
+                    );
+                });
+                ui.label(RichText::new(nom).color(CAPTION).size(11.0));
+            });
+            ui.add_space(18.0);
+        }
+    });
+}
+
 /// La tuile à légende — sa propre planche, la principale ayant atteint le plafond de 8192 px.
 ///
 /// Trois états forcés côte à côte, une légende longue, un contenu élidé, et une grille de quatre
@@ -1594,8 +1915,11 @@ fn galerie_de_la_confirmation() {
 #[test]
 fn galerie_de_la_tuile_a_legende() {
     use overlay_ui::design::LegendTileState;
+    // 480 et non 330 : la rangée « Sélection multiple » (2026-09-16) s'est intercalée entre les
+    // deux sections d'origine, et à l'ancienne hauteur elle poussait celle du contenu élidé hors
+    // du cadre — une section peinte mais invisible dans la capture ne verrouille rien.
     let mut harness = Harness::builder()
-        .with_size(Vec2::new(760.0, 330.0))
+        .with_size(Vec2::new(760.0, 480.0))
         .build_ui(|ui| {
             overlay_ui::style::apply(ui.ctx());
             egui::Frame::NONE
@@ -1637,6 +1961,26 @@ fn galerie_de_la_tuile_a_legende() {
                     });
                     heading(
                         ui,
+                        "Sélection multiple",
+                        "Case à cocher au coin haut-DROIT — le haut-gauche porte la légende — et bordure au ton de la sélection quand la tuile est cochée. La case ne prend aucun geste : cocher est le clic de la tuile.",
+                    );
+                    ui.horizontal(|ui| {
+                        for (checked, tone, legend, text) in [
+                            (false, design::SelectionTone::Danger, "Commerce", "gelano"),
+                            (true, design::SelectionTone::Danger, "Guilde", "wa wabbit"),
+                            (true, design::SelectionTone::Neutral, "Proximité", "archi"),
+                        ] {
+                            ui.add(
+                                design::legend_tile(legend, text)
+                                    .width(160.0)
+                                    .selection(Some(checked))
+                                    .selection_tone(tone)
+                                    .log_name(format!("galerie.tuile.selection.{text}")),
+                            );
+                        }
+                    });
+                    heading(
+                        ui,
                         "Quatre par rangée, contenu élidé",
                         "La largeur d'une colonne de l'onglet Chat. Un mot trop long finit en ellipse, jamais rogné ; une légende trop longue s'arrête avant le bord.",
                     );
@@ -1668,13 +2012,299 @@ fn galerie_de_la_tuile_a_legende() {
     harness.snapshot("design_gallery_legend_tile");
 }
 
+/// Le switch à cases — sa propre planche, la principale ayant atteint le plafond de 8192 px.
+///
+/// Les deux états du jeu à la case de 36 (74 × 36, la taille servie à tous les appelants depuis
+/// le 2026-09-16), puis ce que le jeu n'a pas montré — survol, désactivé —, un switch étiré
+/// portant des pictogrammes plus grands que le carré de 16, le repli sans pictogramme, les
+/// switches à trois cases — le cas du sélecteur de grandeur du panneau Combat, que le jeu n'a pas
+/// capturé (cases du milieu dérivées des bouts) —, et une rangée aux 88 × 44 de la capture
+/// (`scale(44 / 36)`, largeur 88 imposée) : c'est LA rangée à comparer à
+/// `switch-first-slot-active.png` / `switch-second-slot-active.png`.
+#[test]
+fn galerie_du_switch() {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Genre {
+        Masculin,
+        Feminin,
+    }
+    let mut harness = Harness::builder()
+        // 680 → 700 le 2026-09-16 : les switches du panneau Combat passent de 26 à 36 px de haut.
+        // 700 → 1000 le 2026-09-16 : les deux rangées de la variante premier plan.
+        .with_size(Vec2::new(760.0, 1000.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.spacing_mut().item_spacing = Vec2::new(12.0, 8.0);
+                    heading(
+                        ui,
+                        "Switch à deux cases — les deux états du jeu, case de 36 (74 × 36)",
+                        "Le sélecteur de genre : case active kaki au glyphe doré, case inactive gris-brun au glyphe gris. Le pictogramme remplace le libellé, qui devient l'infobulle. Cadre du jeu ramené de 44 à 36 par un 9-slice à l'échelle.",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut masculin = Genre::Masculin;
+                        design::switch(&mut masculin)
+                            .slot(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .slot(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .log_name("galerie.switch.masculin")
+                            .show(ui);
+                        let mut feminin = Genre::Feminin;
+                        design::switch(&mut feminin)
+                            .slot(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .slot(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .log_name("galerie.switch.feminin")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("première case active · seconde case active")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                    heading(
+                        ui,
+                        "Survol (mesuré) et désactivé (inventé)",
+                        "Survolée, la case inactive prend tout l'aspect de la case active — fond kaki, biseaux, glyphe doré (capture du jeu, 2026-09-16). Désactivé : fonds atténués, glyphes gris, la case sélectionnée reste reconnaissable.",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut survol = Genre::Masculin;
+                        design::switch(&mut survol)
+                            .slot(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .slot(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .preview_state(SwitchState::Hovered)
+                            .log_name("galerie.switch.survol")
+                            .show(ui);
+                        let mut inactif = Genre::Feminin;
+                        design::switch(&mut inactif)
+                            .slot(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .slot(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .enabled(false)
+                            .log_name("galerie.switch.desactive")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("seconde case survolée · désactivé")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                    heading(
+                        ui,
+                        "Étiré, autres pictogrammes, et le repli sans pictogramme",
+                        "Toute largeur est valide (9-slice à l'échelle par case, coins gardés). Un glyphe plus grand que 16 px y est ramené ; les deux du jeu restent à leur taille native (plafond commun aux deux variantes). Sans pictogramme, le libellé est peint dans la case — non vérifié contre une capture.",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut vue = 0_u8;
+                        design::switch(&mut vue)
+                            .slot(0, "Combat")
+                            .icon(DsIcon::Cards)
+                            .slot(1, "Suivi")
+                            .icon(DsIcon::Trophy)
+                            .width(160.0)
+                            .log_name("galerie.switch.etire")
+                            .show(ui);
+                        let mut periode = 1_u8;
+                        design::switch(&mut periode)
+                            .slot(0, "Jour")
+                            .slot(1, "Nuit")
+                            .width(160.0)
+                            .log_name("galerie.switch.texte")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("160 px, pictogrammes de 22 px · 160 px, libellés")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                    heading(
+                        ui,
+                        "Trois cases — une seule active, cases du milieu dérivées des bouts",
+                        "Le sélecteur de grandeur du panneau Combat. La case du milieu n'a ni coin ni liseré latéral : 40 px de remplissage recopiés des cases d'extrémité, coin redressé comme tab-active.png.",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut degats = 0_u8;
+                        design::switch(&mut degats)
+                            .slot(0, "Dégâts")
+                            .slot(1, "Armure")
+                            .slot(2, "Soins")
+                            .width(260.0)
+                            .log_name("galerie.switch.trois-libelles")
+                            .show(ui);
+                        let mut milieu = 1_u8;
+                        design::switch(&mut milieu)
+                            .slot(0, "Combat")
+                            .icon(DsIcon::Cards)
+                            .slot(1, "Suivi")
+                            .icon(DsIcon::Trophy)
+                            .slot(2, "Objets")
+                            .icon(DsIcon::BagIn)
+                            .preview_state(SwitchState::Hovered)
+                            .log_name("galerie.switch.trois-milieu")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("260 px, première active · 112 px (natif), milieu actif, dernière survolée")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                    heading(
+                        ui,
+                        "Aux 88 × 44 de la capture, et glyphes en couleurs sur le cadre",
+                        "scale(44/36) + width(88) : le cadre du jeu à sa taille de capture, coins et liseré à 1:1 — la rangée à comparer aux deux captures. Puis les glyphes « couleur » sur le cadre à 36 : tels quels sur la case active, atténués ailleurs (ICON_NATIVE_DIM).",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut masculin = Genre::Masculin;
+                        design::switch(&mut masculin)
+                            .slot(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .slot(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .scale(44.0 / 36.0)
+                            .width(88.0)
+                            .log_name("galerie.switch.capture-masculin")
+                            .show(ui);
+                        let mut feminin = Genre::Feminin;
+                        design::switch(&mut feminin)
+                            .slot(Genre::Masculin, "Masculin")
+                            .icon(DsIcon::Male)
+                            .slot(Genre::Feminin, "Féminin")
+                            .icon(DsIcon::Female)
+                            .scale(44.0 / 36.0)
+                            .width(88.0)
+                            .log_name("galerie.switch.capture-feminin")
+                            .show(ui);
+                        let mut camp = 0_u8;
+                        design::switch(&mut camp)
+                            .slot(0, "Alliés")
+                            .icon(DsIcon::Allies)
+                            .slot(1, "Ennemis")
+                            .icon(DsIcon::Enemies)
+                            .log_name("galerie.switch.camp")
+                            .show(ui);
+                        let mut grandeur = 0_u8;
+                        design::switch(&mut grandeur)
+                            .slot(0, "Dégâts infligés")
+                            .icon(DsIcon::MetricDamage)
+                            .slot(1, "Armure donnée")
+                            .icon(DsIcon::MetricArmor)
+                            .slot(2, "Soins prodigués")
+                            .icon(DsIcon::MetricHeal)
+                            .preview_state(SwitchState::Hovered)
+                            .log_name("galerie.switch.grandeur")
+                            .show(ui);
+                        let mut inactif = 0_u8;
+                        design::switch(&mut inactif)
+                            .slot(0, "Dégâts infligés")
+                            .icon(DsIcon::MetricDamage)
+                            .slot(1, "Armure donnée")
+                            .icon(DsIcon::MetricArmor)
+                            .slot(2, "Soins prodigués")
+                            .icon(DsIcon::MetricHeal)
+                            .enabled(false)
+                            .log_name("galerie.switch.grandeur-desactive")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("88 × 44 : première active · seconde active · 74 × 36 · 112 × 36, survolée · désactivé")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                    heading(
+                        ui,
+                        "Variante premier plan — le socle de bouton icône du jeu",
+                        "SwitchVariant::FirstPlan : une case = un socle button-icon-first-plan.png (36 × 36),\npas de cadre, pas de séparateur. Ce que les deux switches du panneau Combat portent depuis le 2026-09-16.",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut camp = 0_u8;
+                        design::switch(&mut camp)
+                            .slot(0, "Alliés")
+                            .icon(DsIcon::Allies)
+                            .slot(1, "Ennemis")
+                            .icon(DsIcon::Enemies)
+                            .variant(SwitchVariant::FirstPlan)
+                            .log_name("galerie.switch.camp-premier-plan")
+                            .show(ui);
+                        let mut grandeur = 0_u8;
+                        design::switch(&mut grandeur)
+                            .slot(0, "Dégâts infligés")
+                            .icon(DsIcon::MetricDamage)
+                            .slot(1, "Armure donnée")
+                            .icon(DsIcon::MetricArmor)
+                            .slot(2, "Soins prodigués")
+                            .icon(DsIcon::MetricHeal)
+                            .preview_state(SwitchState::Hovered)
+                            .variant(SwitchVariant::FirstPlan)
+                            .log_name("galerie.switch.grandeur-premier-plan")
+                            .show(ui);
+                        let mut inactif = 0_u8;
+                        design::switch(&mut inactif)
+                            .slot(0, "Dégâts infligés")
+                            .icon(DsIcon::MetricDamage)
+                            .slot(1, "Armure donnée")
+                            .icon(DsIcon::MetricArmor)
+                            .variant(SwitchVariant::FirstPlan)
+                            .enabled(false)
+                            .log_name("galerie.switch.premier-plan-desactive")
+                            .show(ui);
+                        ui.label(
+                            RichText::new("70 × 36 · 104 × 36, dernière survolée · désactivé")
+                                .color(CAPTION)
+                                .size(12.0),
+                        );
+                    });
+                    heading(
+                        ui,
+                        "Le piège de la variante : l'actif et le survolé partagent leur socle",
+                        "Seule la teinte du glyphe les distingue. Monochrome : blanc (actif), or (survolé), gris froid (repos).\nEn couleurs : sa couleur vraie sur la case active, atténué partout ailleurs — le socle éclairci porte seul le survol.",
+                    );
+                    ui.horizontal(|ui| {
+                        for (state, legende) in [
+                            (SwitchState::Idle, "repos"),
+                            (SwitchState::Hovered, "survolé"),
+                            (SwitchState::Active, "actif"),
+                            (SwitchState::Disabled, "désactivé"),
+                        ] {
+                            let mut etat = 1_u8;
+                            design::switch(&mut etat)
+                                // Deux cases au moins (un switch à une case n'en est pas un) : la
+                                // seconde est le témoin au repos, seule la PREMIÈRE porte l'état
+                                // forcé — d'où le `preview_state` posé avant elle.
+                                .slot(0, "Monochrome")
+                                .icon(DsIcon::Trophy)
+                                .preview_state(state)
+                                .slot(1, "En couleurs")
+                                .icon(DsIcon::MetricHeal)
+                                .preview_state(state)
+                                .variant(SwitchVariant::FirstPlan)
+                                .log_name(format!("galerie.switch.premier-plan-{legende}"))
+                                .show(ui);
+                            ui.label(RichText::new(legende).color(CAPTION).size(12.0));
+                        }
+                    });
+                });
+        });
+
+    harness.run();
+    harness.snapshot("design_gallery_switch");
+}
+
 /// L'autocomplétion — le seul composant de la galerie dont le panneau **sort de son rectangle**
 /// (comme `select` déplié), d'où les espaces réservés sous chaque cas.
 ///
 /// `preview_open`/`preview_active`/`preview_filter` forcent l'état peint : hors écran, aucun champ
 /// n'a le focus, donc rien ne s'ouvrirait jamais.
 fn section_autocomplete(ui: &mut egui::Ui) {
-    use wakassets_fixtures::{CategoryFilter, CategoryIcons, ItemIcons, RarityGems, GEM_NATIVE};
+    use wakassets_fixtures::{CategoryFilter, CategoryIcons, ItemIcons, RarityGems};
 
     // **Gardées en mémoire egui, pas rechargées à chaque frame** : un `TextureHandle` libère sa
     // texture quand le dernier exemplaire tombe, et un chargement local peindrait donc des cases
@@ -1694,9 +2324,8 @@ fn section_autocomplete(ui: &mut egui::Ui) {
     // visibles sur la même capture.
     let entree = |label: &str, categorie: u16, rarete, deja: bool, image: Option<usize>| {
         let mut entry = design::AutocompleteEntry::new(label, categorie);
-        entry.gem = Some(gems.texture_id(rarete));
-        entry.gem_size = GEM_NATIVE;
-        entry.image = image.map(|rang| objets.texture_id(rang));
+        entry.gem = Some(gems.sized_texture(rarete));
+        entry.image = image.map(|rang| objets.sized_texture(rang));
         entry.disabled = deja;
         if deja {
             entry.mention = Some("déjà suivi".to_owned());
@@ -1734,8 +2363,8 @@ fn section_autocomplete(ui: &mut egui::Ui) {
         ),
     ];
     let filtre = |f: CategoryFilter, categorie: Option<u16>| match categorie {
-        None => design::AutocompleteFilter::all(f.label(), Some(cats.texture_id(f))),
-        Some(c) => design::AutocompleteFilter::category(c, f.label(), Some(cats.texture_id(f))),
+        None => design::AutocompleteFilter::all(f.label(), Some(cats.sized_texture(f))),
+        Some(c) => design::AutocompleteFilter::category(c, f.label(), Some(cats.sized_texture(f))),
     };
     let filtres = vec![
         filtre(CategoryFilter::All, None),
@@ -1839,6 +2468,96 @@ fn section_autocomplete(ui: &mut egui::Ui) {
         .log_name("galerie.autocomplete-filtre-vide")
         .show(ui);
     ui.add_space(4.0 + 38.0 + 34.0);
+
+    // La **saisie assistée** (`search_icon` / `fill_on_select`) a sa propre planche : celle-ci est
+    // pleine — voir `galerie_de_la_saisie_assistee`.
+}
+
+/// **La saisie assistée** — le second réglage de `design::autocomplete`, ajouté le 2026-09-16.
+///
+/// Sa propre planche parce que `galerie_du_design_system` est pleine : son contenu dépasse déjà le
+/// plafond de 8192 px que wgpu impose à une texture, et sa section « Autocomplétion » y est
+/// tronquée en bas. Ajouter ici, c'était ajouter dans ce qui ne se voit plus.
+///
+/// Trois cas, et le premier est le témoin : **le même champ avec et sans sa loupe**, puis le
+/// panneau ouvert d'une saisie assistée. `fill_on_select` ne s'y voit pas — c'est un comportement
+/// (la valeur choisie reste dans le champ au lieu de le vider), pas une apparence.
+#[test]
+fn galerie_de_la_saisie_assistee() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(760.0, 540.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    section_saisie_assistee(ui);
+                });
+        });
+    harness.run();
+    harness.snapshot("design_gallery_autocomplete_saisie");
+}
+
+fn section_saisie_assistee(ui: &mut egui::Ui) {
+    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+    let largeur = 700.0;
+    let entrees: Vec<design::AutocompleteEntry> = [
+        "Anonyme-Zobal1",
+        "Anonyme-Sadida1",
+        "Anonyme-Huppermage1",
+        "Anonyme-Ecaflip1",
+        "Anonyme-Ouginak1",
+    ]
+    .iter()
+    .map(|nom| design::AutocompleteEntry::new(*nom, 0))
+    .collect();
+
+    heading(
+        ui,
+        "Champ de recherche — le réglage par défaut",
+        "`search_icon` vaut `true` : la loupe du jeu, et la sélection vide le champ (règle 5). C'est ce que veut un champ d'AJOUT, qui a fini son travail dès que l'entrée est passée à la liste.",
+    );
+    let mut recherche = String::new();
+    design::autocomplete(&mut recherche)
+        .placeholder("Ajouter un objet à surveiller…")
+        .width(largeur)
+        .entries(&entrees)
+        .log_name("galerie.autocomplete-avec-loupe")
+        .show(ui);
+
+    heading(
+        ui,
+        "Saisie assistée — sans loupe",
+        "`search_icon(false)` quand le champ n'est pas une recherche : le nom d'un personnage s'écrit, il ne se cherche pas, et deux champs à loupe sur un même écran ne se distinguent plus que par leur invite. Son compagnon `fill_on_select(true)` laisse la valeur choisie DANS le champ. Le texte libre reste accepté dans les deux réglages : le composant ne valide rien, et un nom qu'aucune suggestion ne porte sort du champ tel quel.",
+    );
+    let mut nom = String::new();
+    design::autocomplete(&mut nom)
+        .placeholder("Nom du personnage, exactement comme en jeu…")
+        .width(largeur)
+        .entries(&entrees)
+        .search_icon(false)
+        .fill_on_select(true)
+        .log_name("galerie.autocomplete-saisie")
+        .show(ui);
+
+    heading(
+        ui,
+        "Le même, déplié",
+        "Le panneau est inchangé : seul le décor du champ l'est.",
+    );
+    let mut saisi = String::from("erz");
+    design::autocomplete(&mut saisi)
+        .placeholder("Nom du personnage, exactement comme en jeu…")
+        .width(largeur)
+        .entries(&entrees)
+        .search_icon(false)
+        .fill_on_select(true)
+        .preview_open(true)
+        .preview_active(0)
+        .log_name("galerie.autocomplete-saisie-depliee")
+        .show(ui);
 }
 
 /// Le tableau — ses trois corps (peuplé, vide, en chargement), son défilement et son cas dégénéré.

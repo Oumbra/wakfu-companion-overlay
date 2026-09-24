@@ -187,7 +187,12 @@ fn harnais(p: Planche) -> Harness<'static> {
             select_mode: p.select_mode,
             selected: p.selected,
             search: p.search,
+            // Une planche est un instantané : rien n'y a été retiré du brouillon.
+            retirees: Vec::new(),
             recipe: recette,
+            // Le champ de durée que cette planche ne montre pas : il est peint dans l'onglet
+            // « Paramètres », section « Suivi » (`panels::notifications`).
+            duration_input: String::new(),
         },
         suivi_draft: Some(entrees()),
         suivi_availability: p.availability,
@@ -229,6 +234,10 @@ fn harnais(p: Planche) -> Harness<'static> {
                     remote_icons,
                     remote_icon_textures,
                     icons,
+                    // Ces planches ne montrent que l'onglet « Suivi » : ni bustes de classe ni
+                    // serveurs de jeu à peindre.
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         })

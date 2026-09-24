@@ -373,13 +373,19 @@ fn harnais(p: Planche) -> Harness<'static> {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -392,8 +398,14 @@ fn harnais(p: Planche) -> Harness<'static> {
                     // montrent les infobulles telles qu'elles sont sans personnalisation.
                     shortcuts: &ShortcutBindings::default(),
                     now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
 

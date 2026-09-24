@@ -1,8 +1,8 @@
 /**
  * Point d'entrée du bundle embarqué par `overlay-engine` (docs/plan-architecture.md §2, §12 — L2).
  *
- * Expose l'API réelle de `LogParser` (vendue depuis `wakfu-companion`, voir
- * `VENDORED_FROM.txt`, zéro ligne modifiée) sous une forme appelable depuis QuickJS/Rust :
+ * Expose l'API réelle de `LogParser` (vendue depuis `wakfu-companion`, à deux divergences
+ * documentées près — voir `VENDORED_FROM.txt`) sous une forme appelable depuis QuickJS/Rust :
  * chaque fonction prend/renvoie des chaînes JSON, pour ne dépendre d'aucun mécanisme de
  * marshaling spécifique au binding QuickJS choisi côté Rust (`rquickjs`).
  *
@@ -62,6 +62,17 @@ export function resetParser(): void {
 }
 
 /**
+ * Oublie un combat qui n'aura jamais son `[FIGHT] End fight` — voir `LogParser.closeFight`. Appelé
+ * par l'hôte Rust quand il suspend les combats en cours sur une coupure du client
+ * (`Engine::is_client_cut_line`) : sans ça, le parser continuerait de router vers ce combat
+ * fantôme toute ligne sans nom (butin, kamas hors combat), exactement le bug que le web a corrigé
+ * en appelant `closeFight` depuis son store.
+ */
+export function closeFight(fightId: number): void {
+  parser.closeFight(fightId);
+}
+
+/**
  * Variante par lot, conforme au modèle de threading du plan (§3 : le thread IO envoie des
  * `LineBatch` de ≤ 2000 lignes, jamais ligne par ligne) — un seul aller-retour Rust↔QuickJS pour
  * tout le lot, au lieu d'un appel de fonction par ligne. `linesJoined` : lignes séparées par `\n`
@@ -82,4 +93,4 @@ export function parseBatch(linesJoined: string): string {
 // dans le contexte d'exécution. On republie donc l'API sur `globalThis` pour que le harnais Rust
 // l'appelle par un nom stable, indépendamment du format de bundle (`esbuild --format=iife`, voir
 // build.mjs).
-globalThis.wakfuEngine = { parseLine, flush, resetParser, parseBatch };
+globalThis.wakfuEngine = { parseLine, flush, resetParser, parseBatch, closeFight };

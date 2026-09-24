@@ -10,8 +10,8 @@
 //! passe par le compte (`overlay_sync::client::fetch_settings`), jamais par ce fichier.
 //!
 //! **Priorité de résolution du chemin au démarrage** (voir `resolve_log_path`, partagé par
-//! `main.rs` et `bin/overlay-ui-x11.rs`) : argument CLI explicite > chemin sauvegardé ici (choisi
-//! via la modale Options, `panels::options_modal`) > découverte automatique
+//! `main.rs` et `bin/wakfu-companion-overlay-x11.rs`) : argument CLI explicite > chemin sauvegardé
+//! ici (choisi via la modale Options, `panels::options_modal`) > découverte automatique
 //! (`overlay_ingest::discovery::discover`).
 //!
 //! Emplacement du fichier : `directories::ProjectDirs` (déjà une dépendance de ce crate, utilisée
@@ -50,6 +50,62 @@ pub struct OverlayConfig {
     /// un parsing en échec repart de `OverlayConfig::default()`, chemin de log compris).
     #[serde(default)]
     pub combat_always_visible: bool,
+    /// Le panneau Combat est-il posé **à droite** de la fenêtre de jeu plutôt qu'à gauche ?
+    ///
+    /// `false` par défaut : l'overlay Combat est collé au bord GAUCHE du client depuis toujours
+    /// (voir `main.rs::App::anchor_position`). `true` (demande utilisateur du 2026-09-17 —
+    /// « permettre à l'utilisateur d'afficher l'overlay combat à droite plutôt qu'à gauche ») le
+    /// colle au bord DROIT, et **retourne toute son interface en miroir vertical** pour qu'elle
+    /// s'ouvre vers l'intérieur de l'écran plutôt que de lui tourner le dos — portraits, images de
+    /// monstre, icônes et images de sort exceptées, qui restent à l'endroit (voir
+    /// `crate::mirror`).
+    ///
+    /// Même nature que [`Self::combat_always_visible`] : un choix d'encombrement à l'écran, donc
+    /// une config LOCALE (l'écran qu'on a devant soi, pas le joueur) et non un réglage de compte.
+    /// `#[serde(default)]` pour la même raison qu'elle — une config écrite avant ce champ reste
+    /// lisible et garde le panneau à gauche.
+    #[serde(default)]
+    pub combat_on_right: bool,
+    /// **À quelle hauteur l'utilisateur a posé le panneau Combat** (2026-09-17) : ordonnée de son
+    /// CONTENU, en pixels physiques depuis le bord haut de la fenêtre de jeu. `None` = jamais
+    /// déplacé, donc le centrage vertical d'origine (`combat_placement::default_offset`) — ce qui
+    /// n'est pas la même chose que « posé exactement au centre » : c'est ce que l'aimantation du
+    /// glisser rétablit, et le glyphe de replacement de la rangée d'actions avec elle.
+    ///
+    /// **Une seule clé, pour les deux côtés** : « même s'il change de côté, la hauteur est
+    /// conservée » (demande utilisateur). L'abscisse, elle, n'est jamais un réglage — elle vaut le
+    /// bord gauche ou le bord droit du client selon [`Self::combat_on_right`], voir
+    /// `combat_placement::window_position`.
+    ///
+    /// **Relative à la fenêtre de jeu, jamais à l'écran**, comme [`Self::recap_position_x`] et
+    /// pour la même raison : le client se déplace, change de taille, passe d'un écran à l'autre.
+    /// L'origine est `GameRect::top` — la fenêtre de jeu ENTIÈRE, sur laquelle ce panneau est
+    /// centré depuis toujours, et non la zone cliente comme la bande Récap.
+    ///
+    /// **C'est le haut du CONTENU, pas celui de sa fenêtre OS** : celle-ci commence
+    /// `render_content::COMBAT_TOP_MARGIN` px plus haut (la place de l'infobulle du switch
+    /// Alliés/Ennemis, où vit aussi la rangée d'actions). Un fichier qu'on ouvre à la main dit
+    /// ainsi où l'on voit le panneau, pas où commence une marge invisible.
+    ///
+    /// **Locale et non au compte**, comme ses voisines : une position à l'écran dépend de la
+    /// fenêtre de jeu qu'on a sous les yeux, pas du joueur — et le serveur n'accepte que des clés
+    /// connues (même raison que `chat_alert_duration_seconds`).
+    #[serde(default)]
+    pub combat_position_y: Option<i32>,
+    /// **Le panneau Combat est-il verrouillé ?** (2026-09-17) — le cadenas de sa rangée d'actions
+    /// (`panels::combat::CombatChrome::locked`). Verrouillé, sa poignée latérale disparaît : plus
+    /// rien ne se saisit, et le curseur reste celui du système au-dessus d'elle.
+    ///
+    /// **Le défaut est `false`, DÉVERROUILLÉ** — demande explicite de l'utilisateur (« par défaut
+    /// il sera unlock, et l'utilisateur pourra cliquer pour verrouiller la position »), et
+    /// l'inverse du défaut de la bande Récap ([`Self::recap_locked`]) : ce qui se saisit ici n'est
+    /// pas tout le fond du panneau mais une poignée dédiée, une lisière de quelques pixels sur son
+    /// bord extérieur (`panels::combat::HANDLE_WIDTH`) — un clic malencontreux dans le panneau ne
+    /// le déplace donc pas, et il n'y a rien à protéger par défaut.
+    ///
+    /// **Locale et non au compte**, comme la hauteur qu'elle protège.
+    #[serde(default)]
+    pub combat_locked: bool,
     /// Durée d'affichage de la carte d'alerte de **chat**, en secondes (onglet « Chat », voir
     /// `panels::chat_tab::ChatToastSettings`). **Ici et non au compte**, par exception au principe
     /// de la doc de module : ce réglage n'a pas d'équivalent web, et le serveur n'accepte que des
@@ -59,6 +115,47 @@ pub struct OverlayConfig {
     /// La carte d'alerte de chat ne se ferme qu'à la main — même exception, même raison.
     #[serde(default)]
     pub chat_alert_manual_close: bool,
+    /// Durée d'affichage de la carte de **décompte arrivé à zéro** du Suivi, en secondes — ligne
+    /// « Fermeture automatique des notifications de décompte » de la section « Suivi » de l'onglet
+    /// « Paramètres » (2026-09-16, voir `panels::suivi_tab::CountdownToastSettings`).
+    ///
+    /// **Ici et non au compte**, même exception et même raison que
+    /// [`Self::chat_alert_duration_seconds`] : ce réglage n'a pas d'équivalent web, et le serveur
+    /// n'accepte que des clés connues. `None` = défaut (5 s).
+    ///
+    /// Avant cette clé, la carte du décompte empruntait la durée du **profil d'alertes de
+    /// ramassage** (`AlertProfile`, descendue du compte) : régler l'une réglait l'autre.
+    #[serde(default)]
+    pub countdown_alert_duration_seconds: Option<f32>,
+    /// La carte de décompte ne se ferme qu'à la main — même exception, même raison.
+    #[serde(default)]
+    pub countdown_alert_manual_close: bool,
+    /// **Retirer un suivi complété** — case « Supprimer les éléments suivis lorsqu'ils sont
+    /// complétés » de la section « Suivi » de l'onglet « Paramètres » (2026-09-17, voir
+    /// `panels::suivi_tab::CompletionSettings`).
+    ///
+    /// Un décompte arrivé à 0 et un objectif atteint ont fini leur travail : cochée — le défaut —
+    /// l'entrée disparaît de la bande **et du compte** une fois la célébration jouée. Décochée,
+    /// elle reste, compteur à sa cible.
+    ///
+    /// **Ici et non au compte**, même exception et même raison que
+    /// [`Self::countdown_alert_duration_seconds`] : ce réglage n'a pas d'équivalent web, et le
+    /// serveur n'accepte que des clés connues. Son EFFET, lui, part bien au compte — c'est la
+    /// liste de suivi amputée qui monte par `PATCH /api/v1/settings`.
+    ///
+    /// `#[serde(default = "actif")]` et non le simple `#[serde(default)]` de ses voisines, qui
+    /// vaudrait `false` : c'est le comportement demandé, il ne doit pas dépendre de l'ancienneté
+    /// du fichier de configuration.
+    #[serde(default = "actif")]
+    pub suivi_remove_on_complete: bool,
+    /// **Célébrer un suivi complété** — case « Activer l'animation de complétion » de la même
+    /// section, sous la précédente mais **indépendante** d'elle (les quatre combinaisons ont un
+    /// sens, voir `panels::suivi_tab::CompletionSettings`).
+    ///
+    /// Décochée, un suivi complété est retiré sans cérémonie — ou reste tel quel si le retrait
+    /// l'est aussi. Même politique que sa voisine pour le reste.
+    #[serde(default = "actif")]
+    pub suivi_completion_animation: bool,
     /// Prévenir par une **notification du système** qu'un personnage du joueur doit jouer
     /// (section « Combat » de l'onglet Paramètres, 2026-09-14).
     ///
@@ -80,7 +177,7 @@ pub struct OverlayConfig {
     /// est, qui décident si un son est bienvenu. `#[serde(default)]` comme ses voisines.
     #[serde(default)]
     pub turn_notification_muted: bool,
-    /// La fonctionnalité **Suivi** est-elle active ? — case « Activer le Suivi », tout en haut de
+    /// La fonctionnalité **Suivi** est-elle active ? — case « Activer le suivi », tout en haut de
     /// l'onglet du même nom (2026-09-15).
     ///
     /// Décochée, l'onglet entier est grisé et inerte (voir `panels::suivi_tab::show`), le bandeau
@@ -101,7 +198,7 @@ pub struct OverlayConfig {
     /// lancement de cette version.
     #[serde(default = "actif")]
     pub suivi_enabled: bool,
-    /// La fonctionnalité **Alertes** est-elle active ? — case « Activer les alertes ». Décochée,
+    /// La fonctionnalité **Alertes** est-elle active ? — case « Activer la surveillance du drop ». Décochée,
     /// l'onglet est grisé et inerte, et le ramassage d'un objet à son activé ne joue plus rien et
     /// n'affiche plus de carte. Même politique que [`Self::suivi_enabled`] pour le reste (liste
     /// conservée au compte, `true` par défaut).
@@ -112,9 +209,117 @@ pub struct OverlayConfig {
     /// sonner l'overlay ni n'affiche de carte. Même politique que [`Self::suivi_enabled`].
     #[serde(default = "actif")]
     pub chat_enabled: bool,
+    /// Le **détail des combats** est-il actif ? — case « Activer le détail des combats », en tête
+    /// de la section « Combat » de l'onglet « Paramètres » (2026-09-15).
+    ///
+    /// Décochée, **aucune fenêtre Combat n'est montrée**, combat en cours compris (voir
+    /// `panels::combat::should_show`) : c'est l'interrupteur de la fonctionnalité entière, pas un
+    /// réglage d'encombrement comme [`Self::combat_always_visible`] — que cette case commande
+    /// d'ailleurs, et grise, dans la fenêtre Options.
+    ///
+    /// **Le moteur continue de compter** : les combats sont toujours mesurés et synchronisés vers
+    /// le compte, exactement comme pour les trois interrupteurs ci-dessus. Recocher la case
+    /// retrouve le panneau en l'état, sans relire le log.
+    ///
+    /// **Locale et non au compte**, comme ses voisines, et `#[serde(default = "actif")]` pour la
+    /// même raison qu'elles : une config écrite avant ce champ garde son panneau de combat.
+    #[serde(default = "actif")]
+    pub combat_enabled: bool,
+    /// Le **suivi des sorts** est-il actif ? — case « Activer le suivi des sorts », sous la
+    /// précédente **dont elle dépend** (grisée tant que le détail des combats est décoché, sans
+    /// changer de valeur : on la retrouve telle quelle en le rallumant).
+    ///
+    /// Décochée, le panneau Combat garde ses portraits et ses barres et perd le bloc « ligne de
+    /// sorts » (`panels::combat_spell_block`) ainsi que les marques qu'il pose sur les médaillons.
+    /// Même politique que [`Self::combat_enabled`] pour le reste.
+    #[serde(default = "actif")]
+    pub spells_enabled: bool,
+    /// La bande **Récap de session** est-elle active ? — case « Activer le récap de session », en
+    /// tête de la section « Recap » de l'onglet « Paramètres » (2026-09-16).
+    ///
+    /// Décochée, la bande XP / Kamas / Combats / Challenges / Durée posée en haut à gauche de la
+    /// fenêtre de jeu n'est plus montrée (voir `panels::recap`). Même politique que ses voisines
+    /// pour le reste : le moteur continue de compter, rien n'est effacé, et
+    /// `#[serde(default = "actif")]` garde la bande allumée pour une config écrite avant ce champ.
+    #[serde(default = "actif")]
+    pub recap_enabled: bool,
+    /// La bande Récap affiche-t-elle la **durée de la session** ? — case « Afficher la durée de
+    /// la session », sous l'interrupteur de la bande dont elle dépend (2026-09-16, tard). Voir
+    /// `panels::recap::RecapCells` ; même politique que ses voisines, `actif` par défaut.
+    #[serde(default = "actif")]
+    pub recap_duration_enabled: bool,
+    /// La bande Récap affiche-t-elle les **combats** (gagnés − perdus) ? — case « Afficher les
+    /// combats », même famille que [`Self::recap_duration_enabled`].
+    #[serde(default = "actif")]
+    pub recap_fights_enabled: bool,
+    /// La bande Récap affiche-t-elle les **challenges** (réussis − échoués) ? — case « Afficher
+    /// les challenges », même famille que [`Self::recap_duration_enabled`].
+    #[serde(default = "actif")]
+    pub recap_challenges_enabled: bool,
+    /// **Reprendre la session du Récap après une pause** — case « Reprendre la session après une
+    /// pause de moins de … min » de la section « Recap » (2026-09-17, voir
+    /// `crate::recap_session::ResumeSettings`). Décochée, chaque retour dans le jeu repart de
+    /// zéro. Cochée pour une config écrite avant ce champ.
+    ///
+    /// **Ici et non au compte**, même exception et même raison que
+    /// [`Self::countdown_alert_duration_seconds`] : pas d'équivalent web.
+    #[serde(default = "actif")]
+    pub recap_resume_enabled: bool,
+    /// La tolérance de pause, en minutes — `None` = défaut
+    /// (`crate::recap_session::DEFAULT_RESUME_MINUTES`, 60). Bornée à la lecture.
+    #[serde(default)]
+    pub recap_resume_minutes: Option<i64>,
+    /// **Où l'utilisateur a posé la bande Récap** (2026-09-17) : abscisse du BLOC en pixels
+    /// physiques depuis le bord gauche de la fenêtre de jeu. `None` = jamais déplacée, donc
+    /// l'ancrage d'origine sous les boutons du client (`main.rs::GAME_RECAP_EDGE_MARGIN_PX` /
+    /// `GAME_RECAP_TOP_MARGIN_PX`) — ce qui n'est pas la même chose que « posée exactement au
+    /// défaut » : c'est ce que l'aimantation du glisser-déposer rétablit, et le bouton de retour
+    /// de la bande elle-même (`panels::recap`) avec elle.
+    ///
+    /// **Relative à la fenêtre de jeu, jamais à l'écran** : le client se déplace, change de
+    /// taille, passe d'un écran à l'autre ; seul un décalage depuis son coin garde la bande là
+    /// où l'utilisateur l'a accrochée. L'origine est celle de l'ancrage
+    /// (`GameRect::left`/`client_top`, donc la zone cliente — le client dessine sa fausse barre
+    /// de titre dedans, voir `GameRect::client_top`).
+    ///
+    /// **C'est le coin du BLOC, pas celui de sa fenêtre OS** : celle-ci commence
+    /// `render_content::RECAP_TOOLTIP_RESERVE` px plus haut (la place de ses infobulles). Un
+    /// fichier qu'on ouvre à la main dit ainsi où l'on voit la bande, pas où commence une marge
+    /// invisible.
+    ///
+    /// **Ici et non au compte**, comme ses voisines : une position à l'écran dépend de la
+    /// fenêtre de jeu qu'on a sous les yeux, pas du joueur — et le serveur n'accepte que des
+    /// clés connues (même raison que `chat_alert_duration_seconds`).
+    ///
+    /// Deux clés PLATES plutôt qu'une table `[recap_position]`, pour la même raison que les
+    /// interrupteurs de fonctionnalité : un fichier qu'on ouvre à la main se lit mieux sans
+    /// table intermédiaire, et une table ne pourrait pas se glisser avant `[shortcuts]` sans
+    /// déplacer les clés de racine qui la suivent.
+    #[serde(default)]
+    pub recap_position_x: Option<i32>,
+    /// Ordonnée du bloc Récap, même origine et même politique que [`Self::recap_position_x`] —
+    /// les deux vont toujours ensemble (voir [`OverlayConfig::recap_position`], qui ne rend une
+    /// position que si les deux sont là).
+    #[serde(default)]
+    pub recap_position_y: Option<i32>,
+    /// **La bande Récap est-elle verrouillée ?** (2026-09-17) — le cadenas de sa rangée
+    /// d'actions (`panels::recap::RecapChrome::locked`). Verrouillée, elle ne se saisit plus à la
+    /// souris et le curseur redevient celui du système au-dessus d'elle.
+    ///
+    /// **Le défaut est `true`, verrouillée** : tout le fond de la bande est une poignée (elle n'a
+    /// pas la place d'en porter une dédiée, voir `panels::recap`), donc non verrouillée, le
+    /// moindre clic dessus en mode interactif la déplace. On la déverrouille pour la ranger, on
+    /// la reverrouille ensuite — c'est le geste que les deux glyphes racontent. Une config écrite
+    /// avant cette clé se verrouille donc au premier lancement, y compris pour une bande déjà
+    /// déplacée : sa position, elle, ne bouge pas.
+    ///
+    /// **Locale et non au compte**, comme la position qu'elle protège : le serveur n'accepte que
+    /// des clés connues (même raison que `chat_alert_duration_seconds`).
+    #[serde(default = "actif")]
+    pub recap_locked: bool,
     /// L'alerte de **décompte à zéro** du Suivi est-elle muette ? — case « Couper le son des
     /// notifications », sous la ligne « Tester le son de l'alerte » de l'onglet « Suivi »
-    /// (2026-09-15, voir `panels::sound_row`).
+    /// (2026-09-15, voir `panels::notifications`).
     ///
     /// Cochée, le décompte arrivé à zéro affiche toujours sa carte par-dessus le jeu : c'est le
     /// SON qui se tait, pas la fonctionnalité — celle-ci a sa propre clé ([`Self::suivi_enabled`]),
@@ -145,6 +350,25 @@ pub struct OverlayConfig {
     /// active, une config écrite avant ce champ comprise.
     #[serde(default = "actif")]
     pub auto_update: bool,
+    /// **Journal détaillé** — case de la section « Journal » de l'onglet « À propos » (2026-09-18,
+    /// constat C6 de `docs/analyse-rgpd.md`). **Décochée par défaut**, et c'est tout l'objet du
+    /// réglage.
+    ///
+    /// Le journal de session ordinaire ne contient plus rien de personnel : ni nom de personnage,
+    /// ni pseudonyme de tiers, ni chemin portant le nom d'utilisateur du système, ni code
+    /// d'appairage, ni contenu de lot refusé (voir `crate::logging`, `overlay_ingest::privacy`).
+    /// Ces informations n'ont pas disparu du code pour autant : elles sont journalisées en
+    /// `debug!`, niveau que cette case — et elle seule — active à chaud
+    /// (`logging::set_verbose`).
+    ///
+    /// Autrement dit : le diagnostic fin reste possible, mais il est demandé, pas subi. Le
+    /// réglage ne change rien à ce qui est ENVOYÉ (rien de tout cela ne quitte la machine) ; il ne
+    /// change que ce qui est ÉCRIT dans un fichier local conservé 14 jours.
+    ///
+    /// `#[serde(default)]` — `false` : une config écrite avant ce champ n'a évidemment pas
+    /// demandé le mode détaillé.
+    #[serde(default)]
+    pub verbose_log: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).
@@ -167,7 +391,7 @@ pub struct OverlayConfig {
     pub shortcuts: BTreeMap<String, String>,
 }
 
-/// Valeur par défaut des trois drapeaux de fonctionnalité — **une fonction, parce que
+/// Valeur par défaut des drapeaux de fonctionnalité — **une fonction, parce que
 /// `#[serde(default)]` ne sait produire que `bool::default()`, c'est-à-dire `false`**. Voir
 /// `OverlayConfig::suivi_enabled` : le défaut d'une fonctionnalité est d'être active.
 fn actif() -> bool {
@@ -175,23 +399,42 @@ fn actif() -> bool {
 }
 
 impl Default for OverlayConfig {
-    /// Écrit à la main, et non dérivé, pour la seule raison des trois drapeaux de fonctionnalité :
+    /// Écrit à la main, et non dérivé, pour la seule raison des drapeaux de fonctionnalité :
     /// `bool::default()` vaut `false`, alors qu'une fonctionnalité non réglée est ACTIVE. Tous les
     /// autres champs gardent le défaut que la dérivation leur donnait.
     fn default() -> Self {
         Self {
             log_path: None,
             combat_always_visible: false,
+            combat_on_right: false,
+            combat_position_y: None,
+            combat_locked: false,
             chat_alert_duration_seconds: None,
             chat_alert_manual_close: false,
+            countdown_alert_duration_seconds: None,
+            countdown_alert_manual_close: false,
             turn_notification: false,
             turn_notification_muted: false,
             suivi_enabled: actif(),
             alerts_enabled: actif(),
             chat_enabled: actif(),
+            combat_enabled: actif(),
+            spells_enabled: actif(),
+            recap_enabled: actif(),
+            recap_duration_enabled: actif(),
+            recap_fights_enabled: actif(),
+            recap_challenges_enabled: actif(),
+            suivi_remove_on_complete: actif(),
+            suivi_completion_animation: actif(),
+            recap_resume_enabled: actif(),
+            recap_resume_minutes: None,
+            recap_position_x: None,
+            recap_position_y: None,
+            recap_locked: actif(),
             suivi_alert_muted: false,
             chat_alert_muted: false,
             auto_update: actif(),
+            verbose_log: false,
             shortcuts: BTreeMap::new(),
         }
     }
@@ -228,6 +471,80 @@ impl OverlayConfig {
         self.chat_alert_manual_close = toast.manual_close;
     }
 
+    /// Réglages de la carte de décompte effectifs — défaut pour une config qui ne les porte pas,
+    /// exactement comme [`Self::chat_toast`].
+    pub fn countdown_toast(&self) -> crate::panels::suivi_tab::CountdownToastSettings {
+        let mut toast = crate::panels::suivi_tab::CountdownToastSettings {
+            manual_close: self.countdown_alert_manual_close,
+            ..Default::default()
+        };
+        if let Some(seconds) = self.countdown_alert_duration_seconds {
+            toast.set_duration(seconds);
+        }
+        toast
+    }
+
+    /// Reporte les réglages de la carte de décompte dans la config.
+    pub fn set_countdown_toast(&mut self, toast: crate::panels::suivi_tab::CountdownToastSettings) {
+        self.countdown_alert_duration_seconds = Some(toast.duration_seconds);
+        self.countdown_alert_manual_close = toast.manual_close;
+    }
+
+    /// Ce que devient un suivi complété, d'après cette config — voir
+    /// [`crate::panels::suivi_tab::CompletionSettings`].
+    pub fn completion(&self) -> crate::panels::suivi_tab::CompletionSettings {
+        crate::panels::suivi_tab::CompletionSettings {
+            remove: self.suivi_remove_on_complete,
+            animate: self.suivi_completion_animation,
+        }
+    }
+
+    /// Reporte les deux réglages de complétion dans la config.
+    pub fn set_completion(&mut self, completion: crate::panels::suivi_tab::CompletionSettings) {
+        self.suivi_remove_on_complete = completion.remove;
+        self.suivi_completion_animation = completion.animate;
+    }
+
+    /// Le réglage de reprise de la session du Récap effectif — défaut pour une config qui ne le
+    /// porte pas, exactement comme [`Self::countdown_toast`].
+    pub fn recap_resume(&self) -> crate::recap_session::ResumeSettings {
+        let mut resume = crate::recap_session::ResumeSettings {
+            enabled: self.recap_resume_enabled,
+            ..Default::default()
+        };
+        if let Some(minutes) = self.recap_resume_minutes {
+            resume.set_minutes(minutes);
+        }
+        resume
+    }
+
+    /// Reporte le réglage de reprise de la session du Récap dans la config.
+    pub fn set_recap_resume(&mut self, resume: crate::recap_session::ResumeSettings) {
+        self.recap_resume_enabled = resume.enabled;
+        self.recap_resume_minutes = Some(resume.minutes);
+    }
+
+    /// Où l'utilisateur a posé la bande Récap, `None` tant qu'il ne l'a pas déplacée — voir
+    /// [`Self::recap_position_x`].
+    ///
+    /// **Les deux coordonnées ou aucune** : une config à moitié écrite (édition à la main
+    /// malheureuse, fichier tronqué) retombe sur l'ancrage d'origine plutôt que de coller la
+    /// bande contre un bord, et surtout plutôt que de faire échouer la lecture de tout le
+    /// fichier — la même tolérance que la table `[shortcuts]`.
+    pub fn recap_position(&self) -> Option<(i32, i32)> {
+        self.recap_position_x.zip(self.recap_position_y)
+    }
+
+    /// Reporte la position de la bande Récap dans la config — `None` efface les deux clés et
+    /// rend son ancrage d'origine à la bande (bouton de retour de la bande, et aimantation du
+    /// glisser-déposer). Appelée au relâchement du bouton de la souris, jamais à chaque frame.
+    pub fn set_recap_position(&mut self, position: Option<(i32, i32)>) {
+        (self.recap_position_x, self.recap_position_y) = match position {
+            Some((x, y)) => (Some(x), Some(y)),
+            None => (None, None),
+        };
+    }
+
     /// Les trois interrupteurs de fonctionnalité de cette config — voir
     /// [`crate::panels::feature_switch::FeatureToggles`], qui les fait voyager ensemble jusqu'au
     /// thread Engine. Les champs restent PLATS dans le TOML (`suivi_enabled = false`) : un fichier
@@ -238,6 +555,14 @@ impl OverlayConfig {
             suivi: self.suivi_enabled,
             alerts: self.alerts_enabled,
             chat: self.chat_enabled,
+            combat: self.combat_enabled,
+            spells: self.spells_enabled,
+            recap: self.recap_enabled,
+            recap_cells: crate::panels::recap::RecapCells {
+                duration: self.recap_duration_enabled,
+                fights: self.recap_fights_enabled,
+                challenges: self.recap_challenges_enabled,
+            },
         }
     }
 
@@ -247,13 +572,19 @@ impl OverlayConfig {
         self.suivi_enabled = features.suivi;
         self.alerts_enabled = features.alerts;
         self.chat_enabled = features.chat;
+        self.combat_enabled = features.combat;
+        self.spells_enabled = features.spells;
+        self.recap_enabled = features.recap;
+        self.recap_duration_enabled = features.recap_cells.duration;
+        self.recap_fights_enabled = features.recap_cells.fights;
+        self.recap_challenges_enabled = features.recap_cells.challenges;
     }
 
-    /// Les deux sourdines de cette config — voir [`crate::panels::sound_row::AlertMutes`], qui les
+    /// Les deux sourdines de cette config — voir [`crate::panels::notifications::AlertMutes`], qui les
     /// fait voyager ensemble jusqu'au thread Engine comme `features` fait pour les interrupteurs.
     /// Champs PLATS dans le TOML pour la même raison qu'eux.
-    pub fn alert_mutes(&self) -> crate::panels::sound_row::AlertMutes {
-        crate::panels::sound_row::AlertMutes {
+    pub fn alert_mutes(&self) -> crate::panels::notifications::AlertMutes {
+        crate::panels::notifications::AlertMutes {
             suivi: self.suivi_alert_muted,
             chat: self.chat_alert_muted,
         }
@@ -261,20 +592,130 @@ impl OverlayConfig {
 
     /// Reporte les deux sourdines dans la config — appelée à la validation de la fenêtre Options,
     /// jamais à chaque frame.
-    pub fn set_alert_mutes(&mut self, mutes: crate::panels::sound_row::AlertMutes) {
+    pub fn set_alert_mutes(&mut self, mutes: crate::panels::notifications::AlertMutes) {
         self.suivi_alert_muted = mutes.suivi;
         self.chat_alert_muted = mutes.chat;
     }
 }
 
-fn project_dirs() -> Option<directories::ProjectDirs> {
-    // Mêmes qualifieurs que le reste du dépôt (organisation GitHub `Oumbra`, voir
-    // `overlay_sync::token_store` pour le même motif appliqué au jeton de compte natif).
-    directories::ProjectDirs::from("com", "Oumbra", "wakfu-companion-overlay")
+/// Nom de projet — suffixe `-test` sous `cfg(test)`, comme dans `overlay_sync` et
+/// `overlay_engine` : un test qui écrit — ou qui efface — ne doit jamais atteindre le dossier réel
+/// de la personne qui lance la suite.
+#[cfg(not(test))]
+const APP_NAME: &str = "wakfu-companion-overlay";
+#[cfg(test)]
+const APP_NAME: &str = "wakfu-companion-overlay-test";
+
+/// **La racine de `config.toml` et des gabarits de tour** — la même que tout le reste de l'overlay
+/// depuis le 2026-09-19 (`overlay_engine::app_dirs`, constat C13 de `docs/analyse-rgpd.md`) ;
+/// publique pour `crate::local_data` et `turn_watch::templates::data_dir`.
+pub fn project_dirs() -> Option<directories::ProjectDirs> {
+    overlay_engine::app_dirs::project_dirs(APP_NAME)
+}
+
+/// L'ancienne racine de ce module (`%APPDATA%\Oumbra\wakfu-companion-overlay` sous Windows,
+/// jusqu'au 2026-09-19) — pour [`migrate_legacy_root`] et l'effacement complet, rien d'autre.
+pub fn legacy_project_dirs() -> Option<directories::ProjectDirs> {
+    overlay_engine::app_dirs::legacy_project_dirs(APP_NAME)
 }
 
 fn config_file() -> Option<PathBuf> {
     project_dirs().map(|dirs| dirs.config_dir().join("config.toml"))
+}
+
+/// Le chemin de `config.toml` — pour `local_data::has_user_data`, qui a besoin de sa date de
+/// dernière écriture pour distinguer une installation déjà utilisée d'une première ouverture.
+pub fn config_path() -> Option<PathBuf> {
+    config_file()
+}
+
+/// **Déplace ce que l'ancienne racine contenait vers la racine unique, puis la supprime** — à
+/// appeler au démarrage, avant [`load`]. Constat C13 (2026-09-19) : sous Windows, `config.toml`
+/// et `turn-templates/` vivaient sous `%APPDATA%\Oumbra\wakfu-companion-overlay\`, tout le reste
+/// sous `%APPDATA%\wakfu-companion-overlay\`. Sous Linux les deux racines se confondent et il
+/// n'y a rien à faire ; une installation neuve non plus (ancienne racine absente).
+///
+/// Best-effort comme le reste du module : un déplacement qui échoue est journalisé et l'ancien
+/// fichier reste où il est — l'overlay repart alors avec les réglages par défaut plutôt que de
+/// refuser de démarrer. Ce qui existe déjà à destination gagne (une migration antérieure, ou un
+/// overlay plus récent qui a déjà écrit là), l'ancien exemplaire est alors simplement supprimé.
+pub fn migrate_legacy_root() {
+    let (Some(legacy), Some(current)) = (legacy_project_dirs(), project_dirs()) else {
+        return;
+    };
+    let legacy_root = legacy.project_path();
+    if legacy_root == current.project_path() || !legacy_root.exists() {
+        return;
+    }
+    let moves = [
+        (
+            legacy.config_dir().join("config.toml"),
+            current.config_dir().join("config.toml"),
+        ),
+        (
+            legacy.data_dir().join("turn-templates"),
+            current.data_dir().join("turn-templates"),
+        ),
+    ];
+    migrate_paths(legacy_root, &moves);
+}
+
+/// Le geste de [`migrate_legacy_root`] sur des chemins explicites — testable sur un dossier
+/// temporaire. `legacy_root` n'est supprimée que si chaque déplacement a réussi.
+fn migrate_paths(legacy_root: &std::path::Path, moves: &[(PathBuf, PathBuf)]) {
+    let mut failed = false;
+    for (from, to) in moves {
+        if !from.exists() {
+            continue;
+        }
+        if to.exists() {
+            tracing::info!(
+                "[config] {} existe déjà, l'ancien exemplaire {} est abandonné.",
+                to.display(),
+                from.display()
+            );
+            continue;
+        }
+        let moved = to
+            .parent()
+            .map(std::fs::create_dir_all)
+            .transpose()
+            .and_then(|_| std::fs::rename(from, to));
+        match moved {
+            Ok(()) => tracing::info!(
+                "[config] {} déplacé vers {} (racine unique, constat C13).",
+                from.display(),
+                to.display()
+            ),
+            Err(err) => {
+                failed = true;
+                tracing::warn!(
+                    "[config] {} non déplacé vers {} : {err} — laissé en place.",
+                    from.display(),
+                    to.display()
+                );
+            }
+        }
+    }
+    if failed {
+        return;
+    }
+    match std::fs::remove_dir_all(legacy_root) {
+        Ok(()) => {
+            tracing::info!(
+                "[config] ancienne racine {} supprimée.",
+                legacy_root.display()
+            );
+            // `%APPDATA%\Oumbra\` ne contenait que nous : il part s'il est vide, et reste sinon.
+            if let Some(parent) = legacy_root.parent() {
+                let _ = std::fs::remove_dir(parent);
+            }
+        }
+        Err(err) => tracing::warn!(
+            "[config] ancienne racine {} non supprimée : {err}",
+            legacy_root.display()
+        ),
+    }
 }
 
 /// Charge la config persistée — `OverlayConfig::default()` (donc `log_path: None`) au tout premier
@@ -311,8 +752,8 @@ pub fn load() -> OverlayConfig {
 }
 
 /// Sauvegarde `config` sur disque — best-effort (voir doc de module), crée le répertoire parent
-/// si besoin. Appelée UNIQUEMENT à la validation de la modale Options (jamais à chaque frame) :
-/// voir `panels::options_modal::OptionsModalAction::Validate`.
+/// si besoin. Appelée à la validation de la modale Options, et jamais à chaque frame (voir
+/// `panels::options_modal::OptionsModalAction::Validate`).
 pub fn save(config: &OverlayConfig) {
     let Some(path) = config_file() else {
         tracing::warn!(
@@ -345,8 +786,8 @@ pub fn save(config: &OverlayConfig) {
 }
 
 /// Résout le chemin de `wakfu.log` à utiliser au démarrage — voir doc de module pour l'ordre de
-/// priorité. Partagée par `main.rs` (Windows) et `bin/overlay-ui-x11.rs` (Linux), qui appellent
-/// chacun `env::args().nth(1)` pour l'argument CLI (rien d'OS-spécifique là-dedans, mais
+/// priorité. Partagée par `main.rs` (Windows) et `bin/wakfu-companion-overlay-x11.rs` (Linux), qui
+/// appellent chacun `env::args().nth(1)` pour l'argument CLI (rien d'OS-spécifique là-dedans, mais
 /// `std::env::args` reste appelé au point d'entrée de chaque binaire plutôt qu'ici, pour ne pas
 /// faire dépendre ce module de la façon dont chaque binaire construit ses arguments).
 ///
@@ -362,6 +803,82 @@ pub fn resolve_log_path(cli_arg: Option<PathBuf>, config: &OverlayConfig) -> Opt
 
 #[cfg(test)]
 mod tests {
+    /// La migration de l'ancienne racine : ce qui existe est déplacé, ce qui existe déjà à
+    /// destination gagne, et l'ancienne racine part avec son parent s'il est vide.
+    #[test]
+    fn l_ancienne_racine_est_migree_puis_supprimee() {
+        let base = std::env::temp_dir().join(format!("overlay-migration-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let legacy_root = base.join("Oumbra").join("app");
+        let current_root = base.join("app");
+        std::fs::create_dir_all(legacy_root.join("config")).unwrap();
+        std::fs::create_dir_all(legacy_root.join("data").join("turn-templates")).unwrap();
+        std::fs::write(legacy_root.join("config").join("config.toml"), "ancien").unwrap();
+        std::fs::write(
+            legacy_root
+                .join("data")
+                .join("turn-templates")
+                .join("Perso.png"),
+            b"png",
+        )
+        .unwrap();
+        // Le fichier de compteurs a déjà été écrit dans la racine courante : il gagne.
+        std::fs::create_dir_all(current_root.join("data")).unwrap();
+        std::fs::write(current_root.join("data").join("garde.json"), "courant").unwrap();
+
+        let moves = [
+            (
+                legacy_root.join("config").join("config.toml"),
+                current_root.join("config").join("config.toml"),
+            ),
+            (
+                legacy_root.join("data").join("turn-templates"),
+                current_root.join("data").join("turn-templates"),
+            ),
+            (
+                legacy_root.join("data").join("absent"),
+                current_root.join("data").join("absent"),
+            ),
+        ];
+        super::migrate_paths(&legacy_root, &moves);
+
+        assert_eq!(
+            std::fs::read_to_string(current_root.join("config").join("config.toml")).unwrap(),
+            "ancien"
+        );
+        assert!(current_root
+            .join("data")
+            .join("turn-templates")
+            .join("Perso.png")
+            .is_file());
+        assert_eq!(
+            std::fs::read_to_string(current_root.join("data").join("garde.json")).unwrap(),
+            "courant",
+            "ce qui vivait déjà dans la racine courante est intact"
+        );
+        assert!(!legacy_root.exists(), "l'ancienne racine doit partir");
+        assert!(
+            !base.join("Oumbra").exists(),
+            "son parent, vide, part avec elle"
+        );
+
+        // Une destination déjà présente gagne : l'ancien exemplaire est abandonné, pas fusionné.
+        std::fs::create_dir_all(legacy_root.join("config")).unwrap();
+        std::fs::write(
+            legacy_root.join("config").join("config.toml"),
+            "encore plus ancien",
+        )
+        .unwrap();
+        super::migrate_paths(&legacy_root, &moves[..1]);
+        assert_eq!(
+            std::fs::read_to_string(current_root.join("config").join("config.toml")).unwrap(),
+            "ancien"
+        );
+        assert!(!legacy_root.exists());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     use super::*;
 
     #[test]
@@ -407,21 +924,43 @@ mod tests {
     }
 
     /// Le défaut d'une fonctionnalité est d'être ACTIVE — y compris pour un `config.toml` écrit
-    /// avant l'existence de ces trois clés (`#[serde(default = "actif")]`, voir le champ). Sans
-    /// cette fonction de défaut, `#[serde(default)]` les mettrait à `false` et couperait Suivi,
-    /// Alertes et Recherche chez tous ceux qui les utilisent déjà.
+    /// avant l'existence de ces clés (`#[serde(default = "actif")]`, voir le champ). Sans cette
+    /// fonction de défaut, `#[serde(default)]` les mettrait à `false` et couperait Suivi, Alertes,
+    /// Recherche, le panneau de combat et le suivi des sorts chez tous ceux qui les utilisent
+    /// déjà.
     #[test]
     fn fonctionnalites_actives_par_defaut() {
         let neuve = OverlayConfig::default();
         assert!(neuve.suivi_enabled);
         assert!(neuve.alerts_enabled);
         assert!(neuve.chat_enabled);
+        assert!(neuve.combat_enabled);
+        assert!(neuve.spells_enabled);
+        assert_eq!(
+            neuve.features(),
+            crate::panels::feature_switch::FeatureToggles::default()
+        );
 
         let ancienne: OverlayConfig =
             toml::from_str("log_path = \"/config/wakfu.log\"").expect("ancienne config lisible");
         assert!(ancienne.suivi_enabled);
         assert!(ancienne.alerts_enabled);
         assert!(ancienne.chat_enabled);
+        assert!(ancienne.combat_enabled);
+        assert!(ancienne.spells_enabled);
+    }
+
+    /// Le jalon `autostart_initialized` des versions du 2026-09-16 au 2026-09-19 (démarrage
+    /// automatique inscrit d'office, retiré pour le constat C12) est ignoré à la lecture et ne
+    /// ressort pas à l'écriture : une config qui le porte reste lisible et s'en débarrasse à la
+    /// prochaine sauvegarde (voir `crate::autostart`).
+    #[test]
+    fn l_ancien_jalon_du_demarrage_automatique_est_ignore() {
+        let ancienne: OverlayConfig =
+            toml::from_str("log_path = \"/config/wakfu.log\"\nautostart_initialized = true")
+                .expect("ancienne config lisible");
+        let raw = toml::to_string_pretty(&ancienne).expect("sérialisation");
+        assert!(!raw.contains("autostart_initialized"));
     }
 
     /// Une fonctionnalité coupée le reste après un aller-retour sur disque : c'est tout l'intérêt
@@ -431,6 +970,7 @@ mod tests {
         let config = OverlayConfig {
             suivi_enabled: false,
             chat_enabled: false,
+            spells_enabled: false,
             ..Default::default()
         };
         let raw = toml::to_string_pretty(&config).expect("sérialisation");
@@ -438,6 +978,63 @@ mod tests {
         assert!(!relu.suivi_enabled);
         assert!(relu.alerts_enabled);
         assert!(!relu.chat_enabled);
+        // Le détail des combats reste actif, seul le suivi des sorts est coupé : les deux cases
+        // de la section « Combat » sont bien deux clés distinctes.
+        assert!(relu.combat_enabled);
+        assert!(!relu.spells_enabled);
+        assert!(!relu.features().spells_visible());
+    }
+
+    /// Les trois cases de la bande Récap sont trois clés distinctes, persistées et relues telles
+    /// quelles ; une config d'avant leur existence les retrouve toutes cochées.
+    #[test]
+    fn aller_retour_des_cases_du_recap() {
+        let mut config = OverlayConfig::default();
+        config.set_features(crate::panels::feature_switch::FeatureToggles {
+            recap_cells: crate::panels::recap::RecapCells {
+                duration: false,
+                fights: true,
+                challenges: false,
+            },
+            ..Default::default()
+        });
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert!(relu.recap_enabled);
+        assert!(!relu.recap_duration_enabled);
+        assert!(relu.recap_fights_enabled);
+        assert!(!relu.recap_challenges_enabled);
+        assert_eq!(
+            relu.features().recap_cells,
+            crate::panels::recap::RecapCells {
+                duration: false,
+                fights: true,
+                challenges: false,
+            }
+        );
+        let ancienne: OverlayConfig = toml::from_str("recap_enabled = false\n").expect("relecture");
+        assert!(!ancienne.recap_enabled);
+        assert_eq!(
+            ancienne.features().recap_cells,
+            crate::panels::recap::RecapCells::default()
+        );
+    }
+
+    /// **Le suivi des sorts coupé se retrouve tel quel**, même si le détail des combats l'éteint
+    /// entre-temps : c'est `FeatureToggles::spells_visible` qui combine les deux, la config
+    /// garde les deux cases séparément (voir le champ `spells_enabled`).
+    #[test]
+    fn detail_des_combats_coupe_garde_la_case_des_sorts() {
+        let mut config = OverlayConfig::default();
+        config.set_features(crate::panels::feature_switch::FeatureToggles {
+            combat: false,
+            ..Default::default()
+        });
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert!(!relu.combat_enabled);
+        assert!(relu.spells_enabled);
+        assert!(!relu.features().spells_visible());
     }
 
     /// **Le défaut d'une sourdine est d'être levée** — `false` des deux côtés, y compris pour un
@@ -448,7 +1045,7 @@ mod tests {
         let neuve = OverlayConfig::default();
         assert_eq!(
             neuve.alert_mutes(),
-            crate::panels::sound_row::AlertMutes::default()
+            crate::panels::notifications::AlertMutes::default()
         );
         assert!(!neuve.suivi_alert_muted);
         assert!(!neuve.chat_alert_muted);
@@ -459,7 +1056,7 @@ mod tests {
         assert!(!ancienne.chat_alert_muted);
 
         let mut config = OverlayConfig::default();
-        config.set_alert_mutes(crate::panels::sound_row::AlertMutes {
+        config.set_alert_mutes(crate::panels::notifications::AlertMutes {
             suivi: true,
             chat: false,
         });
@@ -489,7 +1086,7 @@ mod tests {
         };
         let mut bindings = ShortcutBindings::default();
         bindings.set(
-            crate::shortcuts::ShortcutAction::Quit,
+            crate::shortcuts::ShortcutAction::Options,
             crate::shortcuts::Shortcut::parse("Ctrl+Alt+K").expect("combinaison de test valide"),
         );
         config.set_shortcuts(&bindings);
@@ -498,5 +1095,50 @@ mod tests {
         let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
         assert_eq!(relu, config);
         assert_eq!(relu.shortcuts(), bindings);
+    }
+
+    /// La bande Récap déplacée (2026-09-17) : les deux coordonnées font l'aller-retour, elles
+    /// s'écrivent AVANT `[shortcuts]` (sans quoi la table les avalerait, voir le champ
+    /// `shortcuts`), et une config qui ne les porte pas — toutes celles écrites avant ce jour —
+    /// se relit sans erreur, bande à son ancrage d'origine.
+    #[test]
+    fn aller_retour_de_la_position_du_recap() {
+        let vierge = OverlayConfig::default();
+        assert_eq!(vierge.recap_position(), None);
+
+        let mut config = OverlayConfig {
+            log_path: Some(PathBuf::from("/config/wakfu.log")),
+            ..Default::default()
+        };
+        config.set_recap_position(Some((460, 234)));
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let position = raw.find("recap_position_x").expect("clé écrite");
+        let table = raw.find("[shortcuts]").expect("table écrite");
+        assert!(
+            position < table,
+            "les clés de position doivent précéder `[shortcuts]`, sinon la table les avale :\n{raw}"
+        );
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert_eq!(relu.recap_position(), Some((460, 234)));
+
+        let ancienne: OverlayConfig =
+            toml::from_str("log_path = \"/config/wakfu.log\"").expect("ancienne config lisible");
+        assert_eq!(ancienne.recap_position(), None);
+    }
+
+    /// Une seule des deux coordonnées ne fait pas une position — une bande collée contre un bord
+    /// serait pire que l'ancrage d'origine, et faire échouer toute la lecture pire encore (le
+    /// `log_path` partirait avec).
+    #[test]
+    fn une_demi_position_du_recap_ne_deplace_rien() {
+        let bancale: OverlayConfig =
+            toml::from_str("recap_position_x = 460").expect("config bancale lisible");
+        assert_eq!(bancale.recap_position(), None);
+
+        let mut config = OverlayConfig::default();
+        config.set_recap_position(Some((460, 234)));
+        config.set_recap_position(None);
+        assert_eq!(config.recap_position_x, None);
+        assert_eq!(config.recap_position_y, None);
     }
 }

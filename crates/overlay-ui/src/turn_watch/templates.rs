@@ -1,5 +1,6 @@
 //! Persistance des gabarits de nom appris — un PNG 8 bits par personnage, dans le dossier de
-//! données de l'overlay (`turn-templates/`, même racine que `logs/` et `catalog_cache`).
+//! données de l'overlay (`turn-templates/`, même racine que `logs/` et `catalog_cache` depuis le
+//! 2026-09-19, voir `overlay_engine::app_dirs`).
 //!
 //! Un gabarit vaut pour un client à une échelle d'interface donnée : il est indexé par le nom du
 //! personnage tel que le titre de fenêtre le donne. Changer l'échelle d'interface du jeu rendra
@@ -14,13 +15,15 @@ use std::path::PathBuf;
 
 use super::vision::Glyph;
 
-/// Dossier de données de l'overlay — même racine que `config`, `logs/` et `catalog_cache`.
+/// Dossier de données de l'overlay — demandé à `config` plutôt que reconstruit ici : une seule
+/// racine pour tout le dépôt (`overlay_engine::app_dirs`, constat C13 de `docs/analyse-rgpd.md`).
 pub fn data_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("com", "Oumbra", "wakfu-companion-overlay")
-        .map(|d| d.data_dir().to_path_buf())
+    crate::config::project_dirs().map(|d| d.data_dir().to_path_buf())
 }
 
-fn dir() -> Option<PathBuf> {
+/// Dossier des gabarits appris — public pour que `crate::local_data` puisse l'effacer (un PNG du
+/// nom du personnage rendu à l'écran et le nom en clair, constat C8).
+pub fn dir() -> Option<PathBuf> {
     data_dir().map(|d| d.join("turn-templates"))
 }
 
@@ -65,10 +68,16 @@ pub fn load_all() -> HashMap<String, Glyph> {
             .and_then(|b| Glyph::from_png(&b).map_err(|e| e.to_string()))
         {
             Ok(glyph) => {
-                tracing::info!("[tour] gabarit chargé : {name} ({}x{})", glyph.w, glyph.h);
+                // Nom de personnage en `debug` seulement (constat C6 de `docs/analyse-rgpd.md`)
+                // : ce qui se diagnostique ici, c'est le NOMBRE de gabarits relus et leur taille.
+                tracing::info!("[tour] gabarit chargé ({}x{})", glyph.w, glyph.h);
+                tracing::debug!(character = %name, "[tour] gabarit chargé");
                 out.insert(name, glyph);
             }
-            Err(err) => tracing::warn!("[tour] gabarit illisible {} : {err}", path.display()),
+            Err(err) => tracing::warn!(
+                "[tour] gabarit illisible {} : {err}",
+                overlay_ingest::privacy::redact_path(&path)
+            ),
         }
     }
     out
@@ -86,10 +95,16 @@ pub fn save(character: &str, glyph: &Glyph) {
         std::fs::write(dir.join(format!("{stem}.name")), character).map_err(|e| e.to_string())
     })();
     match result {
-        Ok(()) => tracing::info!(
-            "[tour] gabarit enregistré : {character} → {}",
-            dir.display()
-        ),
-        Err(err) => tracing::warn!("[tour] gabarit non enregistré ({character}) : {err}"),
+        Ok(()) => {
+            tracing::info!(
+                "[tour] gabarit enregistré → {}",
+                overlay_ingest::privacy::redact_path(&dir)
+            );
+            tracing::debug!(%character, "[tour] gabarit enregistré");
+        }
+        Err(err) => {
+            tracing::warn!("[tour] gabarit non enregistré : {err}");
+            tracing::debug!(%character, "[tour] gabarit non enregistré");
+        }
     }
 }

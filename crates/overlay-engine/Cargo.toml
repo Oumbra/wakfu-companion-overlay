@@ -3,6 +3,7 @@ name = "overlay-engine"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 description = "Frontiere metier : QuickJS + LogParser vendu depuis wakfu-companion (LineBatch -> LogEntry), agregation de session en Rust (LogEntry -> SessionSnapshot) — voir docs/plan-architecture.md §2 et §9."
 
 [dependencies]

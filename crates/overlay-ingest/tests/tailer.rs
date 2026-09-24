@@ -177,3 +177,79 @@ fn encodage_invalide_ne_bloque_pas_lingestion() {
     // La ligne corrompue est remplacée (U+FFFD), pas perdue ni fatale pour l'ingestion.
     assert!(batches[0].lines[1].contains('\u{FFFD}'));
 }
+
+/// Une ligne incomplète démesurée (fichier corrompu) n'est pas gardée en mémoire entre deux
+/// `poll()` : elle est abandonnée, et les lignes suivantes restent lues normalement.
+#[test]
+fn une_ligne_incomplete_demesuree_est_abandonnee() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wakfu.log");
+    write_new(&path, &"x".repeat(2 * 1024 * 1024));
+
+    let mut tailer = Tailer::new(&path);
+    assert!(tailer.poll().unwrap().is_empty());
+
+    append(&path, "fin du fragment\nligne suivante\n");
+    let batches = tailer.poll().unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].lines, vec!["fin du fragment", "ligne suivante"]);
+}
+
+/// Un gros rattrapage se découpe en temps linéaire : 200 000 lignes d'un coup, dont des fins de
+/// ligne CRLF, toutes restituées dans l'ordre.
+#[test]
+fn gros_rattrapage_decoupe_en_une_passe() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wakfu.log");
+    let contents: String = (0..200_000).map(|i| format!("ligne {i}\r\n")).collect();
+    write_new(&path, &contents);
+
+    let mut tailer = Tailer::new(&path);
+    let lines: Vec<String> = tailer
+        .poll()
+        .unwrap()
+        .into_iter()
+        .flat_map(|batch| batch.lines)
+        .collect();
+    assert_eq!(lines.len(), 200_000);
+    assert_eq!(lines[0], "ligne 0");
+    assert_eq!(lines[199_999], "ligne 199999");
+}
+
+/// O7 : un reliquat plus gros qu'une tranche de lecture (4 Mio) est lu par tranches — aucune
+/// ligne perdue ni coupée à une frontière de tranche, lots bornés à `MAX_BATCH_LINES`, et le
+/// rattrapage est bien terminé à la fin du même `poll()`.
+#[test]
+fn rattrapage_plus_gros_qu_une_tranche_sans_ligne_coupee() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wakfu.log");
+    // Longueurs de ligne variables (dont des lignes longues) : les frontières de tranche tombent
+    // forcément au milieu de lignes.
+    let contents: String = (0..60_000)
+        .map(|i| format!("ligne {i} {}\n", "x".repeat(i % 400)))
+        .collect();
+    assert!(contents.len() > 9 * 1024 * 1024, "{}", contents.len());
+    write_new(&path, &contents);
+
+    let mut tailer = Tailer::new(&path);
+    let batches = tailer.poll().unwrap();
+    assert!(batches
+        .iter()
+        .all(|batch| batch.lines.len() <= MAX_BATCH_LINES));
+    assert!(batches.iter().all(|batch| batch.is_initial_load));
+    let lines: Vec<String> = batches.into_iter().flat_map(|batch| batch.lines).collect();
+    assert_eq!(lines.len(), 60_000);
+    for (i, line) in lines.iter().enumerate() {
+        assert_eq!(*line, format!("ligne {i} {}", "x".repeat(i % 400)));
+    }
+
+    assert!(tailer.poll().unwrap().is_empty());
+    append(&path, "direct\n");
+    let batches = tailer.poll().unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].lines, vec!["direct"]);
+    assert!(
+        !batches[0].is_initial_load,
+        "rattrapé dès le premier poll()"
+    );
+}

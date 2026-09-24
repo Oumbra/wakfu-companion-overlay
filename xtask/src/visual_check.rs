@@ -1,10 +1,11 @@
 //! `xtask visual-check` — extraction de `spikes/s3-window-linux/{harness.sh,src/probe.rs}` vers un
 //! outillage permanent (docs/plan-architecture.md §17.2, point 3 du critère de sortie de S3), une
-//! fois qu'un vrai binaire existait à piloter (`crates/overlay-ui/src/bin/overlay-ui-x11.rs`,
-//! §17.2 « État »). Orchestre Xvfb + un WM EWMH (openbox) + une fenêtre de jeu factice (xterm
-//! titré) + le VRAI `overlay-ui-x11`, pilotage par `xdotool`, vérifications programmatiques par
-//! le protocole X11 lui-même (`x11rb`, jamais une déduction depuis une capture d'écran — même
-//! réserve que le spike, §17.6 du plan), artefact final pour revue humaine.
+//! fois qu'un vrai binaire existait à piloter
+//! (`crates/overlay-ui/src/bin/wakfu-companion-overlay-x11.rs`, §17.2 « État »). Orchestre Xvfb +
+//! un WM EWMH (openbox) + une fenêtre de jeu factice (xterm titré) + le VRAI
+//! `wakfu-companion-overlay-x11`, pilotage par `xdotool`, vérifications programmatiques par le
+//! protocole X11 lui-même (`x11rb`, jamais une déduction depuis une capture d'écran — même réserve
+//! que le spike, §17.6 du plan), artefact final pour revue humaine.
 //!
 //! **Portée** : ancrage, click-through (extension Shape), topmost/focus-aware avec délai de
 //! grâce — les trois mêmes familles d'assertion que `harness.sh`, adaptées aux DEUX fenêtres
@@ -180,7 +181,7 @@ fn wait_until(mut condition: impl FnMut() -> bool, timeout: Duration, what: &str
 pub fn run() {
     // Build AVANT de toucher X11 — un échec de compilation doit rester une erreur cargo lisible,
     // pas noyé dans le bruit d'un Xvfb déjà lancé pour rien.
-    println!("=== Build overlay-ui-x11 ===");
+    println!("=== Build wakfu-companion-overlay-x11 ===");
     let status = Command::new("cargo")
         .args([
             "build",
@@ -188,14 +189,14 @@ pub fn run() {
             "-p",
             "overlay-ui",
             "--bin",
-            "overlay-ui-x11",
+            "wakfu-companion-overlay-x11",
         ])
         .current_dir(env!("CARGO_MANIFEST_DIR").to_string() + "/..")
         .status()
         .expect("lancement de cargo build");
     assert!(status.success(), "cargo build a échoué");
     let binary = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../target/debug/overlay-ui-x11")
+        .join("../target/debug/wakfu-companion-overlay-x11")
         .canonicalize()
         .expect("le binaire vient d'être construit");
 
@@ -255,7 +256,7 @@ pub fn run() {
     let game_xid = find_window_ids(GAME_TITLE)[0];
     println!("fenêtre de jeu factice : XID=0x{game_xid:x}");
 
-    println!("=== overlay-ui-x11 (vrai binaire) ===");
+    println!("=== wakfu-companion-overlay-x11 (vrai binaire) ===");
     let wakfu_log = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../crates/overlay-engine/tests/wakfu.log")
         .canonicalize()

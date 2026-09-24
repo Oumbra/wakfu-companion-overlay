@@ -185,6 +185,61 @@ pub fn format_iso_utc(epoch_ms: i64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}.{ms:03}Z")
 }
 
+/// Instant UTC (ms, époque Unix) d'une date civile **UTC** + heure du jour en ms — sans aucune
+/// conversion de fuseau, contrairement à [`LogDateTracker::full_timestamp_ms`]. Sert aux dates
+/// déjà exprimées en UTC : relecture d'un [`format_iso_utc`], date HTTP (`Retry-After`).
+pub fn utc_ms_from_civil(year: i64, month: i64, day: i64, ms_of_day: i64) -> i64 {
+    days_from_civil(year, month, day) * 86_400_000 + ms_of_day
+}
+
+/// Inverse de [`format_iso_utc`] : `AAAA-MM-JJTHH:MM:SS[.fraction]Z` → ms époque Unix. `None`
+/// pour toute autre forme (décalage `+02:00`, champ hors bornes) — la file d'envoi s'en sert pour
+/// écarter une date que le serveur refuserait (`overlay_sync::queue`), et ne relit que ce que
+/// l'overlay a lui-même écrit.
+pub fn parse_iso_utc_ms(raw: &str) -> Option<i64> {
+    let bytes = raw.as_bytes();
+    if bytes.len() < 20
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || bytes[bytes.len() - 1] != b'Z'
+    {
+        return None;
+    }
+    let number = |range: std::ops::Range<usize>| -> Option<i64> {
+        let part = raw.get(range)?;
+        if !part.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        part.parse().ok()
+    };
+    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
+    let (h, m, s) = (number(11..13)?, number(14..16)?, number(17..19)?);
+    let ms = match raw.get(19..raw.len() - 1)? {
+        "" => 0,
+        fraction => {
+            let digits = fraction.strip_prefix('.')?;
+            if digits.is_empty() || digits.len() > 9 || !digits.bytes().all(|b| b.is_ascii_digit())
+            {
+                return None;
+            }
+            // Millisecondes : les trois premiers chiffres, complétés à droite (`.5` = 500 ms).
+            format!("{digits:0<3}")[..3].parse::<i64>().ok()?
+        }
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || h > 23 || m > 59 || s > 59 {
+        return None;
+    }
+    Some(utc_ms_from_civil(
+        year,
+        month,
+        day,
+        ((h * 60 + m) * 60 + s) * 1000 + ms,
+    ))
+}
+
 fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let z = z + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
@@ -276,5 +331,37 @@ mod tests {
         let before = system_now_ms();
         let ts = tracker.full_timestamp_ms("10:00:00,000");
         assert!(ts >= before);
+    }
+
+    /// `parse_iso_utc_ms` relit exactement ce que `format_iso_utc` écrit, epoch compris.
+    #[test]
+    fn iso_utc_aller_retour() {
+        for ms in [0, 1_325_376_000_000, 1_790_000_000_123, 1_700_000_000_999] {
+            assert_eq!(parse_iso_utc_ms(&format_iso_utc(ms)), Some(ms), "{ms}");
+        }
+        assert_eq!(
+            parse_iso_utc_ms("2012-01-01T00:00:00Z"),
+            Some(1_325_376_000_000)
+        );
+        assert_eq!(
+            parse_iso_utc_ms("2026-09-23T10:00:00.5Z"),
+            Some(utc_ms_from_civil(2026, 9, 23, 36_000_500))
+        );
+    }
+
+    #[test]
+    fn iso_utc_formes_refusees() {
+        for raw in [
+            "",
+            "garbage",
+            "2026-09-23T10:00:00.000+02:00",
+            "2026-13-01T00:00:00.000Z",
+            "2026-09-23T24:00:00.000Z",
+            "2026-09-23T10:00:00.Z",
+            "2026-09-23 10:00:00.000Z",
+            "2026-09-23T10:00:00.00aZ",
+        ] {
+            assert_eq!(parse_iso_utc_ms(raw), None, "{raw}");
+        }
     }
 }

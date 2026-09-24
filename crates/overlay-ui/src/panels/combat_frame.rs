@@ -83,6 +83,15 @@ pub struct SelectionMarks {
 /// exactement sur cette largeur (voir `combat::show_side_row`).
 pub(super) const FRAME_WIDTH: f32 = 70.0;
 
+/// **Hauteur de vide en bas du gabarit à `slots` médaillons** : ce que son canevas garde de lignes
+/// transparentes sous sa dernière encre (voir `TemplateInfo::painted_bottom`). À retrancher du bas
+/// de l'allocation du cadre pour retomber sur le dernier pixel VISIBLE de la décoration — ce dont
+/// la rangée d'actions du panneau se tient à 5 px (`combat::ACTIONS_DECORATION_GAP`).
+pub(super) fn bottom_trim(slots: usize) -> f32 {
+    let template = &TEMPLATES[slots.clamp(1, MAX_FRAME_SLOTS) - 1];
+    template.height - 1.0 - template.painted_bottom
+}
+
 /// Rayon de rognage circulaire du portrait — moitié de `NATIVE_PORTRAIT_SIZE` (48/2), un carré
 /// aux coins arrondis à ce rayon devient un cercle parfait (voir doc de module). Les gabarits
 /// n'ont plus de trou/anneau pour faire ce travail à la place du code.
@@ -91,6 +100,15 @@ const PORTRAIT_CORNER_RADIUS: u8 = (NATIVE_PORTRAIT_SIZE / 2.0) as u8;
 struct TemplateInfo {
     bytes: &'static [u8],
     height: f32,
+    /// **Ordonnée du dernier pixel d'encre du gabarit** dans son canevas (origine = coin
+    /// haut-gauche, comme [`Self::slot_centers`]) — mesurée une fois sur le PNG, seuil alpha > 0.
+    ///
+    /// Deux gabarits sur six finissent par des lignes entièrement transparentes : 2 px pour celui
+    /// à un combattant (dernière encre à 127 sur 130), 3 px pour celui à quatre (284 sur 288).
+    /// La rangée d'actions se pose « à 5 px du dernier pixel de la décoration » (demande
+    /// utilisateur du 2026-09-17) : viser le bas du CANEVAS lui donnerait 7 ou 8 px d'écart
+    /// apparent sur ces deux gabarits, là où les quatre autres en donneraient 5.
+    painted_bottom: f32,
     /// Centre de chaque médaillon, coordonnées locales au canevas (origine = coin haut-gauche du
     /// template, avant tout décalage à l'écran) — voir doc de module pour la méthode de
     /// validation (artefact interactif, plus une mesure de trou : il n'y en a plus).
@@ -106,16 +124,19 @@ macro_rules! template_asset {
 const TEMPLATES: [TemplateInfo; MAX_FRAME_SLOTS] = [
     TemplateInfo {
         bytes: template_asset!(1),
+        painted_bottom: 127.0,
         height: 130.0,
         slot_centers: &[egui::pos2(29.5, 64.5)],
     },
     TemplateInfo {
         bytes: template_asset!(2),
+        painted_bottom: 179.0,
         height: 180.0,
         slot_centers: &[egui::pos2(29.5, 62.3), egui::pos2(29.5, 114.7)],
     },
     TemplateInfo {
         bytes: template_asset!(3),
+        painted_bottom: 231.0,
         height: 232.0,
         slot_centers: &[
             egui::pos2(29.5, 64.2),
@@ -125,6 +146,7 @@ const TEMPLATES: [TemplateInfo; MAX_FRAME_SLOTS] = [
     },
     TemplateInfo {
         bytes: template_asset!(4),
+        painted_bottom: 284.0,
         height: 288.0,
         slot_centers: &[
             egui::pos2(29.5, 63.4),
@@ -135,6 +157,7 @@ const TEMPLATES: [TemplateInfo; MAX_FRAME_SLOTS] = [
     },
     TemplateInfo {
         bytes: template_asset!(5),
+        painted_bottom: 338.0,
         height: 339.0,
         slot_centers: &[
             egui::pos2(29.5, 63.5),
@@ -146,6 +169,7 @@ const TEMPLATES: [TemplateInfo; MAX_FRAME_SLOTS] = [
     },
     TemplateInfo {
         bytes: template_asset!(6),
+        painted_bottom: 392.0,
         height: 393.0,
         slot_centers: &[
             egui::pos2(27.5, 66.9),
@@ -281,6 +305,12 @@ impl CombatFrame {
 
         // Le template est peint D'ABORD (voir doc de fonction) : simple fond, plus de trou à
         // masquer côté image.
+        //
+        // **Panneau posé à droite** : ce gabarit est du DÉCOR, donc il est bien RETOURNÉ par le
+        // miroir (`crate::mirror`) — son ornement doit regarder vers le jeu. C'est justement ce
+        // qui manquait à la première version, où il n'était que déplacé : « le rendu est
+        // complètement affreux ». Les portraits, eux, sont des blocs (voir plus bas) : ils
+        // changent de place sans se retourner.
         egui::Image::new(texture).paint_at(ui, frame_rect);
 
         for (fighter, &center) in fighters.iter().zip(template.slot_centers) {
@@ -304,20 +334,27 @@ impl CombatFrame {
             // encore classifié, ennemi que le catalogue ne résout pas) n'ont pas d'équivalent gris.
             let (texture, dimmed) = match &portrait {
                 Some(super::combat::FighterPortrait::ClassPortrait(texture)) => {
-                    (texture.id(), false)
+                    (super::combat::sized(texture), false)
                 }
                 Some(super::combat::FighterPortrait::RemoteMonster(texture)) => {
-                    (texture.id(), fighter.is_ko)
+                    (super::combat::sized(texture), fighter.is_ko)
                 }
-                None => (icons.unknown_entity_texture().id(), fighter.is_ko),
+                None => (
+                    super::combat::sized(icons.unknown_entity_texture()),
+                    fighter.is_ko,
+                ),
             };
-            crate::design::paint_portrait(
-                ui,
-                portrait_rect,
-                texture,
-                crate::design::PortraitShape::Round,
-                dimmed,
-            );
+            // Ancré sur `portrait_rect` : le pourcentage peint plus bas, dans la seconde boucle,
+            // prend la MÊME ancre et suit donc exactement le même déplacement.
+            crate::mirror::upright_in(ui, portrait_rect, |ui| {
+                crate::design::paint_portrait(
+                    ui,
+                    portrait_rect,
+                    texture,
+                    crate::design::PortraitShape::Round,
+                    dimmed,
+                );
+            });
         }
 
         // Infobulle (nom, demande utilisateur : les portraits ne sont plus alignés avec "leur"
@@ -368,11 +405,15 @@ impl CombatFrame {
             crate::design::tooltip(&response).text(fighter.name.as_str());
             let measured = metric.value_of(fighter);
             if measured > 0 {
-                crate::design::paint_portrait_percent(
-                    ui,
-                    portrait_rect,
-                    crate::design::portrait_percent(measured, total_damage),
-                );
+                // Même ancre que le portrait : les deux se déplacent ensemble, le pourcentage
+                // reste dans son coin (voir `crate::mirror`).
+                crate::mirror::upright_in(ui, portrait_rect, |ui| {
+                    crate::design::paint_portrait_percent(
+                        ui,
+                        portrait_rect,
+                        crate::design::portrait_percent(measured, total_damage),
+                    );
+                });
             }
         }
         clicked

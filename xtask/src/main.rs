@@ -5,13 +5,17 @@
 //! dépendances de production.
 //!
 //! Sous-commandes : `mem-budget` (voir sa doc), `visual-check` (voir sa doc — jamais appelée par
-//! la CI par défaut, §17.2 : « jamais un gate CI par défaut » pour ce harnais précis) et `dist`
+//! la CI par défaut, §17.2 : « jamais un gate CI par défaut » pour ce harnais précis), `dist`
 //! (assets, manifeste signé et mesure du différentiel d'une Release — `.github/workflows/
-//! release.yml`, docs/plan-mise-a-jour.md §6).
+//! release.yml`, docs/plan-mise-a-jour.md §6) et `setup-tools` (outils Cargo globaux du dépôt,
+//! voir sa doc).
 
 mod dist;
 mod mem_budget;
+mod setup_tools;
 mod visual_check;
+
+const USAGE: &str = "usage : cargo run -p xtask -- mem-budget|visual-check|dist|setup-tools";
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -19,14 +23,13 @@ fn main() {
         Some("mem-budget") => mem_budget::run(),
         Some("visual-check") => visual_check::run(),
         Some("dist") => dist::run(),
+        Some("setup-tools") => setup_tools::run(),
         Some(other) => {
-            eprintln!(
-                "sous-commande inconnue : {other}\nusage : cargo run -p xtask -- mem-budget|visual-check|dist"
-            );
+            eprintln!("sous-commande inconnue : {other}\n{USAGE}");
             std::process::exit(2);
         }
         None => {
-            eprintln!("usage : cargo run -p xtask -- mem-budget|visual-check|dist");
+            eprintln!("{USAGE}");
             std::process::exit(2);
         }
     }

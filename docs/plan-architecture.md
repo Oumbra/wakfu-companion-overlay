@@ -15,7 +15,7 @@
 | OS | Windows / Linux / macOS | **Windows + Linux**. macOS retiré (supprime le main-thread NSApp, les permissions Accessibility, la notarisation) |
 | Fichier lu | `wakfu-chat.log` | **`wakfu.log`** (nom réel, enveloppe log Java du client) |
 | Données | « extraire des JSON du dépôt web » | Le catalogue est en **Postgres/Neon derrière une API** — consommation via `GET /api/v1/catalog/` |
-| Serveur | absent du plan | **Synchronisation historique combats / achats HDV / kamas HDV / échanges**, idempotente, sur l'API existante |
+| Serveur | absent du plan | **Synchronisation historique combats / achats HDV / kamas HDV / échanges / extractions de pacte**, idempotente, sur l'API existante |
 
 ---
 
@@ -171,7 +171,7 @@ ne voit jamais de doublon.
 wakfu-companion-overlay/
 ├── Cargo.toml                     # workspace
 ├── crates/
-│   ├── overlay-app/               # binaire : câblage, config, cycle de vie
+│   ├── overlay-app/               # binaire : câblage, config, cycle de vie (harnais L1, retiré le 2026-09-19)
 │   │   └── src/{main.rs,config.rs,paths.rs,hotkey.rs}
 │   ├── overlay-ingest/            # tail de wakfu.log
 │   │   └── src/{watcher.rs,tailer.rs,rotation.rs,discovery.rs}
@@ -284,6 +284,69 @@ généralement rechargée entière avant qu'une reconnexion ne survienne) ; ce n
 de parité fonctionnelle voulu, seulement une conséquence du fait que l'overlay, contrairement à un
 onglet de navigateur, reste ouvert en continu pendant des heures de jeu et traverse donc bien plus
 souvent une vraie rotation `wakfu.log` mid-session.
+
+### 5.3 bis Reprise après blocage de l'ingestion (2026-09-17)
+
+**Le symptôme, rapporté par l'utilisateur** : le panneau Combat se fige en plein combat — plus un
+dégât, plus une armure donnée, plus un soin qui monte — alors que ses boutons répondent encore.
+
+**Ce que ce symptôme désigne.** Un panneau qui répond mais n'avance plus n'est PAS un rendu bloqué :
+le thread de rendu lit le dernier `SessionSnapshot` publié par `ArcSwap` (§3), il redessine donc
+fidèlement un état qui, lui, ne bouge plus. C'est la publication qui s'est arrêtée, et il n'y a que
+deux endroits où elle peut s'arrêter :
+
+1. **le tailer ne livre plus** — plus aucun lot n'arrive sur le canal alors que le jeu écrit
+   (handle perdu, rotation mal vue, inode réutilisé malgré le garde-fou de préfixe du §5.2) ;
+2. **le parser rejette tout** — les lots arrivent mais `Engine::ingest_batch` échoue à chaque fois
+   (contexte QuickJS en échec durable) ; la boucle d'ingestion abandonne alors les lignes SANS
+   publier, et le tailer a déjà avancé son offset : elles sont perdues.
+
+**La réparation, unique pour les deux cas** : relire `wakfu.log` depuis sa première ligne et
+reconstruire la session à partir de ce qu'il contient — `EngineCommand::ResyncLog`
+(`overlay-ui/src/engine_thread.rs`). Mécaniquement, c'est `ChangeLogPath` sur le même fichier :
+`Engine::forget_session()` puis un watcher respawné, ce qui donne un tailer neuf ET, par le
+rattrapage `is_initial_load` qui suit, un parser réinitialisé (§5.3). Aucune alerte ne re-sonne : le
+rattrapage entier est marqué `is_initial_load`, et tout ce qui sonne ou compte durablement est déjà
+filtré par ce drapeau (`Engine::apply_entry`). Les événements d'historique, eux, repartent — comme à
+toute reconnexion, et pour la même raison (idempotence serveur par `clientKey`, §7.1).
+
+**Ce que la relecture coûte, et qui est assumé** : les combats TERMINÉS de la session en cours sont
+oubliés s'ils ne sont plus dans le fichier (rotation survenue depuis), et un combat commencé avant
+une rotation perd son début. C'est le prix d'un dépannage, pas le fonctionnement normal — une
+rotation ordinaire continue de préserver `state` (§5.3), et rien de tout cela ne se déclenche sans
+panne constatée.
+
+**Le déclenchement automatique — `IngestWatchdog`.** Le signal retenu n'est délibérément PAS « les
+chiffres du combat n'ont pas bougé » : un combat au tour par tour passe des dizaines de secondes
+sans un seul dégât, et un chien de garde qui prendrait ce calme pour une panne relancerait une
+relecture complète en plein combat pour rien. Le signal est l'écart entre ce que le JEU a écrit et
+ce que l'overlay a digéré :
+
+> `wakfu.log` a changé de taille, et aucun lot n'a été appliqué avec succès depuis huit secondes.
+
+Les deux conditions sont nécessaires. Le délai (8 s) laisse passer sans faux positif le débounce du
+watcher, son repli périodique, une ligne encore incomplète en fin de fichier et l'ingestion d'un gros
+lot. L'écart de taille — une INÉGALITÉ, pas une croissance, une rotation faisant retomber la taille —
+garantit qu'on ne relit jamais un fichier que personne n'alimente : client fermé, joueur à l'arrêt,
+il n'y a alors rien à rattraper. Un lot REJETÉ ne compte jamais comme un progrès, c'est ce qui rend
+le cas 2 visible. Une période de grâce de 30 s suit chaque relecture : une panne qui résiste doit
+réessayer, pas repasser le fichier entier dans QuickJS toutes les huit secondes.
+
+**Le déclenchement manuel** : `ShortcutAction::Refresh` sous Windows — le « bouton nucléaire » du
+2026-09-02 (`App::force_refresh`), qui redessinait et réaffirmait le premier plan sans jamais
+toucher au flux de log, c'est-à-dire sans rien pouvoir contre cette panne-là. Le bouton
+« Rafraîchir le panneau de combat » qui fermait la section « Combat » de la fenêtre Options
+(les deux plateformes, 2026-09-17) a été **retiré le 2026-09-18** à la demande de l'utilisateur
+(« retire la partie […] de la section Combat de l'onglet Paramètres ») ; sous Linux, le chien de
+garde est donc le seul déclencheur.
+
+**La bascule est atomique.** Pendant la relecture, la publication du snapshot est SUSPENDUE : le
+panneau garde ce qu'il affichait jusqu'à ce que l'état reconstruit soit complet, puis bascule d'un
+bloc. Sans cela, une relecture de plusieurs dizaines de lots (2000 lignes chacun, `MAX_BATCH_LINES`)
+ferait défiler à l'écran tout l'historique du fichier, combat par combat, avant de retomber sur le
+combat en cours — l'inverse de ce que le geste promet. La fin de la relecture est le premier silence
+du watcher (il pousse les lots d'un trait, §5.2), avec une échéance de 20 s en garde-fou : un
+panneau muet est le symptôme qu'on répare, pas celui qu'on installe.
 
 ### 5.4 Date et heure
 
@@ -459,7 +522,10 @@ trouvée**, créée/détruite dynamiquement au gré des clients qui se lancent/s
 affichant le combat de SON personnage (`overlay_engine::SessionSnapshot::fight_for_character`,
 résolu depuis le nom extrait du titre de fenêtre — voir §2 du plan overlay-engine et
 `crates/overlay-ui/src/main.rs::App::sync_windows`). Chaque fenêtre overlay se cale au bord gauche
-de SA fenêtre de jeu, verticalement centrée dessus, et suit tout déplacement/redimensionnement
+de SA fenêtre de jeu — au bord DROIT depuis le 2026-09-17 si la case correspondante est cochée, et
+son contenu est alors retourné en miroir, voir §9.1 vicies —, verticalement centrée dessus **tant
+que l'utilisateur ne l'a pas fait glisser** (§9.1 duovicies : la hauteur choisie est persistée et
+bornée au cadre, le côté reste une case des Options), et suit tout déplacement/redimensionnement
 (`crates/overlay-ui/src/game_window.rs`) :
 
 - **Identification par titre, pas par process.** Le titre de la fenêtre de jeu est
@@ -479,12 +545,24 @@ de SA fenêtre de jeu, verticalement centrée dessus, et suit tout déplacement/
   repositionnement (`set_outer_position`) uniquement si la position cible a changé, pas à chaque
   tick. Même tick pour la création/destruction dynamique des fenêtres overlay (diff par `HWND`
   entre deux scans).
-- **Focus-aware topmost** : chaque overlay reste au-dessus tant qu'une fenêtre de jeu (n'importe
-  laquelle, pas nécessairement la sienne) ou un overlay a le focus (`GetForegroundWindow` comparé
-  aux `HWND` connus), sinon repli en z-order normal via `SetWindowPos(HWND_NOTOPMOST, ...)` — ne
-  recouvre plus une application quelconque devenue active (explorateur de fichiers, navigateur…),
-  retour utilisateur du 2026-09-01. Politique volontairement simplifiée (pas de logique « seulement
-  l'overlay du personnage actif »).
+- **Focus-aware topmost** : chaque overlay reste au-dessus tant que SA fenêtre de jeu, ou un
+  overlay de ce même client, a le focus (`GetForegroundWindow` comparé aux `HWND` connus) ; sinon
+  repli hors bande topmost — ne recouvre plus une application quelconque devenue active
+  (explorateur de fichiers, navigateur…), retour utilisateur du 2026-09-01.
+  **Un groupe d'overlays par fenêtre de jeu, qui suit sa fenêtre (2026-09-23, retour utilisateur
+  multi-compte, captures à l'appui)** : le repli était `SetWindowPos(HWND_NOTOPMOST)`, qui place
+  la fenêtre en TÊTE de la bande non-topmost — donc au-dessus de l'application qui vient d'être
+  activée tant qu'elle n'est pas réactivée : deux clients côte à côte, les overlays du client
+  quitté restaient dessinés par-dessus le client actif (et par-dessus VS Code, l'outil de capture…).
+  Le repli insère désormais l'overlay **juste au-dessus de sa propre fenêtre de jeu** dans le
+  z-order (`hWndInsertAfter` = la fenêtre qui précède le jeu, `GW_HWNDPREV` ; `HWND_NOTOPMOST` si
+  elle est topmost ou absente — `App::glue_above_game`) : il reste visible tant que son client
+  l'est, et passe derrière tout ce qui passe devant ce client, comme s'il en faisait partie. Seul
+  le groupe du client au premier plan est `HWND_TOPMOST`. Le recollage est revérifié à la même
+  cadence que la réaffirmation topmost (`App::is_glued_above_game`) : un `ShowWindow` (panneau
+  Combat qui réapparaît) peut le défaire. Pas de propriété Win32 (`GWLP_HWNDPARENT` vers le
+  processus du jeu) : la destruction du propriétaire détruirait nos fenêtres sous les pieds de
+  winit — le z-order explicite obtient le même résultat sans ce risque.
   **Délai de grâce avant repli (2026-09-02, retour utilisateur, vidéo à l'appui)** : la démotion en
   `HWND_NOTOPMOST` était jusqu'ici IMMÉDIATE dès qu'un seul tick (~50 ms, cadence de sondage §6.5)
   voyait `GetForegroundWindow()` cesser de désigner la fenêtre de jeu — l'overlay Combat
@@ -492,10 +570,14 @@ de SA fenêtre de jeu, verticalement centrée dessus, et suit tout déplacement/
   personnage restait visible au même instant bien que les deux passent par exactement le même code
   (`App::sync_topmost`, vérifié identique pour les deux) : un aléa d'ordonnancement Windows d'un
   seul tick entre les deux `SetWindowPos` suffisait à les faire diverger visuellement. Un overlay
-  qui vient de perdre `relevant` n'est désormais démoté qu'après `TOPMOST_DEMOTE_GRACE` (1,5 s)
-  écoulée EN CONTINU sans redevenir pertinent — la réaffirmation en topmost, elle, reste immédiate
-  dès que le focus revient, avant l'échéance. Ne revient pas sur le principe du 2026-09-01 (repli
-  toujours appliqué au bout du délai), absorbe seulement les aléas de timing d'un tick.
+  qui vient de perdre `relevant` n'est désormais démoté qu'après `TOPMOST_DEMOTE_GRACE` écoulée
+  EN CONTINU sans redevenir pertinent — la réaffirmation en topmost, elle, reste immédiate dès que
+  le focus revient, avant l'échéance. Ne revient pas sur le principe du 2026-09-01 (repli toujours
+  appliqué au bout du délai), absorbe seulement les aléas de timing d'un tick.
+  **100 ms depuis le 2026-09-23** (deux ticks) : les 1,5 s initiales, choisies sans mesure,
+  faisaient traîner la disparition bien derrière l'apparition, immédiate (retour utilisateur,
+  vidéo à l'appui : « il devrait disparaître avec le même temps de réponse que l'apparition »).
+  Même valeur côté Linux (`overlay_platform::linux::topmost::DEMOTE_GRACE`).
 - **Fenêtres à durée de vie dynamique** : le motif `Box::leak`/`&'static Window` du mono-fenêtre
   d'origine ne tient plus dès qu'une fenêtre doit pouvoir être détruite (client fermé) —
   `Arc<Window>` à la place (`wgpu::Instance::create_surface` l'accepte directement, donnant un
@@ -519,6 +601,20 @@ de SA fenêtre de jeu, verticalement centrée dessus, et suit tout déplacement/
 | Achat marchand/HDV | `POST /api/v1/history/purchases` | `clientKey`, `itemId`\|`itemName`, `quantity`, `totalCost`, `occurredAt`, `gameServer` |
 | **Récupération de kamas HDV** | `POST /api/v1/history/purchases` | même endpoint, `itemName = "__hdv_kamas_sale__"` (constante `HDV_KAMAS_SALE_ITEM`) — c'est ainsi que le web l'enregistre |
 | Échange joueur | `POST /api/v1/history/trades` | `clientKey`, `peerName`, `selfName`, `kamasAcquired/Given`, `items[]` |
+| **Extraction de pacte** (2026-09-19) | `POST /api/v1/history/pacts` | `clientKey`, `occurredAt`, `gameServer`, `items[]` (`itemId`\|`itemName`, `quantity`) — ni prix ni combat d'origine. Détectée comme côté web : la ligne `Action [WALKON] performed on interactive element : <id>` (événement `interactive-walkon` du parseur vendu) ouvre une fenêtre de 3 min (`PACT_EXTRACTION_WINDOW_MS`), prolongée par chaque ramassage qui la rejoint ; tout ramassage de cette fenêtre est **exclu du butin de combat** (comme un achat marchand/HDV), et le lot est committé par la première ligne postérieure à la fenêtre — jamais forcé en fin de lot de lignes, une fenêtre pouvant légitimement chevaucher deux lots en lecture incrémentale |
+
+**Un écart assumé avec le web (2026-09-19) : la session marchand/HDV.** Le parseur vendu reconnaît
+désormais son ouverture et ses DEUX fermetures (« On arrête » et « On annule », cette dernière
+portée du web en même temps que `client-lifecycle` et `item-loss`), mais `SessionState` ne s'en
+sert PAS pour exclure du butin de combat, contrairement à `isPurchaseLoot = priceKnown ||
+inMarketOccupation` côté web. Raison mesurée : dans `crates/overlay-engine/tests/wakfu.log` (vrai
+fichier, 2026-08-04), l'ouverture de 20:33:04 n'a jamais de fermeture d'aucune forme — armer le
+drapeau y requalifierait en achat HDV les **628 ramassages des 1 h 30 suivantes**, c'est-à-dire
+tout le butin de tous les combats du fichier. Les logs récents portent bien la ligne de fermeture
+(c'est sur l'un d'eux que le web a été calibré) : le jour où un fichier récent le confirme ici
+aussi, l'exclusion se câble en trois lignes — le signal est déjà parsé et désérialisé. Le cycle de
+démantèlement (`item-loss` + fenêtre de 2 s), lui, est câblé : même forme que la fenêtre d'achat,
+donc sans ce risque de drapeau resté armé.
 
 `clientKey = sha256_hex("{uid}|{kind}|{signature}")`, signature produite **par l'Engine** (donc par
 le code TS partagé) — l'hôte Rust ne fait que le hachage, comme `SyncQueueService` le fait côté web.
@@ -551,8 +647,13 @@ automatiquement par un navigateur, ce qui n'existe pas ici).
 > **Ne jamais** aller lire le cookie dans la base du navigateur : fragile, intrusif, indéfendable.
 
 **Stockage du jeton** : trousseau OS via `keyring` (Credential Manager sous Windows, Secret Service
-sous Linux). Repli explicite et signalé à l'utilisateur : fichier `0600` sous
-`$XDG_DATA_HOME/wakfu-overlay/` quand aucun Secret Service n'est disponible (WM minimalistes).
+sous Linux). Repli explicite et signalé au journal (pas encore dans l'interface, C7 de
+[`analyse-rgpd.md`](analyse-rgpd.md)) : fichier `0600` sous `$XDG_DATA_HOME/wakfu-overlay/` quand
+aucun Secret Service n'est disponible (WM minimalistes) ou que le trousseau ne relit pas ce qu'il
+a écrit. Un emplacement **par déploiement** depuis le 2026-09-21 (`token_store::slot`, dérivé de
+`client::base_url()`) : `native-session` pour la prod, `native-session@<hôte>` pour dev ou un
+`wrangler pages dev` local — un exe de preview et un exe de release sur le même poste ne
+s'écrasent plus leur session. Ce que ce jeton ouvre et comment il se révoque : §10.
 
 ### 7.3 File d'envoi (miroir Rust de `SyncQueueService`) — ✅ fait (lot L5, 2026-09-02)
 
@@ -573,6 +674,23 @@ Paramètres **identiques au web** (`overlay_sync::queue`) : lots de **50** (`SYN
 backoff **15 s → 5 min** (doublement, `backoff_delay` côté `overlay-ui`), abandon d'une entrée
 après **10 tentatives non réseau** (`MAX_ATTEMPTS`) — seul un rejet HTTP 4xx (hors 401/429) compte
 comme tentative, exactement comme `permanent` côté web.
+
+**Écart assumé depuis le 2026-09-23 — refus classés** (`queue::Rejection`) : jusque-là tout 4xx
+comptait une tentative et le lot repartait à l'identique toutes les 5 min, dix fois, avant d'être
+jeté en entier. Désormais : **401** arrête l'envoi, efface le jeton et ramène « Se connecter »
+(`AuthCommand::SessionExpired`), la file étant conservée pour la reconnexion et vidée si un autre
+compte la reprend (`SyncQueue::claim_owner`) ; **403** (`history_quota_exceeded`,
+`browser_session_required`, autre) suspend ce type d'événement pour la session sans vider sa file ;
+**400/413** redivisent le lot par moitié jusqu'à isoler l'entrée fautive, seule retirée ; **429**
+respecte `Retry-After` (secondes ou date HTTP, plafond 1 h) ; 5xx et réseau gardent le backoff ;
+les autres 4xx gardent `MAX_ATTEMPTS`. Une entrée dont la date sort des bornes du serveur (avant
+2012-01-01, après maintenant + 1 j) n'est jamais envoyée, et un 200 portant
+`rejected: [{ index, clientKey?, error }]` journalise ces entrées avant de les retirer.
+
+**Instance unique** (même date, `overlay_ui::single_instance`) : un verrou de fichier
+(`File::try_lock`, dans `%TEMP%` ou `$XDG_RUNTIME_DIR`) empêche deux overlays de partager jeton et
+file d'envoi ; un processus relancé par l'overlay lui-même (`RELAUNCH_ENV`) attend le verrou
+jusqu'à 30 s.
 
 **Écart assumé : pas de vrai debounce de 2 s** (`FLUSH_DEBOUNCE_MS` côté web) — chaque
 `SyncCommand::Enqueue` reçu par le thread Sync (`overlay-ui::spawn_sync_thread`) déclenche une
@@ -663,6 +781,28 @@ ce poste de dev) pour retrouver les formules et raisonnements exacts plutôt que
   lot (`git stash`), sont corrigées au passage — le workspace entier est maintenant propre sous
   `clippy -D warnings`.
 
+**Le rattrapage de `wakfu.log` n'est ingéré qu'une fois le roster connu (2026-09-21).** Vérification
+des trois flux (achats/HDV, échanges, extractions de pacte) sur le vrai `wakfu.log` du jour rejoué
+dans l'`Engine` (`cargo run -p overlay-engine --example dump_sync_events -- <wakfu.log>
+[settings.json]`) puis relus sur `GET /api/v1/history/{purchases,trades,pacts}` du compte dev : les
+trois partent bien — mais le journal montrait « rattrapage initial de wakfu.log terminé » (13:36:16)
+onze secondes AVANT « réglages de compte appliqués à l'Engine » (13:36:27). Tout le rattrapage
+tournait sans roster, et ses événements en gardent la trace pour toujours (la signature, donc le
+`clientKey`, ne dépend pas du roster ; le serveur ne reprend jamais `gameServer` ni ne retire un
+échange) : achats HDV avec `gameServer: null`, échange entre deux personnages du MÊME roster envoyé
+deux fois (une par côté) là où `build_trade_sync_event`/`registerTrade` l'ignorent, combats sans
+classe de roster ni `xpGained` par participant. Depuis la fenêtre de connexion (§9.1 undecies),
+rien ne s'affiche sans compte lié : `spawn_engine_thread` retient donc les lots (`deferred_batches`,
+ordre et `is_initial_load` conservés) et les rejoue d'un trait au premier `ApplySettings`, par le
+même chemin que le direct. `StartupProgress::mark_log_replayed` garde son sens de « fichier lu par
+le watcher » (un utilisateur sans jeton doit pouvoir cliquer « Se connecter » sans attendre) ; une
+relecture (`ChangeLogPath`, chien de garde) vide ce qui est retenu. Vérifié en vrai : « roster
+connu — rejeu des lots de wakfu.log retenus depuis le démarrage batch_count=2 line_count=2657 »,
+puis « lot d'historique envoyé au compte kind="purchase" sent=5 inserted=5 » — nouvelle trace
+d'envoi RÉUSSI (`SyncQueue::flush_once`), seule façon de vérifier après coup qu'un lot est parti,
+la file SQLite étant vidée dès la réponse. Les entrées déjà envoyées sans roster restent telles
+quelles côté serveur (à nettoyer à la main si besoin).
+
 ### 7.4 Synchro des compteurs de Suivi (watchlist) — ✅ fait (2026-09-07)
 
 Mécanisme **VOLONTAIREMENT distinct** de la file d'envoi du §7.3 (`SyncQueue`) — voir §14 point 3
@@ -710,6 +850,20 @@ DERNIER instantané compte.
 ### 7.5 Catalogue
 
 - `GET /api/v1/catalog/version` au démarrage → si changement, `GET /api/v1/catalog/` (≈ 349 Ko gzip).
+- **Session requise (2026-09-20).** Côté `wakfu-companion` (`docs/analyse-cgu.md`, recommandation
+  4 : la licence de données WAKFU n'autorise ni sous-licence ni cession), `catalog/*`,
+  `items/{id}`, `monsters/{id}`, `monster-loot`, `monster-families`, `dungeons` et le relais
+  d'icônes `icons/*` ne répondent plus qu'au site (`Sec-Fetch-Site: same-origin`) et à une
+  session valide (`Authorization: Bearer`), 403 sinon. L'overlay pose donc son jeton natif sur ces
+  routes — le même que pour l'historique et les réglages — via `overlay_sync::session` : le thread
+  Auth le publie dès qu'une session est validée (`activate_sync_queue`) et le retire à la
+  déconnexion ; les threads Catalogue et Donjons publient leur cache disque, attendent le verdict
+  du thread Auth (`session::wait_resolved`, couvert par l'écran de chargement), puis rafraîchissent
+  — et rafraîchissent encore à chaque nouvelle session (`wait_token_after` : premier « Se
+  connecter », reconnexion). Sans session : cache disque, sinon repli embarqué. `gen-catalog-fallback`
+  réutilise le jeton de l'overlay appairé sur le poste contre le déploiement visé
+  (`token_store::load_token`, un emplacement de trousseau par déploiement depuis le 2026-09-21 :
+  `native-session` pour la prod, `native-session@<hôte>` sinon — preview et release cohabitent).
 - Cache disque dans `$XDG_CACHE_HOME` / `%LOCALAPPDATA%`, validé par `ETag`/version.
 - Repli hors-ligne : `assets/catalog/catalog-index.json.gz` embarqué (`include_bytes!`), utilisé si
   aucun cache et pas de réseau — l'overlay reste utilisable, avec un bandeau « catalogue daté ».
@@ -745,10 +899,9 @@ DERNIER instantané compte.
 | Panneau | Contenu | Comportement |
 | --- | --- | --- |
 | **Dégâts de combat** | dégâts par allié/ennemi en temps réel, détail par sort et par élément, onglets multi-combats (multi-compte) | Ouvert automatiquement à l'entrée en combat, replié à la fin (configurable) |
-| **Suivi (watchlist)** | compteurs objets/ennemis, mode incrémental ou décompte avec alerte | Persistant entre sessions — **jamais incrémenté pendant `isInitialLoad`** |
-| **Alertes de drop** | toast (carte + confettis, miroir visuel de `loot-alert.component` du dépôt web) + son, sur ramassage à son activé (défaut ou ajouté au compte) ET sur décompte de suivi à 0 | Son configurable par objet (parité web) ; toast ≤ 5 s (minuterie fixe) OU fermé plus tôt par clic (carte ou croix) — les deux cohabitent, pas un réglage exclusif comme `ProfileService.alertManualClose` côté web |
-| **Récap de session** | kamas (combat / ventes HDV / échanges), XP, combats gagnés/perdus | Compact, toujours visible |
-| **État de synchro** | `idle`/`pending`/`syncing`/`error`, nombre en attente, dernière synchro | Discret ; l'erreur réseau ne doit jamais masquer le jeu |
+| **Suivi (watchlist)** | compteurs objets/ennemis, mode incrémental, décompte (part de la cible, descend vers 0) ou objectif (part de 0, monte vers la cible — ajouté le 2026-09-17, `WatchlistMode::Goal`), les deux derniers avec alerte au bout de l'échelle | Persistant entre sessions — **jamais incrémenté pendant `isInitialLoad`** |
+| **Alertes de drop** | toast (carte + confettis, miroir visuel de `loot-alert.component` du dépôt web) + son, sur ramassage à son activé (défaut ou ajouté au compte) ET sur décompte de suivi à 0 / objectif de suivi atteint (même son, titre de carte distinct) | Son configurable par objet (parité web) ; toast ≤ 5 s (minuterie fixe) OU fermé plus tôt par clic (carte ou croix) — les deux cohabitent, pas un réglage exclusif comme `ProfileService.alertManualClose` côté web |
+| **Récap de session** (2026-09-16, §9.1 octodecies) | XP, kamas nets, combats gagnés − perdus, challenges réussis − échoués, durée de la session | Bande compacte en haut à gauche, sous les boutons du jeu ; `OverlayKind::Recap`, une par fenêtre de jeu ; masquée par la case « Activer le récap de session » (section « Recap » des Paramètres) |
 | **Modale Options** (2026-09-08) | Onglets « Suivi », « Alertes » (§9.1 ter), « Raccourcis » (§9.1 quinquies) et « Paramètres » (chemin de `wakfu.log`, §5.1 — plus l'affichage du panneau Combat hors combat) | Ouverte par le bouton "Options" du carré de contrôle Suivi ou son raccourci (`Ctrl+Shift+O` par défaut, personnalisable) ; fenêtre OS dédiée, centrée sur la fenêtre de jeu, chrome du design system (bannière turquoise, ligne d'onglets, pied de page Annuler/Valider) ; rien n'est pris en compte avant "Valider" |
 
 Raccourcis globaux : bascule interactif/traversable, afficher/masquer, panneau suivant.
@@ -770,6 +923,13 @@ proposer une disposition personnalisable comme le ferait un site web.
 > même raison — laisser l'utilisateur repositionner et mémoriser la disposition de chaque panneau
 > est une logique de personnalisation de site web, pas d'overlay. L'ancrage automatique
 > (`App::anchor_position`, §6.5) reste la seule source de position.
+>
+> **Décision du mainteneur (2026-09-18) : pas d'indicateur d'état de synchro non plus.** Retiré du
+> tableau ci-dessus et de la feuille de route (§12, L2). Le mécanisme (`overlay-sync::queue::SyncQueue`,
+> retries + backoff, L5) garantit que les données finissent par partir tôt ou tard, sans intervention
+> de l'utilisateur ; un badge idle/pending/syncing/error n'aurait donc rien d'actionnable à lui
+> montrer, contrairement à l'indicateur « 📦⚠ catalogue daté » (L3) qui, lui, signale un repli
+> effectivement dégradé.
 
 ### 9.1 Modale Options (2026-09-08)
 
@@ -822,8 +982,7 @@ l'**écran de réglage** manquait — la liste ne se modifiait que depuis le sit
 validée (`crates/overlay-testkit/examples/alertes-mockups.rs`, trois versions, la première refusée
 par une revue à trois experts) à de vraies données.
 
-- **Contenu** : titre et description, bouton « Tester le son », bloc « Fermeture de l'alerte »
-  (case « Fermeture automatique » + durée en secondes), champ d'ajout par `design::autocomplete`
+- **Contenu** : titre et description, champ d'ajout par `design::autocomplete`
   sur le catalogue, et la grille de tuiles. Une tuile porte **deux informations qui ne se gênent
   pas** : bordure et pictogramme disent l'état du SON, emplacement de rareté et nom disent ce
   qu'est l'OBJET. Cliquer bascule le son ; la croix de retrait n'existe **pas** sur les dix objets
@@ -835,12 +994,14 @@ par une revue à trois experts) à de vraies données.
   d'`AlertProfile`, et « Valider » commit **tous les onglets à la fois** — le pied de page est
   partagé, un bouton dont l'effet dépendrait de l'onglet affiché serait imprévisible. Un chemin de
   log refusé n'écrit donc rien, alertes comprises.
-- **Écriture au compte** : `PATCH /api/v1/settings` sur la clé `profile`, reconstruite **à partir
-  de l'objet brut reçu au `GET`** (`AlertProfile::patch_value`) — le serveur remplace la valeur
-  entière de la clé, et cette clé porte aussi le pseudo, l'avatar et le mode d'affichage des
-  personnages, que l'overlay n'affiche nulle part. Écriture sautée si le brouillon n'a pas changé :
-  l'arbitrage est « dernier écrivain gagne », une écriture inutile écraserait une modification
-  faite depuis le site.
+- **Écriture au compte** : `PATCH /api/v1/settings` sur la clé `profile`, **partielle** depuis
+  le 2026-09-19 (constat C9 de `docs/analyse-rgpd.md`) : l'entrée porte `patch` et les seuls trois
+  champs d'alerte (`AlertProfile::patch_fields`), le serveur fusionne champ par champ. Le pseudo,
+  l'avatar et le mode d'affichage des personnages, que l'overlay n'affiche nulle part, ne
+  transitent plus par lui — jusque-là la clé était reconstruite à partir de l'objet brut reçu au
+  `GET`, parce que le serveur en remplaçait la valeur entière. Écriture sautée si le brouillon n'a
+  pas changé : l'arbitrage est « dernier écrivain gagne », une écriture inutile écraserait une
+  modification faite depuis le site.
 - **La durée réglée pilote vraiment le toast** : `WatchlistToast::hide_at` est passé à
   `Option<Instant>`, `None` valant « ne se ferme qu'à la main ». Régler une durée sans effet aurait
   été pire que pas de réglage.
@@ -866,6 +1027,33 @@ La boîte de confirmation a été **remontée au design system** à cette occasi
 voir le catalogue des composants) : deux appelants, donc sa place n'est plus dans un panneau.
 L'extraction est à pixel constant.
 
+### Échap ne quitte plus l'overlay, nulle part (2026-09-17)
+
+Les deux hôtes portaient un filet `Échap → event_loop.exit()`, posé quand les fenêtres overlay
+étaient réputées ne jamais recevoir d'événement clavier (`WS_EX_NOACTIVATE`). La modale Options, la
+fenêtre de connexion puis la confirmation de remise à zéro en ont été exclues une à une — et le
+défaut a resurgi malgré tout (retour utilisateur : « la touche Échap en ayant la modale Options
+ferme complètement l'overlay »). Deux raisons cumulées :
+
+- **La prémisse est fausse** : en mode interactif, un clic sur un bandeau Combat/Suivi fait bel et
+  bien de sa propre `HWND` la fenêtre au premier plan malgré `WS_EX_NOACTIVATE` — c'est le constat,
+  journaux à l'appui, qui avait déjà imposé le calcul par personnage de `sync_topmost` (§ correctif
+  2026-09-06/07). Ces fenêtres-là n'étaient donc pas exclues, et n'avaient aucune raison de l'être.
+- **La modale s'ouvrait sans le focus** quand elle était rattachée à un client : le focus restait au
+  bandeau dont on venait de cliquer « Options ». Échap y partait, et le filet fermait la session.
+
+Le filet est **retiré des deux binaires** plutôt qu'allongé d'une exclusion de plus : une touche nue
+qui arrête le programme n'a pas sa place, exactement comme le raccourci global « Quitter l'overlay »
+retiré le même jour. Les sorties propres restent le bouton « Fermer l'overlay » de l'onglet
+« Paramètres » (confirmé), l'entrée « Quitter » de la zone de notification, Alt+F4 et la croix pour
+les fenêtres qui en ont une (`WindowEvent::CloseRequested`), et Ctrl+C au terminal. Échap appartient
+désormais aux seuls panneaux qui le lisent : il annule la modale Options, répond « Non » à une
+confirmation, referme un sélecteur.
+
+La modale Options **prend le focus clavier à l'ouverture, rattachée ou non** — sans quoi ni Échap ni
+Entrée ne l'atteignent. Le prendre au jeu est ici l'effet recherché : c'est la seule fenêtre
+délibérément focalisable (§9.1), et depuis le voile du même jour elle couvre le client entier.
+
 ### Deux défauts corrigés après un test en jeu (2026-09-12)
 
 **1. La modale restait au-dessus de tout.** Elle naissait avec un `game_hwnd` nul — « pas rattachée
@@ -881,6 +1069,20 @@ global prend celle au premier plan (à défaut le premier overlay connu). Les de
 supprimées — elle suit le premier plan de SON personnage, disparaît quand on regarde ailleurs, et
 s'en va avec le client qu'elle configure. Même traitement côté X11 (`game_window`,
 `_NET_ACTIVE_WINDOW`).
+
+**Complément (2026-09-17) : la fenêtre Options s'ouvre même sans fenêtre de jeu.** Le rattachement
+ci-dessus avait un angle mort : sans client Wakfu à l'écran, « Options » (icône de zone de
+notification ou raccourci global) créait une modale rattachée à une `HWND` nulle et à un rectangle
+inventé, que `sync_windows` refermait au tick suivant faute de client derrière — l'entrée ne
+faisait donc rien tant que le jeu n'était pas lancé, alors que c'est précisément le moment où l'on
+règle le chemin de `wakfu.log`, les raccourcis ou le démarrage automatique. La modale est désormais
+**détachée** dans ce cas (`OverlayWindow::is_detached`, `game_hwnd` nul comme la fenêtre de
+connexion) : centrée sur l'écran principal, laissée en place par `sync_windows`, et jamais
+rétrogradée par `sync_topmost` — une fenêtre `WS_EX_TOOLWINDOW` passée derrière serait perdue,
+hors barre des tâches et alt-tab, sans moyen d'en rouvrir une autre. Elle ne se rattache pas à un
+client lancé entre-temps et vit jusqu'à « Valider »/« Annuler », comme avant. Une modale ouverte
+DEPUIS une fenêtre de jeu garde la règle du 2026-09-12 : elle s'en va avec elle. Même traitement
+côté X11 (`game_window == 0`).
 
 **2. Les noms d'objet étaient illisibles dans la grille.** Trois tuiles affichaient « Plan "Epée
 de » à l'identique. La cause n'était pas la mise en forme du texte mais `Ui::put`, qui **avance le
@@ -1065,10 +1267,10 @@ les deux binaires) et `panels::raccourcis_tab` l'écran qui les édite.
   ignorée, combinaison illisible remplacée par le défaut, table absente = tous les défauts).
 - **Libellés propagés jusqu'aux infobulles** (`RenderContent::shortcuts`) : les boutons du carré de
   contrôle et le switch Alliés/Ennemis affichent la combinaison RÉELLE, plus une chaîne recopiée.
-- **Portée Linux** : `bin/overlay-ui-x11.rs` n'enregistre que `ShortcutAction::LINUX_SUPPORTED`
-  (bascule, quitter, Options, sélection multiple, **plus les deux actions multicompte** depuis le
-  2026-09-13 — §9.1 sexies) faute de câblage pour les autres — celles-ci restent éditables et
-  persistées, un même `config.toml` servant aux deux OS.
+- **Portée Linux** : `bin/wakfu-companion-overlay-x11.rs` n'enregistre que
+  `ShortcutAction::LINUX_SUPPORTED` (bascule, quitter, Options, sélection multiple, **plus les deux
+  actions multicompte** depuis le 2026-09-13 — §9.1 sexies) faute de câblage pour les autres —
+  celles-ci restent éditables et persistées, un même `config.toml` servant aux deux OS.
 
 **Section « Compte » de l'onglet « Paramètres »** (même jour) : titre, bloc d'information disant que
 l'overlay ne fonctionne qu'avec un compte connecté et que se déconnecter ramène à l'écran de
@@ -1254,8 +1456,8 @@ d'**être prévenu** quand un message correspond à un critère qu'il a posé. M
   au `GET` (`AccountSettings::chat_filters`) et réécrite en entier au `PATCH`
   (`client::patch_chat_filters`) au **format du web** — `[{ text, channel }]`, `channel` valant
   `global` ou la clé d'un canal, anciens éléments texte relus comme des recherches globales.
-- **Onglet** (`panels::chat_tab`, entre Alertes et Personnages) : « Tester le son », bloc
-  « Fermeture automatique » + durée, formulaire canal → mot → « Ajouter » (Entrée ajoute aussi ;
+- **Onglet** (`panels::chat_tab`, entre Alertes et Personnages) : formulaire canal → mot →
+  « Ajouter » (Entrée ajoute aussi ;
   vide et doublon refusés avec une phrase), grille de tuiles à légende
   (`design::legend_tile`, §9.2) quatre par rangée, croix au survol. **Sans couleur de canal** : les
   thèmes du jeu. Transactionnel comme les autres onglets (`OptionsModalState::chat_draft`,
@@ -1495,7 +1697,17 @@ session), portée telle quelle dans `panels::login`.
   `AuthStatus::Connecting`. Garde-fou de 45 s, puis l'écran suivant quoi qu'il arrive. Compte lié
   ⇒ la fenêtre cède la place aux overlays ; sinon ⇒ « Vous n'êtes pas connecté ». Même hauteur
   que cet écran-là : le passage ne fait pas bouger la fenêtre.
-- **`OverlayKind::Login` / `panels::login`** — une carte de 400 px sur fond noir translucide :
+- **Plancher d'affichage de 5 s** (`startup::MIN_DISPLAY`, demande utilisateur du 2026-09-15) :
+  tout en cache et un jeton qui répond du premier coup, et l'écran ne durait qu'une poignée
+  d'images — un clignotement au lancement, pas un écran de chargement. `is_complete` reste donc
+  faux tant que l'écran n'a pas tenu cinq secondes, avant même le garde-fou ; l'hôte, qui ne
+  connaît que lui, garde la fenêtre de connexion sans rien savoir de ce délai. Le plancher court
+  depuis l'**apparition** de l'écran et repart quand `set_update_blocking(true)` le rouvre sur une
+  session déjà ouverte (« Mettre à jour » des Options), sinon une mise à jour qui échoue d'emblée
+  — dossier d'installation non inscriptible, manifeste injoignable — rendrait la main aussi vite
+  qu'elle l'a prise.
+- **`OverlayKind::Login` / `panels::login`** — une carte de 400 px sur fond noir quasi opaque
+  (`rgba(8,10,14,.90)` ; le `.78` du web laissait voir le bureau, demande du 2026-09-16) :
   logo du site (`assets/ui/logo-purple.png`, copie de `public/logo-purple.png` du dépôt web),
   titre « WAKFU COMPANION » en accent cyan `#00d2ff` suivi d'« OVERLAY » en italique gris, badge
   *beta* en haut à droite, séparateur gravé, corps aligné à gauche, version en pied en bas à
@@ -1517,7 +1729,8 @@ session), portée telle quelle dans `panels::login`.
   bannière (`LoginOutcome::drag_window` → `Window::drag_window`). Retaillée à chaque changement
   d'état à la hauteur que la carte a réellement occupée (`LoginOutcome::content_height`), en
   gardant son centre. Le logo est son icône de fenêtre et de barre des tâches. Échap n'y quitte
-  pas l'application ; Alt+F4, la croix de barre des tâches et le menu de zone de notification, si.
+  pas l'application — il ne le fait plus nulle part depuis le 2026-09-17 (voir « Échap ne quitte
+  plus l'overlay ») ; Alt+F4, la croix de barre des tâches et le menu de zone de notification, si.
 - **Cycle de vie piloté par le démarrage et `AuthStatus`** (`App::sync_session_windows`, avant
   `sync_windows` à chaque tick) : chargement en cours ⇒ la fenêtre de connexion seule, sur son
   rouage ; compte non lié ⇒ la fenêtre de connexion est la SEULE fenêtre (tout `Combat`/
@@ -1545,16 +1758,19 @@ session), portée telle quelle dans `panels::login`.
   contextuel n'en ouvre pas). **« Mise à jour » ajoutée après « Options » (2026-09-15, demande de
   l'utilisateur)** : lance la recherche de mise à jour (`UpdateCommand::Check`, même commande que
   le bouton de la fenêtre Options — §8.3 de `docs/plan-mise-a-jour.md`), toujours active puisqu'une
-  recherche ne dépend pas du compte ; le résultat se lit dans la section « Mise à jour » de la
-  fenêtre Options. C'est le seul accès à l'overlay quand ni jeu ni fenêtre de connexion
-  ne sont à l'écran, et le seul moyen de quitter proprement une fois connecté.
+  recherche ne dépend pas du compte. **Depuis le 2026-09-18, ce clic MONTRE la recherche**
+  (`App::open_manual_update_window`, §8.4 du même plan) : la fenêtre de connexion/démarrage s'ouvre
+  sur son écran de mise à jour — rouage et « Recherche d'une mise à jour… », puis « Vous êtes déjà
+  à jour », « Version X disponible » ou l'échec. C'est le seul accès à l'overlay quand ni jeu ni
+  fenêtre de connexion ne sont à l'écran, et le seul moyen de quitter proprement une fois
+  connecté.
 - **L'ancienne carte d'appairage de la zone Combat** (code, icône de relance 🔌, « Connexion… »)
   est retirée : la zone Combat n'existe plus que compte lié.
 - **Captures** (`tests/panels.rs`, `login_*.png`, un harnais par test — `egui_kittest` exige
   qu'un test n'en ait qu'un) : les quatre états, animation figée (`LoginState::animate = false`),
   chacune prise à la hauteur exacte que `main.rs` donne à la fenêtre OS, vérifiée par assertion.
 
-**Linux (`bin/overlay-ui-x11.rs`, porté le même jour) :** mêmes threads de fond
+**Linux (`bin/wakfu-companion-overlay-x11.rs`, porté le même jour) :** mêmes threads de fond
 (`overlay_ui::background`), même fenêtre de connexion (fenêtre X11 ordinaire, pas `Utility` —
 barre des tâches, focus, centrée sur l'écran principal, icône = logo), même cycle de vie, fenêtre
 Options désormais pleinement câblée (compte, alertes, chat, suivi, recettes) et icônes réseau
@@ -1572,7 +1788,7 @@ commande (`Retry` reprend le jeton stocké s'il existe, sinon appaire).
 ### 9.1 duodecies Interrupteurs de fonctionnalité : Suivi, Alertes, Recherche (2026-09-15)
 
 Demande utilisateur : « permettre de désactiver les features Suivi, Alertes, Chat, via une option
-tout en haut, après le titre — "Activer le Suivi", "Activer les alertes", "Activer la recherche" ;
+tout en haut, après le titre — "Activer le suivi", "Activer la surveillance du drop", "Activer la recherche" ;
 activée par défaut ; lorsqu'elle est désactivée, tout le contenu devient grisé et désactivé,
 impossible d'interagir avec ».
 
@@ -1642,9 +1858,9 @@ notifications, juste en dessous de la ligne "Tester le son de l'alerte" ».
 - **Le bouton d'essai est grisé quand le son est coupé** — proposer d'écouter ce qu'on vient de
   faire taire serait une promesse que le jeu ne tiendra pas. Même règle que le champ de durée grisé
   sous une « Fermeture automatique » décochée.
-- **La ligne d'essai est devenue un composant** (`panels::sound_row`) : elle était écrite trois
-  fois à l'identique dans les onglets Suivi, Alertes et Chat, et c'est elle qui porte désormais la
-  case. Même motif que `panels::feature_switch`.
+- **La ligne d'essai est devenue un composant** (`panels::notifications`, `panels::sound_row`
+  jusqu'au 2026-09-15) : elle était écrite trois fois à l'identique dans les onglets Suivi, Alertes
+  et Chat, et c'est elle qui porte désormais la case. Même motif que `panels::feature_switch`.
 - **Pas de case dans « Alertes »**, et ce n'est pas un oubli : le son d'un ramassage s'y coupe déjà
   objet par objet, à la tuile — une sourdine globale ferait double emploi avec un réglage plus fin.
 - **Un brouillon comme le reste de la fenêtre** (§5.1) : la bascule n'a d'effet qu'à « Valider », et
@@ -1659,8 +1875,48 @@ la config, puis à chaque validation) et se contente de ne pas appeler `alert_so
 toast, lui, est publié comme avant. C'est toute la différence avec `SetFeatures`, qui saute
 l'alerte entière.
 
-**Captures** : `options_suivi_son_coupe` et `options_chat_son_coupe` — la case cochée, le bouton
-d'essai grisé, et le reste de l'onglet resté vif.
+**Captures** : `options_parametres_son_coupe` — les deux cases cochées, les deux boutons d'essai
+grisés, et le reste des sections resté vif. (Deux planches d'onglet, `options_suivi_son_coupe` et
+`options_chat_son_coupe`, jusqu'au regroupement du §9.1 quaterdecies.)
+
+### 9.1 quaterdecies Les notifications se règlent dans « Paramètres » (2026-09-15)
+
+Demande utilisateur, en quatre points : uniformiser « Tester le son de l'alerte » en **« Tester le
+son des notifications »** et « Fermeture automatique » en **« Fermeture automatique des
+notifications »**, sortir le couple case + durée de sa ligne à fond arrondi, et **déplacer les
+trois blocs (essai du son, sourdine, fermeture automatique) de tous les onglets dans des sections
+dédiées, après la section « Combat » de l'onglet « Paramètres »**.
+
+**Ce qui existe maintenant :**
+
+- **Quatre sections par fonctionnalité** dans « Paramètres » : « Combat » (inchangée, §9.1 decies),
+  puis « Suivi », « Alertes » et « Chat », dans l'ordre du menu d'onglets. Chacune porte ce que sa
+  fonctionnalité fait entendre et voir — et rien n'a été uniformisé de force : les Alertes n'ont
+  pas de sourdine globale (le son d'un ramassage se coupe déjà objet par objet, à la tuile, §9.1
+  terdecies). Le Suivi n'avait pas de fermeture automatique à cette date, au motif que « son alerte
+  est un son et un bandeau permanent, pas une carte à fermer » — c'était faux, et §9.1 sexdecies
+  le corrige.
+- **`panels::notifications`** (l'ancien `panels::sound_row`) peint ces sections. Il porte aussi le
+  trait `ToastClose`, que `AlertProfile` et `chat_tab::ChatToastSettings` implémentent : le bornage
+  de la durée reste chez eux, le peintre n'en refait pas un à lui.
+- **Les trois onglets ne gardent que ce qu'ils listent** — objets suivis, objets à alerte,
+  recherches. `AlertsTabAction` et `ChatTabAction` ont disparu avec le bouton d'essai, seule
+  intention que ces écrans produisaient ; `SuiviTabAction` ne garde que `ResolveRecipe`.
+- **Une fonctionnalité éteinte grise sa section** (`panels::feature_switch`) : ni son à essayer, ni
+  carte à fermer quand rien ne se déclenche. Un brouillon d'alertes ou de chat pas encore descendu
+  du compte grise sa seule ligne de fermeture, plutôt que de la faire apparaître en cours de route.
+- **Plus de fond de ligne sous la fermeture automatique** : le pavé arrondi `#26282b` venait de la
+  maquette d'« Alertes », où il tranchait sur le reste de l'onglet ; dans une section de
+  « Paramètres » il faisait de la durée le seul réglage encadré de la fenêtre.
+- **L'onglet « Paramètres » défile** (`design::PanelZones::scroll_area`, zone
+  « options-parametres ») : il porte sept sections, et « Mise à jour » tombait hors de la fenêtre
+  sans que rien ne le dise. Agrandir la fenêtre n'était pas une option — elle est posée par-dessus
+  un jeu. Corrigé au passage : la zone défilable rognait le retrait des titres de section, qui
+  rendaient « ichier », « ombat », « uivi ».
+
+**Captures** : `options_parametres_infobulle_test_son`, `options_parametres_son_coupe`,
+`options_parametres_fermeture_manuelle`, et `options_parametres_compte` /
+`options_parametres_mise_a_jour` après défilement.
 
 ### 9.1 tredecies Mise à jour automatique (2026-09-15)
 
@@ -1676,8 +1932,784 @@ d'exécution (`self-replace`) et relance avec `--updated-from`, toujours derriè
 chargement, jamais pendant une session. Captures : `login_telechargement`,
 `login_version_disponible`, `login_mise_a_jour_requise`, `options_parametres_mise_a_jour`.
 
-**À retravailler** (retour du mainteneur) : la mise en forme de l'écran de chargement, dans une
-itération dédiée — le mécanisme est en place, pas son dessin.
+**Écran de mise à jour (2026-09-18, demande de l'utilisateur, §8.4 du plan dédié)** : l'entrée
+« Mise à jour » du menu de la zone de notification ouvre la **même carte** que la connexion et le
+démarrage, en mode `LoginState::manual_update` — rouage et « Recherche d'une mise à jour… », puis
+le verdict et ce qu'on peut en faire. La recherche ne court plus en silence. C'est aussi le seul
+cas où cette fenêtre coexiste avec les overlays de jeu (`App::sync_session_windows`). Captures :
+`login_maj_recherche`, `login_maj_telechargement`, `login_maj_a_jour`, `login_maj_disponible`,
+`login_maj_indisponible`, `login_maj_echec`.
+
+**À retravailler** (retour du mainteneur) : la mise en forme de l'écran de chargement **du
+démarrage**, dans une itération dédiée — le mécanisme est en place, pas son dessin.
+
+### 9.1 quaterdecies Interrupteurs du panneau Combat : détail des combats, suivi des sorts (2026-09-15)
+
+Demande utilisateur : « ajouter une option d'activation de l'overlay combat dans la section
+"Combat" de l'onglet "Paramètres" avec le libellé "Activer le détail des combats", active par
+défaut », et « ajouter une option d'activation de l'aperçu des sorts […] avec le libellé "Activer
+le suivi des sorts", active par défaut ; cette option est dépendante de l'option "Activer le détail
+des combats" ».
+
+**Ce qui existe maintenant :**
+
+- **Deux cases en tête de la section « Combat »**, avant les réglages qu'elles commandent — même
+  place qu'un interrupteur d'onglet (§9.1 duodecies). « Activer le suivi des sorts » est en
+  retrait sous « Activer le détail des combats », à l'aplomb de son libellé : la même géométrie
+  que la sourdine sous la notification de tour (§9.1 decies).
+- **Le même véhicule que les trois cases d'onglet** :
+  `panels::feature_switch::FeatureToggles::{combat, spells}`, brouillon jusqu'à « Valider »,
+  persisté en LOCAL (`config::OverlayConfig::{combat,spells}_enabled`, `#[serde(default =
+  "actif")]`). Pas d'appel à `feature_switch::show` en revanche : il n'y a pas d'onglet « Combat »
+  à griser, seulement deux cases ordinaires.
+- **Une dépendance qui grise sans écraser** : le détail des combats coupé grise « Activer le suivi
+  des sorts » ET « Afficher le panneau de combat en dehors des combats » — un réglage d'
+  encombrement ne peut pas rallumer un panneau que son interrupteur éteint. Les deux cases gardent
+  leur valeur : `FeatureToggles::spells_visible()` combine les deux au moment de peindre, et qui
+  rallume l'interrupteur retrouve ses réglages tels quels.
+
+| Coupée | Ce qui s'arrête | Ce qui continue |
+| --- | --- | --- |
+| Détail des combats | Aucune fenêtre Combat n'est montrée, combat en cours compris (`panels::combat::should_show`, appliquée par les deux hôtes) | Le moteur mesure les combats et synchronise l'historique au compte |
+| Suivi des sorts | Le bloc « ligne de sorts », les deux marques sur les médaillons et l'épinglage au clic (`render_content::RenderContent::spells_enabled` → `panels::combat::show`) | Portraits, barres, switches et infobulles du panneau |
+
+Ces deux drapeaux **ne concernent pas le thread Engine** : ils voyagent dans le même
+`EngineCommand::SetFeatures` que les trois autres, mais rien ne les y lit — le détail des combats
+est une affaire de fenêtre OS (`sync_combat_visibility`, appelée dès la validation pour que le
+geste et son effet soient dans la même passe), le suivi des sorts une affaire de rendu.
+
+**Captures** : `options_parametres_combat_coupe` (les deux cases grisées, toujours cochées),
+`combat_spell_block_coupe` (le panneau sans sa ligne de sorts ni ses marques, à comparer à
+`combat_spell_block_suivi_auto`), et le test
+`options_parametres_la_case_des_sorts_suit_le_detail_des_combats` pour la moitié « la case grisée
+ne répond plus », qu'aucune image ne montre.
+
+### 9.1 quindecies La suppression multiple gagne « Alertes » et « Chat » (2026-09-16)
+
+Demande utilisateur : « ajouter le système de la suppression multiple, comme dans l'onglet "Suivi",
+dans les onglets "Alertes" et "Chat" ».
+
+Le geste existait depuis le 2026-09-13, mais **au Suivi seulement** : un bouton corbeille qui ouvre
+un mode, une case à cocher sur chaque tuile, un bouton rouge dont le libellé dit ce qu'il retire.
+Les deux autres onglets composent pourtant la même sorte de liste, et n'offraient qu'un retrait
+tuile par tuile — vider une liste de quinze recherches demandait quinze survols.
+
+**Ce qui existe maintenant :**
+
+- **Un module partagé**, `panels::bulk_select`, où la mécanique vit une seule fois : l'en-tête
+  (titre à gauche, corbeille et bouton groupé ancrés à droite), la bascule du mode, l'oubli des
+  coches en quittant, et le libellé `bulk_label` que le bandeau in-game partageait déjà avec le
+  Suivi. Il ne touche à aucune liste : il rend une intention (`BulkRequest::{All, Keys}`) et
+  l'appelant, seul à savoir ce qu'est une entrée, l'applique à la sienne. L'onglet Suivi y a migré
+  du même coup — trois copies du même en-tête auraient divergé au premier ajustement.
+- **Les quatre règles du Suivi tenues partout** : la sélection est un MODE et non une case
+  permanente ; sélection vide = « Supprimer tout » (la règle du web : aucune coche se lit « aucune
+  exclusion ») ; aucune commande quand il n'y a rien à retirer ; quitter le mode oublie les coches.
+  Et le ton reste **destructif** (`SelectionTone::Danger`) : cocher ici ne mène qu'au retrait, l'or
+  promettrait un choix qui n'existe pas.
+- **Ce que chaque onglet ajoute, et lui seul :**
+
+| Onglet | Ce qui lui est propre |
+| --- | --- |
+| Suivi | inchangé — le glisser-déposer de réordonnancement reste coupé dans le mode |
+| Alertes | **les dix objets par défaut ne se cochent pas** : ils ne se retirent pas (`SoundItemEntry::is_default`, refus structurel du web), donc ni case, ni clic — leur infobulle le dit plutôt que de laisser le clic ne rien faire. Le bouton disparaît quand la liste n'a plus qu'eux, et « Supprimer tout » les conserve. La phrase sous le titre change avec le mode : le clic ne bascule plus le son, il coche |
+| Chat | toutes les recherches se retirent ; la case se pose au coin **haut-droit** de la tuile — le haut-gauche porte la légende du canal — c'est-à-dire au coin de la croix qu'elle remplace |
+
+- **Un composant enrichi** : `design::legend_tile` sait porter une sélection
+  (`LegendTile::selection`/`selection_tone`), comme `design::item_slot` depuis le 2026-09-13. Case
+  ET liseré appartiennent au composant, jamais au panneau — la case n'est pas un widget et ne prend
+  aucun geste, c'est le clic de la tuile qui coche. Le liseré n'est pas un trait ajouté par-dessus :
+  c'est **la bordure du cadre repeinte** au ton de la sélection, sans quoi un rectangle plein
+  traverserait la légende, qui interrompt justement la bordure haute.
+
+**Captures** : `options_alertes_selection` (les trois objets du joueur cochables, dont deux cochés,
+et les dix objets par défaut sans case), `options_chat_selection` (case au coin haut-droit, croix
+disparue, bordures rouges), et la rangée « Sélection multiple » de
+`design_gallery_legend_tile`. `options_suivi_selection` reste inchangée : la migration vers le
+module partagé ne devait rien déplacer, et c'est cette image qui le prouve.
+
+### 9.1 sexdecies Fermeture automatique des notifications de décompte (2026-09-16)
+
+Demande utilisateur : « ajouter une option de gestion du temps d'affichage des notifications de
+décompte dans la section "Suivi" de l'onglet "Paramètres", à l'image de celles des sections
+"Alertes" et "Chat" […] le libellé changera légèrement pour devenir "Fermeture automatique des
+notifications de décompte" ».
+
+**Ce que §9.1 quaterdecies avait manqué** : la section « Suivi » était la seule sans ligne de
+fermeture, parce que son alerte passait pour « un son et un bandeau permanent, pas une carte à
+fermer ». Le décompte arrivé à zéro affiche pourtant bien une carte par-dessus le jeu
+(`panels::watchlist::WatchlistToastReason::Countdown`) — elle empruntait simplement la durée du
+**profil d'alertes de ramassage** descendu du compte (`AlertProfile`), et n'était donc réglable
+que depuis la section d'à côté, pour les deux alertes à la fois.
+
+**Ce qui existe maintenant :**
+
+- **Une ligne de plus dans la section « Suivi »**, sous sa sourdine : case, champ de durée, unité
+  « sec. » — la ligne des deux autres sections, aux mêmes règles (case décochée = fermeture
+  manuelle, champ grisé ; durée bornée à 0,5–30 s à la PERTE DE FOCUS, jamais à la frappe ;
+  virgule décimale acceptée). Seul le libellé change :
+  `notifications::COUNTDOWN_AUTO_CLOSE_LABEL`, parce que le Suivi est la seule fonctionnalité dont
+  deux cartes de nature différente peuvent s'afficher (son décompte ici, un ramassage réglé dans
+  « Alertes »).
+- **Un réglage propre, `suivi_tab::CountdownToastSettings`** — le pendant de
+  `chat_tab::ChatToastSettings`, qui implémente le même trait `notifications::ToastClose` et borne
+  sa durée lui-même. Brouillon jusqu'à « Valider » (`OptionsModalState::countdown_toast`,
+  `OptionsCommit::countdown_toast`), **persisté en LOCAL**
+  (`config::OverlayConfig::{countdown_alert_duration_seconds, countdown_alert_manual_close}`,
+  `countdown_toast()` / `set_countdown_toast()`) : ce réglage n'a pas d'équivalent web et le
+  serveur n'accepte que des clés connues, même exception que la carte de chat.
+- **Sa ligne n'est jamais grisée par une attente** (`AutoClose::available: true`) : un réglage
+  local n'a aucun brouillon de compte à attendre, contrairement à ceux des Alertes et du Chat.
+- **Le thread Engine le reçoit par `EngineCommand::SetCountdownToast`** (au démarrage depuis la
+  config, puis à chaque validation) et s'en sert pour poser le `hide_at` de la carte au moment où
+  l'alerte naît. `chat_toast_deadline` devient `local_toast_deadline`, générique sur `ToastClose` :
+  les deux réglages locaux calculent leur échéance par la même fonction, `toast_deadline` restant
+  celle du profil de compte.
+
+**Défaut commun : fermeture automatique cochée, 5 s** (demande du même jour : « toutes les options
+de gestion de fermeture doivent être actives par défaut et les valeurs numériques à 5 par
+défaut »). La case l'était déjà — `manual_close: false` dans les trois `Default` — mais la durée
+reprenait le `DEFAULT_ALERT_DURATION_SECONDS` du web, 3,5 s. La constante passe à **5,0** dans
+`overlay-engine::profile` et les trois lignes en héritent (profil de compte sans
+`alertDurationSeconds`, `ChatToastSettings::default`, `CountdownToastSettings::default`). Le web
+garde ses 3,5 s ; un compte ou une config qui porte déjà une durée n'est pas touché. Les captures
+de « Paramètres », qui posent leur durée explicitement, ne bougent pas.
+
+**Un bug de rendu trouvé en chemin, et corrigé** (`design::components::input`) : la zone d'édition
+d'un champ prenait l'identifiant AUTOMATIQUE de son `Ui` parent. Un widget que le défilement sort
+du champ visible ne consomme pas les mêmes identifiants, et ceux de tous les champs suivants se
+décalent d'une frame à l'autre — un champ héritait alors de l'état mémorisé d'un autre, dont son
+défilement horizontal (`TextEditState::text_offset`), et **se peignait vide alors que sa valeur
+était bien là**. Le nouveau champ du Suivi l'a révélé (fenêtre défilée au point de sortir le champ
+« Fichier », long et focalisé). La zone d'édition porte désormais un `id_salt` NOMMÉ, dérivé du
+`log_name` du champ, et les rangées de `panels::notifications` nomment la leur de la même façon.
+
+**Captures** : `options_parametres_son_coupe` (la ligne vive, durée à 3,5 s),
+`options_parametres_fermeture_manuelle` (les TROIS champs grisés, valeur conservée),
+`options_parametres_compte` et `options_parametres_mise_a_jour` (la même ligne, après défilement —
+les deux planches qui montraient le champ vide).
+
+### 9.1 septdecies Le bouton d'essai revient, sur la ligne de sourdine (2026-09-16)
+
+Demande utilisateur : « ajouter le bouton de test du son des notifications sur la ligne de coupure
+du son des notifications. Pour la section "Alertes", ajouter une ligne "Tester le son des
+notifications" avec le bouton pour écouter le son » — et, dans l'onglet « Alertes », « déplacer
+l'icône mute en bas à droite des item_slot ».
+
+**Contexte** : la ligne « Tester le son des notifications » que chaque section de « Paramètres »
+ouvrait (§9.1 quaterdecies) avait été retirée le matin même, à la demande de l'utilisateur, avec
+les actions `Test*Sound` de la fenêtre. Elle revient sous une autre forme, plus courte d'une ligne
+par section.
+
+**Ce qui existe maintenant :**
+
+- **Le haut-parleur d'essai à droite de la case « Couper le son des notifications »**, sur la
+  même ligne — sections « Combat » (son de tour), « Suivi » (décompte) et « Chat » (recherche).
+  C'est le même son qu'on coupe et qu'on essaie, il n'occupe plus deux lignes. **Grisé quand le
+  son ne viendrait pas** (sourdine cochée, ou notification de tour décochée pour Combat), et
+  l'infobulle le dit — la règle de §9.1 quaterdecies, inchangée.
+- **Les Alertes gardent une ligne à elles**, « Tester le son des notifications »
+  (`notifications::TEST_LABEL`) : elles n'ont pas de sourdine globale (§9.1 terdecies), le bouton
+  n'a aucune ligne où se poser. Il y est toujours vif.
+- **`notifications::section` renvoie de nouveau le clic**, et `notifications::test_sound_button` est
+  public pour la section « Combat », qui peint sa sourdine de tour elle-même
+  (`panels::options_modal`). Sa ligne prend la hauteur des lignes de section
+  (`notifications::ROW_HEIGHT`, 39 px) : dans un simple `horizontal`, la case restait calée en haut
+  d'un bouton plus grand qu'elle. Les hôtes (`main.rs`, `wakfu-companion-overlay-x11.rs`) rejouent
+  les quatre actions `TestAlertSound` / `TestChatSound` / `TestCountdownSound` / `TestTurnSound` par
+  `alert_sound`, le chemin exact du jeu.
+- **Le pictogramme « son coupé » d'une tuile d'alerte est en bas à droite** (`alerts_tab`,
+  `Corner::BottomRight`), et non plus en haut à gauche : ce coin est celui de la case du mode
+  sélection (`item_slot`), qui recouvrait le haut-parleur d'une tuile coupée dès qu'on entrait
+  dans le mode. La croix garde le haut droit ; même retrait de 8 px.
+
+**Captures** : `options_parametres_son_coupe` (Suivi coupé → bouton grisé, ligne d'essai des
+Alertes), `options_parametres_combat_coupe` (tour cochée, son coupé), `options_alertes_liste` et
+`options_alertes_selection` (la tuile coupée, badge en bas à droite).
+
+### 9.1 octodecies Récap de session (2026-09-16)
+
+Demande utilisateur : « ajouter un overlay en haut à gauche, en dessous des boutons du jeu,
+présentant le récap de la session : XP gagné, kamas gagné, combats (gagné − perdu), challenges
+(réussi − échoué), durée de la session », avec « la section "Recap", après la section "Combat",
+dans l'onglet "Paramètres" » et « une option pour activer l'affichage de cet overlay, active par
+défaut ». Le même jour, la section « Recap » est **remontée en tête de l'onglet** (« déplace la
+section Recap en premier ») et « Démarrage » descend après « Fichier », parmi les réglages qu'on
+pose une fois — l'ordre courant est celui commenté en tête de `OptionsTab::Parametres` dans
+`panels/options_modal.rs`.
+
+**Ce que c'est** : une quatrième zone d'overlay ancrée sur le jeu (`OverlayKind::Recap`,
+`panels::recap`), à côté de Combat, Suivi et Options. Une bande d'une seule ligne, cinq cases
+séparées par un filet, chacune un glyphe du design system et un chiffre, sur le fond translucide
+déjà employé par le carré de contrôle du Suivi (`tokens::OVERLAY_BACKDROP`).
+
+C'est la « bande coup d'œil » du web (`session-recap.component.html`, `.recap-bandeau`) et rien de
+plus : le site déplie sous elle l'XP par personnage, la ventilation des kamas, le butin et les
+accordéons par donjon — de la consultation APRÈS coup, pas du temps réel par-dessus un jeu.
+
+**La session, c'est ce que l'overlay a vu du jeu** (2026-09-17, `overlay_ui::recap_session` —
+voir sa doc de module pour le détail). Le premier jour, la durée était le temps d'exécution du
+processus (`App::started_at`) et les quatre autres chiffres couvraient tout le fichier relu — un
+écart assumé faute d'avoir tranché ce qu'est « la session ». L'utilisateur l'a tranché le
+lendemain, en cinq décisions :
+
+- **Le chrono avance tant qu'une fenêtre de jeu est à l'écran** — le balayage de `sync_windows`,
+  celui qui journalise « [fenêtre de jeu] X trouvée / fermée ». Plus aucune fenêtre : pause. Une
+  seule session même en multi-compte. Un saut d'horloge de plus de deux minutes entre deux ticks
+  (machine en veille) n'est pas du jeu et vaut une pause.
+- **Reprise après une pause tolérée** : au retour d'une fenêtre (overlay resté allumé ou
+  relancé), la pause se mesure contre le dernier instant actif ; en deçà de la tolérance, chrono
+  et compteurs continuent, au-delà tout repart de zéro. La tolérance est un réglage local
+  (section « Recap », case « Reprendre la session après une pause de moins de … min », pas
+  numérique, **60 min par défaut**, `config::OverlayConfig::recap_resume`).
+- **Les compteurs suivent le chrono** : le moteur garde ses totaux de fichier (l'historique en a
+  besoin) ; la session retient un point de référence et affiche `session + (moteur − référence)`.
+  Conséquence acceptée : overlay éteint mais jeu ouvert, ni le temps ni les gains de ce trou
+  n'entrent dans la session — « ce que l'overlay a vu », une seule règle pour les deux.
+- **Persistée** dans `recap-session.json` à côté des `fight-*.json` (début, dernier instant actif,
+  secondes cumulées, totaux pliés, nombre de reprises), écrite à chaque pause et toutes les 30 s.
+- **Remise à zéro** par le glyphe `Undo` au bout de la ligne de la durée, **après confirmation** :
+  la boîte du design system sous un voile qui couvre toute la fenêtre de jeu, overlays compris
+  (`OverlayKind::RecapReset`, une fenêtre OS de la taille de celle du jeu, focalisable pour
+  qu'Échap réponde « Non », réaffirmée en dernier dans `sync_topmost` pour rester devant). Le
+  bloc ne fait que remonter l'intention (`RenderOutcome::recap_reset_requested`).
+
+L'infobulle de la durée dit « Session depuis HH:MM », et « reprise N fois » sur une seconde ligne
+dès la première reprise. Chaque décision de la session laisse une ligne `[session]` au journal
+avec ce qui l'a produite (pause mesurée, tolérance, ce qui est conservé ou effacé).
+
+**Ce que le moteur a gagné** : `SessionTotals::challenges_passed`/`challenges_failed`, les
+challenges de TOUTE la session — `FightSnapshot` ne comptait que ceux d'un combat, et
+`MAX_TRACKED_FIGHTS` purge les plus anciens, un total recalculé à la volée diminuerait donc en
+cours de session (même raison que `fights_won`/`fights_lost`). Comptés même quand le parser n'a pas
+résolu de `fightId`, miroir exact du web.
+
+**Les détails qui ont demandé un arbitrage :**
+
+- **Ancrage** : bord gauche, `client_top + GAME_RECAP_TOP_MARGIN_PX` (70 px = les 28 px de fausse
+  barre de titre déjà mesurés, plus 36 px de bouton du jeu — `tokens::ICON_BUTTON_SIZE` —, plus
+  6 px). Seule valeur de cette famille dérivée d'une mesure du design system plutôt que relevée sur
+  une capture : à corriger sur retour d'écran.
+- **Largeur pilotée par le contenu** : la bande mesure ce qu'elle occupe et le renvoie
+  (`RenderOutcome::recap_width`), l'hôte y ajuste la fenêtre OS — même raison que le Suivi, une
+  fenêtre plus large que sa bande capte les clics sur du vide en mode interactif.
+- **Infobulles au-dessus** (`TooltipSide::Above`, `RECAP_TOOLTIP_RESERVE` en marge HAUTE du
+  contenu, la fenêtre OS ancrée d'autant plus haut) — elles se sont ouvertes en dessous une
+  journée ; la durée, dernière ligne, retombait déjà au-dessus faute de place, et c'est ce rendu
+  qui a plu (2026-09-16 tard). Textes de deux mots : la fenêtre fait 206 px.
+- **Le chrono se redessine tout seul** : `request_repaint_after(1 s)` depuis le panneau. Cette
+  architecture ne rend une frame que lorsque quelque chose change (§6.1) ; la durée, elle, change
+  sans que rien d'autre ne bouge.
+- **Pas de symbole « ₭ »** derrière les kamas, contrairement au web : Ubuntu, la police embarquée,
+  ne couvre pas U+20AD — la première version affichait un « ? », vu sur la capture du harnais. Le
+  glyphe Kamas à gauche dit déjà de quelle monnaie il s'agit.
+- **Aucune icône inventée** : `Xp`, `Kamas`, `MetricDamage` (les combats), `Trophy` (les
+  challenges) et `Calendar` (la durée — la seule notion de temps du registre `DsIcon`, le jeu n'a
+  pas de cadran).
+- **La case vit avec les autres interrupteurs** (`FeatureToggles::recap`, §9.1 duodecies), persistée
+  en local (`config::OverlayConfig::recap_enabled`, `true` par défaut, y compris pour un
+  `config.toml` écrit avant ce champ). Décochée, la fenêtre est **masquée, jamais détruite** —
+  `App::sync_panel_visibility`, qui porte désormais Combat ET Récap, même politique.
+
+**Déplaçable au glisser-déposer** (2026-09-17, demande utilisateur : « placer l'overlay de recap
+via du drag & drop », position retenue « même après un redémarrage de l'overlay ») :
+
+- **Tout le fond de la bande se saisit**, sans poignée ni glyphe ajouté — le bloc fait 206 px calés
+  au pixel sur la rangée de boutons du jeu, il n'y a pas de place à prendre. Le curseur passe à la
+  croix fléchée du jeu (`Grab`/`Grabbing` y retombent déjà, `overlay_ui::cursor`), et le glyphe de
+  remise à zéro capte le glissement comme le clic (`Sense::click_and_drag`) pour qu'un appui dessus
+  ne fasse jamais partir la bande.
+- **Le panneau ne déplace rien** : il remonte le geste (`RecapOutcome::drag`, trois étapes dont
+  seule la première porte une position — le point de saisie). L'hôte pose la fenêtre à
+  « curseur moins point de saisie », invariant du geste : rien ne s'accumule, rien ne dérive, même
+  quand le bornage retient la bande contre un bord.
+- **Le curseur se lit à l'OS, en coordonnées d'écran** (`GetCursorPos` sous Windows,
+  `QueryPointer` sur la racine sous X11, sur la connexion que l'hôte X11 tient déjà ouverte) —
+  jamais celui qu'egui rapporte. **Correction du 2026-09-17, sur retour d'écran vidéo : la bande
+  vibrait au point d'être impossible à poser**, souris immobile. La première version calculait le
+  geste dans le repère de la fenêtre qu'elle déplaçait : bouger la fenêtre change la position
+  LOCALE du curseur sans que la souris bouge, ce qui la rebouge à la frame suivante. La formule
+  n'aurait été au repos que si la fenêtre se posait avant l'événement souris suivant, ce
+  qu'aucun des deux systèmes ne garantit (aller-retour serveur X11 / gestionnaire de fenêtres) :
+  le décalage déjà appliqué se réappliquait, la bande dépassait, revenait, sautait d'une centaine
+  de pixels par frame. Le repère d'écran ne dépend d'aucune fenêtre ; `drag_offset` ne prend même
+  pas la position de la bande en paramètre, et `RecapDrag::Moved` ne porte plus de position — la
+  coordonnée qui rebouclait n'existe plus.
+- **La fenêtre n'est pas retaillée tant que la bande est tenue** : une ligne qui s'empile en plein
+  geste déplacerait le bloc sous le curseur, et le bornage avec lui. La hauteur en attente
+  s'applique à la frame qui suit le relâchement. Le contenu, lui, continue de vivre — ce sont des
+  chiffres, ils ne déplacent rien.
+- **`overlay_ui::recap_placement`** porte l'ancrage d'origine (`DEFAULT_OFFSET`, les ex-constantes
+  `GAME_RECAP_*_MARGIN_PX` des deux hôtes), le bornage à la zone cliente et l'aimantation
+  (`SNAP_RADIUS_PX`, 12 px : reposée près de son ancrage, la bande y recolle et la config oublie sa
+  position). Partagé par les deux binaires — c'est de l'arithmétique sur des entiers, et ici elle
+  se teste sans serveur graphique.
+- **Persistance** : `config::OverlayConfig::recap_position_{x,y}`, décalage du BLOC (pas de sa
+  fenêtre, qui commence `RECAP_TOOLTIP_RESERVE` plus haut) depuis le coin de la zone CLIENTE du jeu
+  — relative à la fenêtre de jeu, donc valable quand le client se déplace ou change d'écran. Une
+  seule position pour toutes les fenêtres de jeu (décision utilisateur). Écrite au relâchement du
+  bouton seulement, par `App::persist_config`, qui est devenu le seul endroit sachant ce que
+  `config.toml` doit contenir.
+- **Le mode interactif est requis** : en clic-traversant, l'OS fait passer les clics à travers et la
+  fenêtre ne les voit jamais. D'où, à l'origine, la ligne d'aide de la section « Recap » des
+  Paramètres, qui nommait le raccourci de bascule tel qu'il est réglé, et le bouton
+  **« Replacer au défaut »**, la sortie de secours d'une bande posée dans un coin oublié.
+  **Retirés tous deux le 2026-09-18** (demande utilisateur : « supprime l'entrée […] de la section
+  recap de l'onglet paramètres ») — la bande porte depuis le 17 au soir son cadenas et son bouton
+  de retour (ci-dessous), l'entrée des Options les doublait, exactement comme celle de la section
+  « Combat » retirée la veille. Le champ `recap_position` a quitté l'état de la fenêtre Options
+  avec elle : le replacement n'a plus qu'un chemin, `App::answer_reset_confirm`. Conséquence à
+  garder en tête : plus aucun texte de l'interface ne dit que la poignée est inerte en
+  clic-traversant.
+
+**Le cadenas, et le retour à l'ancrage d'origine (2026-09-17, soir)** — demande utilisateur :
+« deux modes qui permettent de déplacer l'overlay de récap », un cadenas fermé et un cadenas
+ouvert dont « les deux ne peuvent pas vivre en même temps ».
+
+- **Un seul bouton, deux visages** (`DsIcon::Lock` / `DsIcon::LockOpen`, faits l'un pour l'autre :
+  même corps au pixel près, seule l'anse change) : il porte l'état de la bande et le bascule d'un
+  clic. Verrouillée, la bande n'est plus un widget du tout — pas de zone d'interaction, donc aucun
+  geste et **le curseur redevient celui du système** au-dessus d'elle. Garder le `interact` en ne
+  renvoyant rien aurait laissé le curseur promettre un déplacement qui n'arrive pas.
+- **Verrouillée par défaut** (`config::OverlayConfig::recap_locked`, défaut `true`, persistée comme
+  la position) : tout le fond est une poignée, donc non verrouillée, le moindre clic dessus en mode
+  interactif déplace la bande. On la déverrouille pour la ranger, on la reverrouille ensuite.
+- **Le glyphe de replacement n'apparaît qu'une fois la bande déplacée**
+  (`RecapChrome::moved`) : il n'y a rien à défaire avant, et un bouton grisé en permanence
+  coûterait sa place pour ne rien dire. Un clic ouvre une confirmation — décision utilisateur :
+  « on remet le récap à son emplacement initial seulement si l'utilisateur appuie sur oui » — par
+  la fenêtre qui existait déjà, `OverlayKind::ResetConfirm`, paramétrée par sa cible
+  (`ResetTarget::RecapSession` pour les compteurs, `RecapPosition` pour la bande, et depuis le
+  soir du même jour `CombatPosition` pour la hauteur du panneau Combat — voir §9.1 duovicies). Une
+  variante d'`OverlayKind` par cible aurait dédoublé, dans les deux hôtes, tout le cycle
+  « ouvrir / centrer / voiler / fermer » pour ne changer qu'une phrase.
+- **La rangée se pose au-dessus du bloc, en haut à gauche, et bascule en dessous** quand la bande
+  est posée si haut dans la fenêtre de jeu que la rangée en sortirait
+  (`recap_placement::actions_below`, calculé par l'hôte : le panneau ne connaît pas sa position à
+  l'écran). La fenêtre OS garde la place des deux côtés — la réserve d'infobulle au-dessus,
+  `RECAP_ACTIONS_RESERVE` en dessous — **en permanence** : une taille qui dépendrait du côté, et
+  un côté de la position, se rebouclerait, exactement comme la vibration ci-dessus.
+- **Le bornage change de promesse** : il garde désormais le FOND dans le cadre, plus la fenêtre.
+  Jusque-là la bande butait 36 px sous le bord haut (la réserve d'infobulle était bornée avec elle)
+  sans que rien ne l'explique à l'écran ; les réserves peuvent maintenant déborder, ce qui rend au
+  passage le cas « rangée en bas » atteignable.
+- **La rangée n'apparaît qu'au survol** (2026-09-21, demande utilisateur : « afficher les icônes
+  de verrouillage et de réinitialisation de position seulement lors du survol des overlays »).
+  Pointeur hors de la bande et de la pastille, rien n'est peint ni déclaré ; la zone de survol
+  réunit les deux (air compris), sans quoi quitter la bande pour cliquer le cadenas le ferait
+  disparaître. La réserve de la fenêtre OS, elle, ne change pas — la pastille apparaît sans rien
+  retailler. En mode clic-traversant la fenêtre ne reçoit aucun pointeur : la pastille n'y existe
+  jamais, et elle n'y serait pas cliquable de toute façon. Même règle sur le panneau Combat
+  (§9.1 duovicies).
+
+**Captures** : `recap_apres_rejeu_reel` (totaux du vrai rejeu, paire Kamas/XP empilée),
+`recap_session_ordinaire` (XP ramenée, trois lignes), `recap_tooltip_kamas_au_dessus`,
+`recap_tooltip_duree_reprises`, `recap_tooltip_remise_a_zero`, `recap_confirmation_remise_a_zero`,
+`recap_actions_verrouille`, `recap_actions_deverrouille_deplace`, `recap_actions_en_bas` (les trois
+rangées d'actions rendues pointeur sur la bande), `recap_actions_hors_survol` (la même bande sans
+pointeur : pas de pastille) — chrono et heure de début fixés (1 h 23 min 45 s, 20:12), ils
+n'existent pas dans le fichier par construction.
+
+### 9.1 novodecies Démarrage actif par défaut (retiré), bouton « Fermer l'overlay » (2026-09-16)
+
+Deux demandes utilisateur du même jour, toutes deux dans l'onglet « Paramètres ».
+
+**« Option de démarrage active par défaut. »** La case « Lancer l'overlay au démarrage de
+l'ordinateur » (section « Démarrage », `overlay_ui::autostart`) lit et écrit l'état RÉEL du système
+(clé `Run` sous Windows, `.desktop` sous Linux), jamais une copie en config — et le système ne
+distingue pas « jamais inscrit » de « retiré exprès ». Le défaut s'appliquait donc **une seule fois
+par installation** (`autostart::enable_by_default_once`, jalon
+`config::OverlayConfig::autostart_initialized` sauvegardé dans la foulée).
+
+**Retiré le 2026-09-19** (constat C12 de [`analyse-rgpd.md`](analyse-rgpd.md), décision du
+mainteneur) : un programme qui s'inscrit au démarrage de la session sans qu'on le lui ait demandé
+contrevient à la loyauté du traitement (art. 5.1.a). La case est **décochée par défaut** et seule
+la case inscrit l'overlay ; `enable_by_default_once` et le jalon n'existent plus, `config.toml`
+n'est de nouveau écrit qu'à « Valider ». Une inscription posée d'office par les versions du 16 au
+19 reste en place — la retirer d'office serait le même geste à l'envers —, la case la montre et la
+retire ; la ligne `autostart_initialized` d'une config existante est ignorée et disparaît à la
+prochaine sauvegarde.
+
+**« Un bouton pour fermer l'overlay à la toute fin de l'onglet, secondaire, centré, avec une
+confirmation. »** Sous la section « Compte », sans section propre (ce n'est pas un réglage, c'est
+la sortie) : `design::button` en `Secondary` — et non `Danger` comme « Se déconnecter » juste
+au-dessus, parce que fermer ne détruit rien (compte appairé, réglages validés conservés) —, centré
+comme lui parce que ce sont les deux seules actions de la fenêtre qui échappent à « Annuler ». La
+confirmation (`OptionsModalState::pending_quit`, « Fermer l'overlay ? ») est la quatrième boîte
+exclusive de la fenêtre ; « Oui » remonte `OptionsModalAction::Quit`, et l'hôte sort par le chemin
+de la zone de notification (`logging::log_session_end` puis `event_loop.exit()`, §11 — la borne de
+fin de session dit « Fermer l'overlay (fenêtre Options) »).
+
+**Le raccourci global « Quitter l'overlay » (`Ctrl+Shift+Q`) est retiré le lendemain**
+(2026-09-17, demande utilisateur), ce bouton le rendant superflu — et une combinaison globale qui
+arrête le programme d'un geste, sans confirmation, était un piège en plein combat, exactement le
+reproche fait à `Ctrl+Alt+D` (déconnexion) le 2026-09-13. Même traitement : variante retirée de
+`ShortcutAction`, clé `quit` d'un `config.toml` antérieur ignorée en silence à la relecture
+(`RETIRED_KEYS`), bannière de démarrage et captures (`options_onglet_raccourcis`) ajustées. Les
+sorties propres sont désormais ce bouton, l'entrée « Quitter » de la zone de notification, et
+Ctrl+C dans le terminal.
+
+**Captures** : `options_parametres_sorties` (bas de l'onglet — la capture s'appelait
+`options_parametres_fermer_overlay` jusqu'au 2026-09-17, où « Redémarrer » est venu à côté, voir
+§9.1 unvicies) ; `options_parametres_compte`
+et `options_parametres_mise_a_jour` bougent avec la hauteur de l'onglet. L'aide de défilement des
+tests (`defile_les_parametres`) retire désormais le pointeur AVANT les frames de repos : un bouton
+centré passant sous lui ouvrait son infobulle, dont l'animation empêchait `Harness::run` de se
+poser.
+
+### 9.1 vicies Panneau Combat à droite : le miroir porte sur la DISPOSITION (2026-09-17)
+
+**Demande utilisateur** : « permettre à l'utilisateur d'afficher l'overlay combat à droite plutôt
+qu'à gauche ; l'ensemble de l'overlay doit donc être affiché en miroir vertical, hormis les
+portraits, les images de monstre, les icônes (allié, ennemi, dégât, armure, soins) et les images de
+sort ».
+
+Deux choses vont ensemble et ne se séparent jamais : la fenêtre Combat s'ancre au bord DROIT du
+client (`App::anchor_position`, le même `GAME_EDGE_MARGIN_PX` de zéro qu'à gauche), et son contenu
+bascule. Sans le second, le panneau tournerait le dos au jeu — cadre des portraits contre le bord
+de l'écran, colonne des barres vers l'intérieur.
+
+**Ce que « en miroir » veut dire, corrigé après essai en jeu.** La première version réfléchissait
+TOUT, forme par forme, en épargnant seulement les images (translatées au lieu d'être réfléchies).
+Testée le jour même, elle a été rejetée sur trois points, qui disent ensemble la vraie règle :
+
+- le **gabarit du cadre** n'était pas retourné, puisqu'il est une image : son ornement pointait du
+  mauvais côté — « le rendu est complètement affreux » ;
+- **l'ordre des cases des switches s'inversait** : ce doit rester Alliés puis Ennemis, Dégâts puis
+  Armure puis Soins, quel que soit le côté ;
+- **le sens de lecture s'inversait** : le total passait avant son switch, le chiffre de dégâts
+  avant le nom qu'il qualifie, les sorts du dernier au premier. « La zone d'affichage des dégâts,
+  des sorts, etc. ne doit pas changer. Elle doit juste être placée à l'endroit où tu l'as placée.
+  En revanche, il faut garder le sens de lecture. »
+
+La règle n'est donc pas « tout réfléchir » mais **réfléchir la PLACE des blocs, jamais leur
+contenu** :
+
+- ce qui est peint librement — gabarit du cadre, ascenseurs, fondus — est **réfléchi** : c'est du
+  décor, il doit regarder vers le jeu ;
+- ce qui forme un bloc qu'on LIT — un bandeau et son switch, un groupe nom + dégâts + barre, la
+  ligne de sorts, un portrait et son pourcentage — est déclaré par `mirror::upright` /
+  `mirror::upright_in` : sa boîte va à la place du reflet, son contenu ne bouge pas d'un pixel. Il
+  se lit toujours de gauche à droite, dans le même ordre, images à l'endroit.
+
+Une infobulle, un popup, tout ce qui vit dans sa propre couche egui est un bloc de ce genre sans
+avoir à le déclarer : sa couche entière est déplacée telle quelle, et bornée à la fenêtre (egui
+l'avait contrainte à gauche avant le miroir ; son reflet la collerait au bord droit).
+
+**Décision structurante : c'est un miroir de RENDU, pas une mise en page paramétrée.** Le panneau
+Combat est une centaine de rectangles calculés à la main (`panels::combat`, `combat_frame`,
+`combat_bars`, `combat_spell_block`, les composants de `design`). Faire descendre un booléen « à
+droite » jusque dans chacun d'eux aurait voulu dire retourner chacun de ces calculs, puis le
+refaire à chaque futur ajustement, sous peine de voir la version miroir diverger en silence.
+`overlay_ui::mirror` prend le problème en un endroit :
+
+- **à la sortie**, `apply` réfléchit le décor et déplace les blocs (dernier geste de
+  `render_content::paint_content`, infobulles comprises) ;
+- **à l'entrée**, `mirror_input` traduit les événements de pointeur vers le repère de mise en page
+  avant qu'egui ne les voie (`render_content::build_ui`) — **l'inverse exact de la sortie, donc par
+  morceaux comme elle** : `apply` laisse derrière lui la carte des blocs déplacés (leur boîte telle
+  qu'elle est affichée, et de combien elle a bougé), un point posé sur un bloc remonte le
+  déplacement de CE bloc, un point posé sur le décor est réfléchi. Corollaire : une infobulle née
+  d'un survol suit le bloc survolé au lieu d'aller à la place de son reflet.
+
+egui continue de raisonner dans le repère « à gauche » de bout en bout — mise en page, survol,
+clic, placement des infobulles — et les panneaux n'ont à déclarer qu'une chose : où sont leurs
+blocs. Une déclaration qui ne coûte rien tant que le miroir n'est pas armé, donc rien du tout
+quand le panneau est à gauche.
+
+**L'axe est le centre de la fenêtre** (`Context::viewport_rect`) : la réflexion laisse la fenêtre
+globalement inchangée, donc ce qui y tenait y tient encore, et un contenu collé au bord gauche se
+retrouve collé au bord droit — ce que l'ancrage complète.
+
+**Trois pièges rencontrés, tous verrouillés par un test.**
+
+1. La couche de fond figure déjà dans `Memory::layer_ids` selon l'appelant, et la traiter deux fois
+   ramène exactement le contenu à sa place de départ — un bug muet, puisque le rendu est alors
+   celui d'avant.
+2. Le rectangle de découpe d'une forme **dans** un bloc doit suivre le bloc, pas être réfléchi :
+   la case d'un switch écrête son pictogramme, et une case réfléchie pendant que son icône est
+   déplacée **efface l'icône**. C'est ce qui a vidé les deux switches au premier essai de cette
+   mécanique. Un clip venu de plus haut (la fenêtre, la bande d'un cadre défilant), lui, reste
+   réfléchi. L'ombre portée, enfin, ne compte pas dans la boîte d'un bloc : elle est décalée sous
+   ce qu'elle ombre, et tirait l'infobulle de quelques pixels.
+3. **L'entrée doit suivre la sortie morceau par morceau.** Une réflexion globale du pointeur a
+   tenu tant que la sortie réfléchissait tout, et elle est devenue fausse le jour où les blocs ont
+   cessé d'être réfléchis pour être déplacés : sur un switch de trois cases, survoler la case de
+   gauche visait celle de droite, sans infobulle là où on la montrait et avec un clic qui activait
+   le voisin (essai en jeu, 2026-09-17). La carte des blocs lue par l'entrée est celle de la frame
+   PRÉCÉDENTE — la seule qui existe à cet instant, la frame en cours n'ayant rien peint encore ;
+   la première frame après l'armement du miroir, comme celle qui suit un redimensionnement,
+   retombe donc sur la réflexion seule.
+
+**Réglage** : case « Afficher le panneau de combat à droite de la fenêtre de jeu », section
+« Combat » de l'onglet « Paramètres », sous l'affichage permanent et grisée avec lui quand le
+détail des combats est coupé. Config LOCALE (`config::OverlayConfig::combat_on_right`, `false` par
+défaut) comme ses voisines : ce qu'on accepte de voir par-dessus son jeu dépend de l'écran qu'on a
+devant soi, pas du joueur.
+
+**Limite connue** : une forme TOURNÉE (`RectShape::angle`, `TextShape::angle`) garde son angle, là
+où une réflexion devrait l'inverser autour d'un pivot lui-même réfléchi. Rien dans l'overlay ne
+tourne aujourd'hui — à traiter le jour où quelque chose tournera.
+
+**Captures** (`tests/combat_miroir.rs`) : `combat_miroir_gauche` et `combat_miroir_droite` (même
+fixture des deux côtés, c'est leur comparaison qui a du sens), `combat_miroir_droite_infobulle` et
+`combat_miroir_droite_infobulle_pointeur` — cette dernière prend le chemin complet de la
+production, pointeur en coordonnées écran traduit par `mirror_input`, là où les autres survolent
+directement la position de mise en page.
+Le curseur qu'`egui_kittest` dessine reste, lui, à la position de mise en page : il vient de
+`PlatformOutput::cursor_image`, pas des formes — en production c'est le curseur du système, à la
+position réelle du pointeur.
+
+### 9.1 unvicies Bouton « Redémarrer », à gauche de « Fermer l'overlay » (2026-09-17)
+
+**Demande utilisateur** : « ajouter un bouton *Redémarrer* à gauche du bouton *Fermer l'overlay*
+permettant de relancer l'overlay complètement ».
+
+Redémarrer était jusqu'ici deux gestes : fermer (bouton du pied de l'onglet « Paramètres », §9.1
+novodecies), puis retrouver l'exe ou son raccourci. C'est le geste qu'on fait après avoir changé de
+fichier de journal, quand l'affichage ne suit plus une fenêtre de jeu recréée, ou pour repartir d'un
+moteur propre — assez souvent pour mériter son bouton, jamais assez pour mériter un raccourci
+global (le reproche fait à `Ctrl+Shift+Q`, retiré la veille : une combinaison qui arrête le
+programme d'un geste est un piège en plein combat).
+
+**La paire est centrée, pas chaque bouton.** Les deux largeurs naturelles et la gouttière du pied de
+page (`tokens::WINDOW_FOOTER_GUTTER`, la seule gouttière bouton-à-bouton relevée dans le jeu)
+forment un bloc centré d'un seul tenant sur la colonne. Centrer chacun dans une moitié les
+éloignerait au gré de la largeur de la fenêtre, et « Redémarrer » ne se lirait plus comme la
+variante de son voisin. Il est à GAUCHE (demande), ce qui met aussi l'action la moins définitive en
+premier. Même variante `Secondary` et même hauteur `ROW_HEIGHT` que « Fermer l'overlay » : ni l'un
+ni l'autre ne détruit quoi que ce soit.
+
+**Même contrat de confirmation** : `OptionsModalState::pending_restart` (« Redémarrer l'overlay ? »)
+est la cinquième boîte exclusive de la fenêtre, et Échap y répond « Non » sans être relu par le
+filet clavier. « Oui » remonte `OptionsModalAction::Restart` — un panneau ne produit pas d'effet de
+bord (§17.3 bis), l'hôte seul relance un process.
+
+**La relance, côté hôte** : `overlay_ui::restart::relaunch` lance `std::env::current_exe` avec les
+arguments de CE lancement, moins `--updated-from <version>` (ce drapeau dit « je viens d'une mise à
+jour » et déclenche le nettoyage du dossier de mise à jour, voir §12 — il serait faux ici) ; le
+chemin de `wakfu.log` passé en argument, lui, est conservé, sans quoi le process neuf retomberait
+sur la découverte automatique. Les deux hôtes (`main.rs` et `bin/wakfu-companion-overlay-x11.rs`)
+sortent ensuite comme pour « Fermer l'overlay » : `logging::log_session_end("Redémarrer l'overlay
+(fenêtre Options)")` puis `event_loop.exit()`. Le process neuf est lancé AVANT cette sortie, comme
+à l'installation d'une mise à jour (`update::apply::install_and_relaunch`) : les deux se croisent le
+temps que les fenêtres tombent, ce que rien ne gêne — l'overlay ne prend aucun verrou exclusif au
+démarrage. **Une relance impossible ne ferme rien** : l'erreur part au journal et l'overlay en place
+reste ouvert, plutôt que de laisser l'utilisateur sans overlay du tout.
+
+**Captures** : `options_parametres_sorties` (la paire, bas de l'onglet) ;
+`options_parametres_mise_a_jour` bouge avec elle, la ligne des sorties entrant dans son cadre.
+Comportement couvert sans peindre par `options_redemarrage_confirme_et_echap_repond_non`
+(`tests/panels.rs`) et par les tests d'arguments de `restart`.
+
+### 9.1 duovicies Panneau Combat déplaçable en hauteur (2026-09-17, soir)
+
+Demande utilisateur, dans la foulée du cadenas de la bande Récap : « que l'utilisateur puisse
+slider l'overlay combat de manière verticale, peu importe le côté, pour qu'il choisisse à quelle
+hauteur l'overlay se dessine. Il est bloqué sur le côté, il peut simplement le déplacer de haut en
+bas, et la position sera enregistrée. Même s'il change de côté, la hauteur est conservée. [...] le
+même système que l'overlay récap, avec deux boutons, un cadenas ouvert / cadenas fermé. »
+
+**Une seule valeur persistée : la hauteur.** L'abscisse n'est jamais un réglage — elle vaut le bord
+gauche ou le bord droit du client selon la case des Options (§9.1 vicies) — et la hauteur ne dépend
+pas du côté : `config::OverlayConfig::combat_position_y` est une clé UNIQUE, lue des deux côtés, si
+bien que basculer de gauche à droite garde la hauteur choisie sans rien recalculer. `None` = jamais
+déplacé, donc le centrage vertical d'origine (S1/L2), qui suit les redimensionnements du client —
+et non une valeur figée qui clouerait le panneau à un centre qui n'en est plus un.
+
+**`overlay_ui::combat_placement`**, jumeau de `recap_placement` et partagé par les deux hôtes :
+centrage d'origine (`default_offset`, fonction et non constante — il dépend de la fenêtre de jeu),
+bornage, aimantation (`SNAP_RADIUS_PX`, 12 px), et la traduction geste → hauteur
+(`drag_offset`, sur le curseur d'ÉCRAN, jamais celui d'egui : c'est la boucle qui a fait vibrer la
+bande Récap, diagnostic complet en §9.1 octodecies). Le calcul est de l'arithmétique sur des
+entiers, et ici il se teste sans serveur graphique.
+
+- **Le décalage décrit le CONTENU**, pas sa fenêtre — celle-ci commence `COMBAT_TOP_MARGIN` plus
+  haut (la réserve d'infobulle du switch Alliés/Ennemis). Un fichier de config qu'on ouvre à la
+  main dit ainsi où l'on voit le panneau.
+- **Ce qui est borné, en revanche, c'est la FENÊTRE entière** — l'inverse de la bande Récap. Le
+  panneau peint sa rangée d'actions dedans, au coin bas : une fenêtre qui sortirait du cadre
+  emporterait le cadenas, donc le seul geste qui ramène le panneau. Le prix est que le contenu ne
+  monte pas plus haut que 44 px sous le bord du cadre — exactement la marge qu'il prend déjà.
+- **Aucune bascule de côté pour la rangée, aucune réserve ajoutée** : la place existait déjà, la
+  fenêtre OS ne change donc pas de taille (la bande Récap, elle, a dû garder `RECAP_ACTIONS_RESERVE`
+  des deux côtés en permanence).
+- **La marge au bord vertical, elle, est enfin la même sur les deux OS** : `GAME_EDGE_MARGIN_PX`
+  valait 0 sous Windows depuis le 2026-09-04 (« comme si l'overlay faisait partie du jeu ») et
+  encore 12 px dans le binaire X11, que cette refonte-là n'avait pas suivi. Rien ne comparait les
+  deux hôtes ; le calcul partagé les met d'accord.
+
+**La poignée est la lisière du bord extérieur** (`panels::combat::HANDLE_WIDTH`, 8 px, toute la
+hauteur du panneau) — « il faudra qu'il déplace l'overlay en slidant sur la bordure latérale ».
+Trois conséquences qui ne s'improvisent pas :
+
+- **Déclarée en tête du panneau, peinte à la fin.** L'ordre de déclaration décide qui reçoit le
+  pointeur (le dernier gagne) : la lisière est donc la plus basse de la pile et le cadre des
+  portraits, dont l'ornement la chevauche, garde ses clics. L'ordre de PEINTURE décide qui recouvre
+  qui : peinte en tête, elle passait sous ce même cadre — invisible précisément là où la main va.
+- **Elle ne s'encre qu'au survol.** Un rail permanent sur le bord d'un panneau volontairement
+  transparent serait un meuble, et le fond translucide de l'overlay disparaît de toute façon sur un
+  décor sombre (vu sur capture). Ce qui annonce la fonctionnalité, c'est le cadenas — au même bord,
+  avec son infobulle — et le curseur `Grab` dès qu'on approche. C'est ce que fait déjà la bande
+  Récap, dont tout le fond se saisit sans rien peindre.
+- **Bord EXTÉRIEUR quel que soit le côté** : la lisière est déclarée à gauche dans le repère de
+  mise en page, et le miroir la porte à droite avec le reste du décor. Elle tombe donc contre le
+  bord de l'écran de jeu, là où la souris se pose sans viser — on la pousse contre le bord.
+
+**Le cadenas, et le retour à la hauteur d'origine** — le même système que la bande Récap, aux deux
+différences près que la demande impose :
+
+- **Déverrouillé par défaut** (`config::OverlayConfig::combat_locked`, défaut `false`), là où la
+  bande Récap naît verrouillée : ici la poignée est une lisière dédiée de 8 px, pas tout le fond du
+  panneau, donc un clic malencontreux ne déplace rien et il n'y a rien à protéger par défaut.
+  « Par défaut il sera unlock, et l'utilisateur pourra cliquer pour verrouiller la position. »
+- **Le glyphe de replacement ne concerne que la HAUTEUR** : « pas en termes de droite-gauche, juste
+  en termes de hauteur ». Il n'apparaît qu'une fois le panneau déplacé (`CombatChrome::moved`), et
+  un clic ouvre la confirmation (`ResetTarget::CombatPosition`) : « Replacer le panneau de combat à
+  sa hauteur d'origine ? ». Le côté, lui, reste une case des Options.
+- **La pastille des deux glyphes est en COLONNE, à 5 px sous la décoration du cadre.** Trois
+  demandes du même soir l'ont amenée là. D'abord « en bas plutôt qu'en haut » : la première version
+  la posait dans la réserve d'infobulle du switch Alliés/Ennemis, donc juste au-dessus de lui, dans
+  la zone que sa propre infobulle occupe au survol. Ensuite « l'icône de cadenas et en dessous
+  l'icône de rollback » : le cadenas est le glyphe TOUJOURS présent, il est donc au-dessus — sa
+  place ne bouge pas quand le second apparaît, c'est le groupe qui grandit vers le bas. Enfin « à
+  5 px du dernier pixel de la décoration du template » : le groupe n'est pas accroché au bas de la
+  fenêtre, qui ne bouge jamais, mais au bas du CADRE, dont la hauteur change avec l'effectif du
+  camp affiché (130 px à un combattant, 393 px à six) — basculer Alliés/Ennemis le déplace donc
+  aussi, dès que les deux camps n'ont pas le même nombre.
+- **Le repère est le dernier pixel d'ENCRE, pas le bas du canevas** : deux gabarits sur six
+  finissent par des lignes entièrement transparentes (2 px pour celui à un combattant, 3 px pour
+  celui à quatre), viser le canevas donnerait 7 ou 8 px d'écart apparent là où les quatre autres en
+  donneraient 5. D'où `combat_frame::TemplateInfo::painted_bottom`, mesuré une fois sur les PNG, à
+  côté de la hauteur et des centres de médaillons. L'écart lui-même vaut `SIDE_ROW_GAP`, les 5 px
+  déjà posés le 15 sept. AU-DESSUS du cadre : le groupe se tient à la même distance que sa coiffe.
+- **La position est mesurée sur l'allocation, pas recalculée** : `decoration_bottom` vient du rect
+  de la colonne de gauche telle qu'elle vient d'être peinte, moins ce vide résiduel. Cette colonne
+  a trois formes (cadre exact, cadre à défilement des ennemis au-delà de six, liste plate des
+  alliés excédentaires) et une seule finit sur un gabarit à rogner ; dans un camp vide, elle se
+  réduit au bandeau du switch et le groupe se pose 5 px sous lui, sans cas particulier.
+- **La colonne se replie en RANGÉE quand elle ne rentre pas.** Le contenu du panneau ne fait que
+  480 px : sous le gabarit à six combattants il reste 34 px, et la colonne en demande 47 (5 + 42) —
+  le glyphe de replacement sortirait de la fenêtre, donc de l'écran, avec lui le seul geste qui
+  ramène le panneau. Devant la maquette, l'utilisateur a tranché : « pour ce genre de cas, s'il se
+  présente, il faut afficher les deux icônes côte à côte ». La rangée n'en demande que 27 et tient
+  sous les six gabarits, ce qui évite d'agrandir la fenêtre pour un cas sur six. Conséquence pour
+  le harnais : les 800 × 600 par défaut ne montrent JAMAIS ce repli — la planche
+  `combat_actions_rangee_fenetre_reelle` est rendue à la taille de la fenêtre OS, comme celle des
+  infobulles du Récap.
+- **Les infobulles s'ouvrent à DROITE en colonne**, où la place est libre : au-dessus elles
+  couvriraient l'ornement dont le groupe se tient à 5 px, en dessous elles sortiraient sous les
+  grands gabarits. En rangée, les glyphes se gênent latéralement et c'est le dessus qui est libre.
+- La pastille est déclarée `mirror::upright_in` : sa PLACE part à droite avec le panneau, son
+  contenu reste à l'endroit — un `Undo` réfléchi dirait « rétablir », soit l'inverse de ce qu'il
+  fait.
+- **Le geste est mutualisé** : `panels::drag::PanelDrag` (ex-`RecapDrag`, qui en est désormais un
+  alias) et `panels::drag::from_response` servent les deux overlays. Une divergence entre les deux
+  se serait payée en vibration d'un seul côté, le plus difficile des bugs à voir.
+- **Rien dans la fenêtre Options** — et c'est une décision explicite de l'utilisateur, prise le
+  même soir : la ligne d'aide et le bouton « Replacer au défaut » qui doublaient ceux de la bande
+  Récap dans la section « Combat » ont été retirés (« retire l'entrée dans la section combat »). Le
+  cadenas et son glyphe voisin se suffisent ; la seule conséquence à garder en tête est qu'en mode
+  clic-traversant la poignée est inerte (l'OS fait passer les clics à travers), et que plus aucun
+  texte de l'interface ne le dit — contrairement à la bande, qui garde sa ligne d'aide.
+- **La pastille n'apparaît qu'au survol du panneau** (2026-09-21, même demande que pour la bande
+  Récap, voir §9.1 octodecies). La zone de survol est le panneau entier (`ui.max_rect()`) : c'est
+  « l'overlay » tel que l'utilisateur le nomme, et ce rectangle est symétrique autour de l'axe du
+  miroir, donc le pointeur réfléchi par `mirror_input` y tombe si et seulement si le vrai y est —
+  aucun cas particulier côté droit. Hors survol, rien n'est peint ni déclaré ; les autres planches
+  de Combat (métriques, sorts, miroir, défilement) sont rendues sans pointeur et ne montrent donc
+  plus la pastille.
+
+**Au passage, un bug d'écriture de config corrigé côté Linux** : `validate_and_commit_options` du
+binaire X11 reconstruisait sa propre `OverlayConfig` au lieu d'appeler `persist_config`, et cette
+copie avait déjà divergé — la position ET le verrou de la bande Récap y manquaient, si bien que
+valider la fenêtre Options effaçait du disque une bande qu'on venait de déplacer. C'est exactement
+le risque que la doc de `persist_config` annonçait ; la hauteur du panneau Combat en aurait été la
+troisième victime.
+
+**Captures** (`tests/combat_deplacement.rs`) : `combat_actions_verrouille` (cadenas fermé seul),
+`combat_actions_deverrouille_deplace` (cadenas ouvert + replacement), `combat_poignee_survolee` (la
+lisière encrée par-dessus le panneau, ses trois traits au milieu), `combat_actions_a_droite` (la
+pastille au bord droit, glyphes à l'endroit). Le reste du fichier tient ce qu'aucune capture ne
+montre : verrouillé, aucun geste remonté ; déverrouillé, la suite `Started`/`Moved`/`Released` ;
+et un glissement parti du cadenas qui ne déplace pas le panneau (`Sense::click_and_drag`).
+
+### 9.1 tervicies Onglet « À propos », largeur des onglets (2026-09-18)
+
+Demande utilisateur : « régler la largeur des éléments des onglets du menu de la modale Options,
+ajouter l'onglet "À propos" en dernier et y déplacer la section Mise à jour, les boutons
+"Redémarrer" et "Fermer l'overlay", renommer le bouton "Redémarrer l'overlay" ».
+
+**L'onglet** (`panels::a_propos_tab`, `OptionsTab::APropos`, septième et dernière entrée du menu) :
+la section « Mise à jour » telle qu'elle était (§9.1 tredecies — ligne d'information, case
+« Installer automatiquement… », bouton unique dont le libellé suit l'état), puis la paire de sorties
+« Redémarrer l'overlay » / « Fermer l'overlay » (§9.1 novodecies et unvicies, mêmes règles : paire
+centrée d'un seul tenant, `Secondary`, redémarrage à gauche). Ce sont les trois choses de la
+fenêtre qui concernent le **programme** et non ce qu'il affiche ; elles fermaient l'onglet
+« Paramètres » sous un défilement, à huit sections de la première. « Paramètres » se termine
+désormais sur « Compte ». L'onglet ne confirme rien : il remonte une intention
+(`AProposTabAction` — `CheckUpdate`, `Install`, `Restart`, `Quit`) et c'est la fenêtre qui ouvre la
+boîte qui convient, comme avant. `update_info_line` et `update_button` ont suivi dans le module. La
+version courante n'y est pas répétée : la bannière la porte.
+
+**« Redémarrer l'overlay », en toutes lettres** : « Redémarrer » tenait son complément de son voisin
+« Fermer l'overlay » ; les deux libellés se répondent maintenant mot pour mot.
+
+**Largeur des onglets** (`design::tabs`, §9.2) : à sept onglets sur les 700 px du panneau, les parts
+égales tombaient à 98 px et « Personnages » (encre 100) débordait de sa case. La règle par défaut
+devient **l'encre de chaque libellé plus une marge identique pour tous** (`fill_widths`) : la barre
+remplit toujours le panneau, mais un long mot élargit son onglet et jamais celui du voisin ; si la
+barre est plus étroite que la somme des encres, marge nulle et onglets au prorata. Les pictogrammes
+comptent pour l'emprise de leur glyphe, donc restent égaux entre eux. Toutes les captures de la
+fenêtre Options et la galerie bougent avec la barre.
+
+**Captures** : `options_a_propos` (au repos, sept onglets) et `options_a_propos_mise_a_jour` (version
+disponible) remplacent `options_parametres_sorties` et `options_parametres_mise_a_jour` ;
+`options_parametres_compte` sature désormais au bas de l'onglet, sur sa dernière section.
+`options_fermeture_overlay_confirmee_et_echap_repond_non` et
+`options_redemarrage_confirme_et_echap_repond_non` s'ouvrent sur « À propos ».
+
+### 9.1 quattuorvicies Réinitialiser le compteur d'une tuile suivie (2026-09-18)
+
+Demande utilisateur : « ajouter un icône bouton "undo" au centre des item_slots de la barre de suivi
+visible au survol, avec le même design que l'icône bouton "modifier" de l'onglet Personnages sur les
+hero_slot [...] réinitialiser le compteur de l'élément suivant son mode : incrémental et objectif, la
+valeur repart à zéro ; décompte, la valeur repart de la valeur de la fraction. Avant l'application,
+une confirmBox apparaît ».
+
+**Le bouton** (`panels::watchlist::reset_button`) : la flèche `Undo` sur son disque de 26 px, au
+centre de la tuile, révélée au survol, trait et glyphe à l'or quand le pointeur le vise, curseur
+main. C'est **le même bouton** que le crayon d'une carte de héros : `tile_button` a quitté
+`personnages_tab` pour `panels::tile_button` (`disc_button` / `glyph_button`, l'infobulle restant à
+l'appelant), afin que les deux écrans partagent une géométrie et non deux copies. Sans voile sur la
+tuile, contrairement à la carte de héros : l'icône est petite, le disque presque opaque se détache
+seul, et un voile grisait le compteur et le liseré de rareté — ce qu'on regarde. Le disque laisse
+les coins : le glyphe de mode et le compteur qu'on va remettre se lisent encore. Il ne se montre ni
+en **mode sélection** (la tuile n'a qu'un geste), ni pendant une **célébration** (la tuile s'en va),
+ni pendant un **déplacement** (la tuile sous le pointeur est une destination). Le disque prend le
+clic, la tuile garde le glissement (hit-test d'egui : pur clic au-dessus, glisser en dessous) —
+presser sur le disque et tirer déplace donc la tuile, comme sur la carte de héros. Le nom de la
+tuile ne s'ouvre pas quand le bouton est visé : « Réinitialiser le compteur », en dessous comme lui.
+
+**La confirmation** : la fenêtre du Récap, `OverlayKind::ResetConfirm`, gagne une quatrième cible,
+`ResetTarget::WatchlistCounter`. L'entrée **ne voyage pas dans la cible** — `OverlayKind` est `Copy`
+et l'est dans les deux hôtes à chaque tour de boucle ; l'hôte la retient (`App::watchlist_reset_
+pending`) et la prête au rendu (`RenderContent::watchlist_reset`) pour que la question la nomme :
+« Réinitialiser le compteur de « Bottes Lantha » ? ». Le bandeau, lui, remonte seulement l'entrée
+cliquée (`WatchlistOutcome::reset_counter` → `RenderOutcome::watchlist_reset_requested`).
+
+**La remise** (`WatchlistState::reset_counter`, `EngineCommand::ResetWatchlistCounter`) : le
+compteur repart de `compteur_de_depart` — zéro en incrémental et en objectif, la cible en décompte,
+exactement ce dont part une entrée neuve. L'entrée est désignée par son identité (nom insensible à la
+casse et genre, `meme_entree`), jamais par un rang : entre le clic et la confirmation, la liste a pu
+bouger. Persisté et marqué `dirty` comme un ramassage : le compte voit le compteur repartir, sans
+quoi le prochain `merge_config` le rattraperait à son ancienne valeur. Une entrée qui n'existe plus
+ne fait rien, et rien n'est répliqué.
+
+**Captures** : `watchlist_reinitialisation_repos` / `_survol` (tuile en décompte 12/50, bouton visé,
+infobulle en dessous) et `suivi_confirmation_reinitialisation` (la question nomme l'objet). Le test
+de glisser-déposer du bandeau prend désormais la tuile par son bord (`BANDEAU_TUILE_0_PRISE`) : son
+centre est un bouton, il annonce une main.
 
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
@@ -1810,10 +2842,46 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
 
 ## 10. Sécurité, vie privée, conformité
 
-- **Contrainte de conception non négociable** : lecture d'un fichier texte produit par le jeu, et
-  rien d'autre. Jamais de lecture mémoire, jamais d'injection DLL/hook, jamais de capture d'écran,
-  jamais d'automatisation d'entrées. C'est la posture déjà tenue par l'app web ; l'overlay ne
-  l'élargit pas.
+- **Contrainte de conception non négociable** : la source des données de jeu est un fichier texte
+  produit par le jeu (`wakfu.log`), et rien d'autre. Jamais de lecture mémoire, jamais d'injection
+  DLL/hook. C'est la posture déjà tenue par l'app web ; l'overlay ne l'élargit pas.
+
+  > Jusqu'au 2026-09-18 ce paragraphe promettait aussi « jamais de capture d'écran, jamais
+  > d'automatisation d'entrées », ce que le code ne tenait plus (constat C2 de
+  > [`analyse-rgpd.md`](analyse-rgpd.md)). Les deux points qui suivent, et le point « Jeton de
+  > session » en fin de section, décrivent **ce que l'overlay fait réellement**, dans les limites que l'utilisateur a fixées ; c'est cette
+  > description, pas l'ancienne promesse, qui doit alimenter toute information donnée aux
+  > utilisateurs (politique de confidentialité, « À propos »).
+
+- **Lecture de la fenêtre de jeu, sous option, jamais de l'écran.** La notification de tour
+  (§9.1 decies, `turn_watch/capture.rs`) a besoin de savoir à qui c'est de jouer dans une fenêtre
+  Wakfu qui n'a pas le focus. Pour cela, en combat et toutes les 500 ms, l'overlay demande à
+  Windows le rendu de **la zone client de la fenêtre de jeu uniquement** (`PrintWindow`,
+  `PW_CLIENTONLY`) — jamais le bureau, jamais une autre application —, n'en copie en mémoire que
+  la **bande basse** (`BAND_HEIGHT`, 400 lignes, là où le jeu affiche le widget de tour et le nom du
+  personnage), l'analyse, et la jette. Rien n'est enregistré sur disque hors les gabarits du nom
+  (`templates.rs`, C8), rien n'est transmis. La fonction est réglée par une case à cocher
+  **décochée par défaut** (`OverlayConfig::turn_notification`) : décochée, aucune lecture de
+  fenêtre n'a lieu.
+- **Entrées synthétiques : deux cas, tous deux déclenchés par l'utilisateur, aucun ne joue à sa
+  place.**
+  1. Les raccourcis multicompte F1/F2 (§9.1 sexies, `chat_command.rs`) tapent dans le client au
+     premier plan une commande de chat que **le jeu expose lui-même** (`/i "Nom"`, `/fol "Nom"`) —
+     Wakfu permet déjà d'associer un raccourci à un texte envoyé au chat ; l'overlay ne fait que
+     renseigner le nom de l'autre personnage à la place de l'utilisateur. Rien n'est tapé si la
+     fenêtre au premier plan n'est pas une fenêtre de jeu, et ce sont les **seules** frappes
+     synthétisées.
+  2. Le clic sur la notification de tour doit amener la fenêtre du personnage au premier plan ;
+     Windows l'interdit à un process qui n'a pas reçu d'entrée. Le contournement (`notify.rs`,
+     `focus_via_decoy`) est un clic synthétique **sur une fenêtre-leurre de 5 px de l'overlay**,
+     sous le curseur, remis à sa place ensuite — le jeu ne reçoit ni clic ni déplacement. Il n'a
+     lieu **que** parce que l'utilisateur vient de cliquer le toast, et seulement si la
+     notification de tour est activée.
+
+  Ni l'un ni l'autre n'agit dans le combat, n'automatise une action de jeu ni ne procure un
+  avantage : la notification évite de manquer son tour, les raccourcis évitent de taper un nom.
+  Ce n'est pas du botting, et l'overlay ne doit jamais le devenir : toute nouvelle entrée
+  synthétique est une décision à inscrire ici, pas un détail d'implémentation.
 - Aucune donnée ne sort en mode invité (§7.3).
 - Le contenu du log est **hostile par nature** (messages de chat écrits par des tiers) : tout texte
   affiché est traité comme donnée, jamais interprété ; longueurs bornées ; parsing sans
@@ -1821,13 +2889,90 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
 - Mises à jour : binaire et bundle moteur signés (`minisign`/ed25519), signature **vérifiée avant
   exécution ou chargement**. Un asset de Release non vérifié n'est jamais chargé — un moteur JS
   téléchargé est du code exécutable, pas de la donnée.
-- Le jeton de session ne transite jamais en clair sur disque hors trousseau (§7.2), n'apparaît
-  jamais dans les logs de l'overlay.
+- **Jeton de session** (§7.2) : c'est le jeton du compte *wakfu-companion*, jamais celui du jeu.
+  C'est un **jeton porteur** — quiconque le détient peut appeler l'API au nom de l'utilisateur
+  (`Authorization: Bearer`, `client.rs`) jusqu'à révocation : il n'est donc pas anodin. Il est
+  rangé dans le **trousseau de l'OS** (Credential Manager, Secret Service) ; quand aucun trousseau
+  n'est disponible ou ne relit ce qu'il a écrit, l'overlay le **replie en clair** dans un fichier
+  de son dossier de données (`token_store.rs::save_token_file`, `0600` sous Linux, aucune ACL
+  particulière sous Windows — C7), et le dit au journal (`warn!`), pas encore dans l'interface. Il
+  est **effacé** des deux emplacements à la déconnexion (`clear_token`), **effacé côté serveur**
+  au même geste (`DELETE /api/v1/auth/native/session`, C5) et **révocable** depuis le site
+  (« Sessions actives »). Il est **renouvelé** au démarrage quand il a plus de 7 jours (2026-09-19,
+  `background::rotate_token_if_due`, `POST /api/v1/auth/native/session`) : le serveur émet un jeton
+  neuf de 30 jours glissants et remplace l'ancienne session, encore acceptée 5 min le temps de
+  persister le nouveau et de drainer les requêtes parties — le nouveau est écrit au trousseau AVANT
+  d'être utilisé, un échec conserve l'ancien et n'est jamais une déconnexion, et la file d'envoi
+  (seul détenteur d'un jeton en mémoire) est activée après la rotation, avec le nouveau. La date
+  d'émission vit à côté du fichier de repli (`native-session.issued-at`, une date, pas un secret).
+  Il n'apparaît jamais dans les logs de l'overlay.
 
 ---
 
 ## 11. Distribution
 
+- **Windows : un exécutable fenêtré sans fenêtre, pas un service** (2026-09-17, demande
+  utilisateur : « l'overlay doit fonctionner sous forme de service, ou tout autre système invisible
+  à l'écran, plutôt qu'en fenêtre de terminal »). `overlay-ui.exe` était compilé en sous-système
+  *console* : un double-clic sur l'exe, ou son lancement automatique à l'ouverture de session
+  (`autostart`, §9.1 undecies), ouvrait une console noire qui restait à l'écran tant que l'overlay
+  tournait, et la fermer tuait l'overlay. Il est désormais en sous-système *windows*
+  (`#![cfg_attr(windows, windows_subsystem = "windows")]` en tête de `main.rs`, comme
+  `overlay-focus` depuis le 2026-09-14) : Windows ne lui crée aucune console, l'overlay ne se
+  manifeste que par ses fenêtres transparentes et son icône de zone de notification (menu
+  Quitter). Un **service Windows** au sens strict a été écarté, et pas seulement par économie : un
+  service s'exécute en session 0, isolée du bureau de l'utilisateur, sans possibilité d'afficher
+  quoi que ce soit par-dessus le jeu ni de lire ses fenêtres — c'est structurellement incompatible
+  avec un overlay. Le comportement attendu d'un service (tourne en fond, démarre avec la session,
+  se pilote sans terminal) est obtenu par la combinaison sous-système `windows` + inscription
+  `HKCU\…\Run` + icône de zone de notification. Conséquences :
+  - **Journal** : la couche console de `logging` (§15) n'a plus de destinataire par défaut ; le
+    fichier `%APPDATA%\wakfu-companion-overlay\logs\` est la seule sortie en usage réel. En
+    développement, `logging::attach_parent_console` (appelée en tout premier dans `main()`)
+    rattache le process à la console du terminal qui l'a lancé (`preview.ps1`, `cargo run`), de
+    sorte que le journal y reste lisible et que Ctrl+C y fonctionne comme avant ; lancé sans parent
+    doté d'une console, l'appel échoue silencieusement et l'exe reste muet.
+  - **Paniques** : le message de panique de la bibliothèque standard va sur `stderr`, donc nulle
+    part. `logging::install_panic_hook` (les deux binaires) le recopie dans le journal avant le
+    traitement par défaut — sans quoi un plantage n'aurait laissé qu'une session sans ligne de fin.
+  - **Clic sur une notification de tour** (§9.1 decies) : c'est le MÊME défaut, et il est couvert
+    par le même correctif. Le clic d'un toast est une activation de protocole — Windows lance le
+    gestionnaire de `wakfu-companion:` **par le shell**, donc avec une console s'il est en
+    sous-système *console*, qui surgit par-dessus le jeu et lui prend le premier plan. Le correctif
+    du 2026-09-14 (déporter le focus dans `overlay-focus.exe`, fenêtré sans fenêtre) n'a jamais
+    atteint l'utilisateur : `notify::register_protocol` ne préfère ce binaire que s'il est **à côté
+    de l'overlay**, or la Release ne publie qu'un binaire par plateforme et `overlay_sync::update`
+    n'en remplace qu'un — chez l'utilisateur, le gestionnaire est donc l'overlay lui-même. Signalé
+    à nouveau le 2026-09-17, et réglé par le passage de l'overlay au sous-système *windows* plutôt
+    que par la livraison d'un second fichier à tenir à jour. **Aucun des deux gestionnaires ne doit
+    repasser en sous-système console.**
+  - Linux n'est pas concerné : `wakfu-companion-overlay-x11` lancé par une entrée `.desktop` n'a
+    jamais eu de terminal, et lancé depuis un terminal il en hérite naturellement.
+- **Nom et icône des exécutables livrés** (2026-09-17, demande utilisateur). Les binaires
+  s'appellent `wakfu-companion-overlay.exe` (Windows, bloc `[[bin]]` de
+  `crates/overlay-ui/Cargo.toml`) et `wakfu-companion-overlay-x11` (Linux/X11, §17.2, nommé d'après
+  son fichier `src/bin/`) — le nom du PAQUET (`overlay-ui`) est un nom de module interne qui ne dit
+  ni le produit ni le jeu et se perd dans une liste de processus. Les assets de Release portaient
+  déjà le bon nom (`wakfu-companion-overlay-{version}-windows-x86_64.exe.gz`), ce sont les fichiers
+  qui ne le portaient pas. Seul `overlay-focus` garde un nom d'outil (gestionnaire du protocole
+  `wakfu-companion:`) : `turn_watch::notify` le cherche PAR NOM à côté de l'overlay, le renommer
+  casserait le clic sur un toast de tour.
+  - **Icône** : posée par `crates/overlay-ui/build.rs` via `winresource`, à partir du logo du
+    projet — le même fichier (`assets/ui/logo-purple.png`) que la zone de notification, la fenêtre
+    de connexion et l'icône de fenêtre. L'`.ico` n'est pas commité, il est dérivé du PNG à chaque
+    build (paliers 16/24/32/48/64/128 px réduits en Lanczos, plutôt que laisser Windows réduire un
+    128 px pour une barre des tâches) : une retouche du logo ne peut pas laisser l'exe avec
+    l'ancienne image. Le même `build.rs` renseigne le bloc de version (`ProductName`,
+    `FileDescription` — ce que le gestionnaire des tâches affiche comme nom d'application).
+  - **Ce que ça n'atteint pas** : une cross-compilation vers Windows depuis Linux
+    (`cargo check --target …`, le seul moyen de vérifier ce binaire en session cloud) n'embarque
+    PAS la ressource — `winresource` n'est une `build-dependency` que sur un hôte Windows.
+    `build.rs` émet alors un `cargo:warning` explicite plutôt que de produire un exe muet. Un
+    binaire livré est toujours compilé sous Windows (`release.yml`).
+  - **Mise à jour en place** : `overlay_sync::update` remplace le fichier courant
+    (`std::env::current_exe`), sans le renommer. Une installation antérieure garde donc son
+    `overlay-ui.exe`/`overlay-ui-x11` jusqu'à ce que l'utilisateur retélécharge — aucune Release
+    n'ayant encore été distribuée, le cas est théorique.
 - **Windows** : binaire + installeur NSIS/MSI. Signature Authenticode fortement recommandée (sans
   elle, SmartScreen effraie chaque nouvel utilisateur) — coût à budgéter, mais l'app reste
   installable sans.
@@ -1855,7 +3000,9 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
   fusion `dev` → `main`, manifeste `latest.json` signé `minisign`, module `overlay_sync::update`
   (`ureq` + `self-replace` + `minisign-verify`), installation au démarrage derrière l'écran de
   chargement, différentiel après mesure. **Un binaire de Release vise toujours la prod**
-  (`DEFAULT_BASE_URL`), le domaine dev n'est plus utilisé qu'en local par les scripts de preview.
+  (`DEFAULT_BASE_URL`, figée par le profil de compilation dans `overlay-sync/build.rs` depuis le
+  2026-09-17 : `release` → prod, `preview`/debug → dev), le domaine dev n'est plus utilisé qu'en
+  local, par tout binaire compilé hors `release`.
   - ~~Le bundle moteur peut être mis à jour **sans** nouvelle version du binaire (asset versionné +
     signature)~~ — **retiré le 2026-09-15** (décision 7 du plan de mise à jour) : le bundle est
     vendu et diverge volontairement du dépôt web (`engine-js/VENDORED_FROM.txt`, 2026-09-13), et
@@ -1889,10 +3036,10 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
 | --- | --- | --- |
 | **S1 — Spike rendu Windows** ✅ fait | Fenêtre transparente + always-on-top + click-through + DirectComposition + wgpu | Voir `spikes/s1-window-windows/README.md` : panneau egui semi-transparent confirmé par capture d'écran par-dessus une autre fenêtre, hotkey global de bascule confirmé sans focus, RSS ~87 Mo — **verdict : chemin DirectComposition via `wgpu-hal` (`DxgiFromVisual`) validé**, plus simple que prévu (§6.2 mis à jour) |
 | **S2 — Spike moteur** ✅ fait | Bundle headless TS + QuickJS, ingestion de `tests/wakfu.log` | Voir `spikes/s2-engine-quickjs/README.md` : correction confirmée (rejeu identique), débit ~28 000 l/s (sous la cible initiale de ~40 000 l/s, ×1,4), critère de fluidité UI reformulé en §5.5 — **verdict : choix QuickJS maintenu** |
-| **S3 — Spike X11** ✅ fait | Équivalent S1 sous X11 + XWayland, **développé conjointement avec son harnais de test Xvfb** (voir §17.2) — implémentation et harnais en TDD, pas l'un après l'autre | **Spike validé (2026-09-03), critère de sortie atteint le 2026-09-04** (sauf point 5, question ouverte par nature — voir §17.2 « État »). Voir `spikes/s3-window-linux/README.md` pour le détail complet du spike : les trois prérequis de faisabilité vérifiés dans l'ordre — rendu logiciel Vulkan/lavapipe sous Xvfb confirmé avec du vrai code `wgpu`, WM EWMH (`openbox`) nécessaire et suffisant, scénario sans compositeur (repli opaque) validé comme cas par défaut et scénario avec compositeur en secondaire. Six bugs réels trouvés et corrigés dans le spike (dépendance système manquante, panique `TexturesDelta` en debug, double événement `global-hotkey` sous X11, piège de titre `xterm` dynamique, piège regex `xdotool search`, `[workspace]` manquant préexistant sur S1/S2 aussi). **Critère de sortie enrichi (2026-09-03, revue à 3 experts, §17.6) — rempli aux points 1/2/3/4 le 2026-09-04, voir §17.2 « État »** : le CODE **migré** vers `crates/overlay-platform/src/linux/` (7 tests unitaires topmost verts) ; le multi-fenêtres réel **câblé** — nouveau binaire `crates/overlay-ui/src/bin/overlay-ui-x11.rs` (mode invité), validé sous Xvfb avec preuve visuelle (2 fenêtres Combat/Suivi réelles) ; le HARNAIS **extrait** vers `xtask visual-check` (Rust, garde RAII, assertions par le protocole X11) — toutes les assertions passent sur le VRAI binaire (ancrage, click-through 1→0→1, topmost/délai de grâce/réaffirmation), un second bug réel trouvé au passage (`xdotool search --name` incapable de matcher un tiret cadratin UTF-8 dans son pattern, contourné) |
+| **S3 — Spike X11** ✅ fait | Équivalent S1 sous X11 + XWayland, **développé conjointement avec son harnais de test Xvfb** (voir §17.2) — implémentation et harnais en TDD, pas l'un après l'autre | **Spike validé (2026-09-03), critère de sortie atteint le 2026-09-04** (sauf point 5, question ouverte par nature — voir §17.2 « État »). Voir `spikes/s3-window-linux/README.md` pour le détail complet du spike : les trois prérequis de faisabilité vérifiés dans l'ordre — rendu logiciel Vulkan/lavapipe sous Xvfb confirmé avec du vrai code `wgpu`, WM EWMH (`openbox`) nécessaire et suffisant, scénario sans compositeur (repli opaque) validé comme cas par défaut et scénario avec compositeur en secondaire. Six bugs réels trouvés et corrigés dans le spike (dépendance système manquante, panique `TexturesDelta` en debug, double événement `global-hotkey` sous X11, piège de titre `xterm` dynamique, piège regex `xdotool search`, `[workspace]` manquant préexistant sur S1/S2 aussi). **Critère de sortie enrichi (2026-09-03, revue à 3 experts, §17.6) — rempli aux points 1/2/3/4 le 2026-09-04, voir §17.2 « État »** : le CODE **migré** vers `crates/overlay-platform/src/linux/` (7 tests unitaires topmost verts) ; le multi-fenêtres réel **câblé** — nouveau binaire `crates/overlay-ui/src/bin/wakfu-companion-overlay-x11.rs` (mode invité), validé sous Xvfb avec preuve visuelle (2 fenêtres Combat/Suivi réelles) ; le HARNAIS **extrait** vers `xtask visual-check` (Rust, garde RAII, assertions par le protocole X11) — toutes les assertions passent sur le VRAI binaire (ancrage, click-through 1→0→1, topmost/délai de grâce/réaffirmation), un second bug réel trouvé au passage (`xdotool search --name` incapable de matcher un tiret cadratin UTF-8 dans son pattern, contourné) |
 | **L7 — Outillage de test visuel (Niveau 1)** | Rendu offscreen déterministe des panneaux `overlay-ui` (crate `overlay-testkit`), voir §17.1 | Un changement de panneau (combat/watchlist) produit un diff visuel détecté automatiquement, sans Xvfb ni GPU physique, exécutable dans une session Claude cloud headless — critère détaillé en §17.6 |
 | **L1 — Ingestion** ✅ fait | tail, rotation, découverte de chemin, `isInitialLoad` | Voir `crates/overlay-ingest/` : rejeu, ligne partielle, troncature et rotation (suppression + recréation) couverts par des tests synchrones sur `Tailer::poll` ; watcher temps réel (`notify` + repli) vérifié séparément (`tests/watcher_smoke.rs`, manuel). Réserve trouvée puis corrigée le 2026-09-04 (§5.2) : la détection de rotation combine désormais l'identité de fichier ET un second signal (préfixe de contenu), qui ne dépend pas de l'hypothèse fausse « inode jamais réutilisé ». |
-| **L2 — UI** 🟡 en cours | dégâts, suivi, alertes, récap | Utilisable en jeu une soirée sans redémarrage — **fait** : `crates/overlay-engine/` (QuickJS + `LogParser` vendu → `LogEntry` → `SessionSnapshot`, + `watchlist.rs` — comptage du Suivi et alertes de décompte portés en Rust, voir §14 point 3) et `crates/overlay-ui/` (fenêtre S1, deux fenêtres overlay indépendantes Combat/Suivi — bande de tuiles, alertes son+toast sur décompte à 0), validés sur un vrai `wakfu.log`. **Fait (2026-09-02, suite)** : Alertes de drop version « ramassage avec son activé » — `overlay_engine::profile` lit `data.profile.soundItems` (`GET /api/v1/settings`), indépendant de la watchlist ; `Engine::drain_loot_alerts` déclenche toast + son (`alert_sound::play_loot_alert`, fichier mp3 identique au web) pour tout objet ramassé dont le son est activé au compte (objets par défaut `DEFAULT_SOUND_ITEM_NAMES` ou ajoutés par l'utilisateur, mêmes règles), suivi ou non — miroir de `registerLoot`/`ProfileService.findEnabledSoundItem`. **Fait (2026-09-02, refonte visuelle)** : le toast (`panels::watchlist::toast_card`) reproduit la carte du dépôt web (`loot-alert.component`) — icône réelle, titre/bordure `--accent`, nom (+ quantité), confettis tombants (dispersion tirée une fois par déclenchement, animée en continu tant que le toast est affiché), fermeture au clic sur la carte OU sur une croix EN PLUS de la minuterie fixe (les deux cohabitent, contrairement au réglage exclusif `ProfileService.alertManualClose` côté web, pas encore porté) ; toast affiché même watchlist vide (ramassage à son activé indépendant de la watchlist) ; fenêtre Suivi élargie/agrandie dynamiquement le temps qu'un toast est affiché (`watchlist_target_width`/`_height`), comme pour le nombre d'entrées. **Fait (2026-09-07, retour utilisateur : un Suivi jamais visible sur le site)** : les COMPTEURS du Suivi sont désormais répliqués vers le compte (`PATCH /api/v1/settings`, débounce + backoff, voir §14 point 3 pour le détail complet) — jusqu'ici locaux à l'overlay uniquement. **Reste** : indicateur visuel d'état de synchro dans l'UI (idle/pending/syncing/error, §9 — le mécanisme réseau existe désormais pour l'historique ET le Suivi, seul l'affichage manque). **Retiré (2026-09-02, décision du mainteneur, voir §9)** : thème configurable/mode daltonien ; disposition persistée par écran (poignée de glissement, `layout_store`, un temps implémentée puis retirée pour la même raison — un overlay n'est pas un site, pas de personnalisation de disposition) — palette fixe et ancrage automatique seul assumés |
+| **L2 — UI** ✅ fait | dégâts, suivi, alertes, récap | Utilisable en jeu une soirée sans redémarrage — **fait** : `crates/overlay-engine/` (QuickJS + `LogParser` vendu → `LogEntry` → `SessionSnapshot`, + `watchlist.rs` — comptage du Suivi et alertes de décompte portés en Rust, voir §14 point 3) et `crates/overlay-ui/` (fenêtre S1, deux fenêtres overlay indépendantes Combat/Suivi — bande de tuiles, alertes son+toast sur décompte à 0), validés sur un vrai `wakfu.log`. **Fait (2026-09-02, suite)** : Alertes de drop version « ramassage avec son activé » — `overlay_engine::profile` lit `data.profile.soundItems` (`GET /api/v1/settings`), indépendant de la watchlist ; `Engine::drain_loot_alerts` déclenche toast + son (`alert_sound::play_loot_alert`, fichier mp3 identique au web) pour tout objet ramassé dont le son est activé au compte (objets par défaut `DEFAULT_SOUND_ITEM_NAMES` ou ajoutés par l'utilisateur, mêmes règles), suivi ou non — miroir de `registerLoot`/`ProfileService.findEnabledSoundItem`. **Fait (2026-09-02, refonte visuelle)** : le toast (`panels::watchlist::toast_card`) reproduit la carte du dépôt web (`loot-alert.component`) — icône réelle, titre/bordure `--accent`, nom (+ quantité), confettis tombants (dispersion tirée une fois par déclenchement, animée en continu tant que le toast est affiché), fermeture au clic sur la carte OU sur une croix EN PLUS de la minuterie fixe (les deux cohabitent, contrairement au réglage exclusif `ProfileService.alertManualClose` côté web, pas encore porté) ; toast affiché même watchlist vide (ramassage à son activé indépendant de la watchlist) ; fenêtre Suivi élargie/agrandie dynamiquement le temps qu'un toast est affiché (`watchlist_target_width`/`_height`), comme pour le nombre d'entrées. **Fait (2026-09-07, retour utilisateur : un Suivi jamais visible sur le site)** : les COMPTEURS du Suivi sont désormais répliqués vers le compte (`PATCH /api/v1/settings`, débounce + backoff, voir §14 point 3 pour le détail complet) — jusqu'ici locaux à l'overlay uniquement. **Reste** : rien. **Retiré (2026-09-02, décision du mainteneur, voir §9)** : thème configurable/mode daltonien ; disposition persistée par écran (poignée de glissement, `layout_store`, un temps implémentée puis retirée pour la même raison — un overlay n'est pas un site, pas de personnalisation de disposition) — palette fixe et ancrage automatique seul assumés. **Retiré (2026-09-18, décision du mainteneur, voir §9)** : indicateur visuel d'état de synchro dans l'UI (idle/pending/syncing/error) — les données finissent toujours par se synchroniser (retries + backoff, L5), rien d'alarmant à afficher à l'utilisateur |
 | **L3 — Catalogue** ✅ fait | fetch, cache, repli embarqué, index O(1) | Résolution d'objet identique au web sur les golden files — **fait (2026-09-02, retour utilisateur)** : `overlay_engine::catalog` (index O(1) par id/nom, depuis `GET /api/v1/catalog/`) + `overlay-sync` (fetch + cache disque `catalog_cache.rs`, offline-first) + `overlay-ui::remote_icons` (résolution/téléchargement/cache d'icônes réelles `wakassets` pour le panneau Suivi, vérifié en direct contre le déploiement dev). **Fait (2026-09-02, suite)** : `catalog::find_item_has_recipe` (drapeau recette) et `catalog::find_monster_classification`/`find_monster_family_id` (boss/archimonstre/dominant, priorité `MonsterClassification`, miroir de `resolveFightTypeClassification`) ; `dungeon.rs`/`monster_family.rs` — deux nouveaux index O(1) (par id, + réciproque boss→donjon) construits depuis `GET /api/v1/dungeons`/`GET /api/v1/monster-families` (`overlay_sync::client::fetch_dungeons`/`fetch_monster_families`, cache disque `reference_data_cache.rs`, sans endpoint `/version` dédié côté serveur donc toujours rechargés en tâche de fond) ; repli hors-ligne embarqué (`overlay_sync::catalog_cache::embedded_fallback`, `assets/catalog/catalog-index.json.gz` via `include_bytes!`, décompression `flate2`) branché dans `spawn_catalog_thread` (utilisé seulement si aucun cache disque ET réseau injoignable) ; golden files de non-régression (`crates/overlay-engine/tests/golden/*.json` + `tests/catalog_golden.rs`, cohérence croisée catalogue/donjons/familles). **Clôturé (2026-09-02, poste de dev avec accès réseau réel)** : les lots précédents avaient été développés dans un sandbox sans accès à Neon/`*.pages.dev` ni à `overlay-ui` (Windows-only, non buildable là-bas) — ce n'est plus le cas ici, les trois points bloquants ont donc été levés pour de vrai plutôt que redocumentés comme limite : (1) `claude-dev.wakfu-companion.com` confirmé joignable (`catalog/`, `catalog/version`, `dungeons`, `monster-families` en 200) ; (2) repli embarqué **régénéré depuis ce déploiement réel** via `cargo run -p overlay-sync --bin gen-catalog-fallback` — catalogue complet (~1,8 Mo bruts / ~489 Ko gzip), n'est plus un placeholder ; (3) petit indicateur « 📦⚠ catalogue daté » ajouté dans la zone Combat de `overlay-ui` (`catalog_stale: Arc<AtomicBool>`, posé par `spawn_catalog_thread` uniquement quand le repli embarqué est utilisé, tooltip explicatif) — remplace le `tracing::warn!` jusque-là invisible en jeu. `cargo build`/`test`/`clippy -D warnings`/`fmt --check` **propres sur les 5 crates du workspace, `overlay-ui` compris** (précédemment non vérifiable en sandbox). **Volontairement reporté, pas un blocage de clôture** : brancher `DungeonIndex`/`MonsterFamilyIndex` dans `overlay-ui` — aucun panneau §9 n'en a besoin aujourd'hui (`LogEntry` n'a pas de `dungeonId` par combat, voir `model.rs`), prévu pour un futur panneau Combat conscient du donjon, pas une régression de ce lot. |
 | **L4 — Auth native** ✅ fait | endpoints d'appairage (dépôt web) + trousseau | Connexion Discord/Google depuis l'overlay, session révocable — **fait** : 3 endpoints serveur (`/api/v1/auth/native/{pair,claim,poll}`, table `native_pairings`, `Authorization: Bearer` accepté par `_auth.ts`), page web `/pair`, crate `overlay-sync` (pairing bloquant + `keyring`/repli fichier + `GET /settings`), roster appliqué à `overlay-engine::session` (priorité sur `breed`), portraits de classe affichés dans le panneau Combat (`overlay-ui`). **Fait (2026-09-02, suite)** : révocation/déconnexion — raccourci global `Ctrl+Alt+D` (`App::disconnect_account`), commande `AuthCommand::Disconnect` traitée par le thread Auth (`spawn_auth_thread`, restructuré pour rester vivant après une connexion réussie plutôt que de se terminer, condition requise pour pouvoir déconnecter PUIS reconnecter sans redémarrer l'overlay) — efface le jeton (trousseau + repli fichier) et notifie le thread Engine (`EngineCommand::Disconnect`) qui repasse en mode invité (roster `None` → repli `breed`, Suivi vidé ; compteurs locaux déjà persistés conservés pour une reconnexion ultérieure). Vérification bout en bout **partiellement levée** (poste de dev avec accès réseau réel, comme pour L3) : `claude-dev.wakfu-companion.com` confirmé joignable sur les trois routes d'appairage natif (`pair` → 200 avec code+URL réels, `poll` → `pending`/`expired` conformes au format attendu par `pairing.rs`, `settings` sans/avec jeton invalide → 401 comme attendu) ; la complétion réelle d'un appairage (connexion Discord/Google dans un navigateur) reste non automatisable depuis ici et n'a donc pas été rejouée. **Clôturé (2026-09-02, suite — UI de pairing)** : le code d'appairage n'était visible qu'en console — nouvel état `AuthStatus::PairingStarted { pairing_code, verification_url }` (publié par `attempt_connect` dès que le code est obtenu, avant le premier sondage), affiché directement dans la fenêtre overlay (zone Combat) sous forme d'une carte compacte — code en grand (lisible/tapable), bouton copier (`egui::Context::copy_text`), bouton pour rouvrir la page de vérification (`open::that`, utile si l'ouverture automatique du navigateur a échoué ou si l'onglet a été fermé par erreur). **Refondu (2026-09-14, §9.1 undecies)** : la carte de la zone Combat et le raccourci de déconnexion ont laissé place à une **fenêtre de connexion** dédiée (`OverlayKind::Login`, `panels::login`), seule interface tant qu'aucun compte n'est lié — plus de mode invité, appairage lancé sur « Se connecter » seulement, annulable, déconnexion depuis la fenêtre Options ou l'icône de zone de notification. **Reste** : la complétion réelle d'un appairage (connexion Discord/Google) reste non automatisable depuis ce sandbox (limite d'environnement, pas une lacune du code), comme documenté ci-dessus |
 | **L5 — Synchro** ✅ fait | file SQLite, lots, backoff, idempotence | Rejeu 10× du même log ⇒ **aucun** doublon en base, y compris en alternant web et overlay — **fait (2026-09-02)** : `overlay_engine::history` (signatures + payloads fight/purchase/trade) + `overlay_engine::log_time` (dates réelles depuis `LogDateAnchor`) + `overlay_sync::queue::SyncQueue` (file SQLite idempotente, lots de 50, backoff 15s→5min, abandon après 10 tentatives non réseau — testé par rejeu 10x, critère de sortie ci-contre) + câblage `overlay-ui` (thread Sync dédié, activé/désactivé avec le compte). **Complété (2026-09-02, suite, depuis le dépôt web local)** : ventilation par sort/élément, xpGained par participant ET total du combat, résolution monsterId/itemId par catalogue, gameServer (déduit du roster), récupération de kamas HDV sans achat adjacent. **Clôturé (2026-09-02, suite — demande explicite du mainteneur de lever les deux limites restantes)** : regroupement de donjon multi-salles complet (`overlay_engine::dungeon_run`, port direct de `dungeon-run-grouping.util.ts` + `findDungeonForEnemies` 3 priorités, siblings renvoyés avec le rattachement une fois le run complété — voir §7.3) ET branchement réel `overlay-ui` (`spawn_dungeon_thread`, `GET /api/v1/dungeons` → `Engine::set_dungeons`) : `dungeonId`/`dungeonRunKey` sont désormais alimentés en production, plus seulement prêts côté moteur. **Reste** : rien — voir §7.3 pour le seul renoncement volontaire restant (`turns`, jamais utilisé) |
@@ -1916,13 +3063,14 @@ sur une vraie machine Linux le moment venu, comme documenté au §17.2 (limite a
 **Mise à jour (2026-09-13)** : cette vérification « vraie machine Linux » est désormais possible —
 le mainteneur dispose d'un **Steam Deck (SteamOS, KDE Wayland + XWayland)** avec le client Wakfu
 natif (Zaap). Deux conséquences outillées dans le dépôt plutôt que laissées à la manœuvre manuelle :
-`crates/overlay-ui/preview.sh` (équivalent bash de `preview.ps1`, lance `overlay-ui-x11`) et
-`scripts/setup-steamdeck.sh` (conteneur `distrobox` Arch partageant HOME/écran/GPU/audio, seul moyen
-durable de compiler sous SteamOS dont le rootfs est en lecture seule et réécrit à chaque mise à
-jour ; `preview.sh` y entre tout seul). Premier constat de cette vérification sur matériel réel : la
-découverte de `wakfu.log` sous Linux (§5.1) pointait vers `~/.config/zaap/gamesLogs/wakfu/wakfu.log`
-alors que le client natif écrit dans le sous-dossier `logs/`, comme sous Windows — corrigé dans
-`overlay-ingest::discovery` (le chemin sans `logs/` reste candidat, en repli).
+`crates/overlay-ui/preview.sh` (équivalent bash de `preview.ps1`, lance
+`wakfu-companion-overlay-x11`) et `scripts/setup-steamdeck.sh` (conteneur `distrobox` Arch
+partageant HOME/écran/GPU/audio, seul moyen durable de compiler sous SteamOS dont le rootfs est en
+lecture seule et réécrit à chaque mise à jour ; `preview.sh` y entre tout seul). Premier constat de
+cette vérification sur matériel réel : la découverte de `wakfu.log` sous Linux (§5.1) pointait vers
+`~/.config/zaap/gamesLogs/wakfu/wakfu.log` alors que le client natif écrit dans le sous-dossier
+`logs/`, comme sous Windows — corrigé dans `overlay-ingest::discovery` (le chemin sans `logs/` reste
+candidat, en repli).
 
 ---
 
@@ -2065,7 +3213,10 @@ la console n'en est qu'un miroir.
 - **Deux sorties, un seul contenu** : une couche console (`fmt::layer()`, ANSI) et une couche
   fichier (`fmt::layer().with_ansi(false)`), toutes deux sous le même `EnvFilter` — ce qui apparaît
   dans le terminal est exactement ce qui est écrit sur disque (horodatage, champs structurés,
-  thread, ligne compris).
+  thread, ligne compris). **Depuis le 2026-09-17, sous Windows, la console n'existe qu'en
+  développement** (§11 : exe fenêtré sans fenêtre, rattaché à la console du terminal parent par
+  `logging::attach_parent_console` quand il y en a un) : en usage réel, le fichier est la seule
+  sortie, et les paniques y sont recopiées par `logging::install_panic_hook`.
 - **Emplacement** : `<dossier de données de l'appli>/logs/` (même racine que
   `catalog_cache`/`token_store`/`watchlist`, résolue par `directories::ProjectDirs` — sous Windows
   `%APPDATA%\wakfu-companion-overlay\logs\`), fichier `overlay-ui.<AAAA-MM-JJ>.log`.
@@ -2079,7 +3230,7 @@ la console n'en est qu'un miroir.
   `tracing-subscriber`, zéro dépendance supplémentaire) — UTC plutôt qu'heure locale pour un tri
   lexical fiable et aucune ambiguïté de fuseau/heure d'été.
 - **Niveau** : `info` sur le code de l'appli, `warn` sur `wgpu_hal`/`wgpu_core`/`naga` (bruyants),
-  réglable sans recompiler via `RUST_LOG` (même convention que `overlay-app`).
+  réglable sans recompiler via `RUST_LOG`.
 - **Bornes de session** : chaque lancement journalise `=== session démarrée ===` (PID, version,
   hash de commit — voir §11, OS)
   en tout premier dans `main()`, et `=== session terminée ===` (même PID, + la raison) à CHAQUE
@@ -2089,7 +3240,7 @@ la console n'en est qu'un miroir.
   anormale (crash).
 - Le jeton de compte ne transite **jamais** dans ces logs (§10) — seuls des messages de statut
   (succès/échec d'appairage, de sauvegarde, de récupération des réglages) y apparaissent.
-- `overlay-app` (harnais L1, pas l'overlay final) garde un `tracing_subscriber::fmt` console
+- `overlay-app` (harnais L1, retiré du workspace le 2026-09-19 — constat C14 RGPD) gardait un `tracing_subscriber::fmt` console
   uniquement — pas de fichier, pas de rotation : pas l'usage visé par ce lot.
 
 ---
@@ -2150,7 +3301,7 @@ fenêtre système, sans GPU physique, exécutable dans une session Claude cloud 
 standard.
 
 - **Nouveau crate `crates/overlay-testkit`** (lib + tests). Jamais dans le graphe de dépendances du
-  binaire livré — vérifié en CI par `cargo tree -p overlay-app` (aucune occurrence attendue).
+  binaire livré — vérifiable par `cargo tree -p overlay-ui` (aucune occurrence attendue).
 - **Frontière à extraire de `crates/overlay-ui/src/main.rs::render()`** : une fonction pure
   `build_ui(ctx: &egui::Context, content: RenderContent<'_>) -> egui::FullOutput`, qui ne contient
   que ce qui est aujourd'hui dans la fermeture `ctx.run_ui(...)`. `render()` garde tout ce qui
@@ -2265,6 +3416,49 @@ trois comportements.
   chemin légitime pour les RÉGÉNÉRER (`UPDATE_SNAPSHOTS=1 bash scripts/ci-local.sh
   --captures-conteneur`).
 
+**Régénération sans Docker — workflow `regen-captures.yml`, 2026-09-18** (décision utilisateur).
+Le dispositif ci-dessus supposait un poste capable de faire tourner Docker. Le poste du mainteneur
+ne l'est pas (Windows, ni Docker ni distribution WSL installée), et une session Claude cloud n'a pas
+davantage de démon Docker. Conséquence mesurée :
+
+- **Six runs rouges consécutifs** (n° 390 à 395, du 2026-09-17 au 2026-09-18), tous sur le même
+  gate, **65 références périmées** accumulées par quatre changements visuels d'affilée — retrait du
+  replacement Récap (`b9c3aaf`), retrait du rafraîchissement du combat (`f260891`), largeur des
+  onglets (`0eeeacf`), onglet « À propos » (`345fa7a`, qui ajoute un onglet à la barre et change
+  donc les 50 captures `options_*` sans en régénérer une seule). Le gate ne disait plus « ce rendu a
+  régressé » mais « tu développes sous Windows », et le verdict a cessé d'être lu — exactement la
+  spirale de la semaine rouge de septembre. Rattrapé par `3e71f1c` (56 planches régénérées, run 396
+  vert) **depuis un environnement qui avait le rendu épinglé** : ce que le poste du mainteneur n'a
+  pas, et c'est précisément le manque que le workflow ci-dessous comble.
+- **`--captures-conteneur` était de surcroît SILENCIEUSEMENT IGNORÉ sous MSYS** : le bloc qui
+  l'honore vivait à l'intérieur d'un `if PLATFORM = linux`. La commande recommandée par la doc du
+  Dockerfile lançait un `cargo build --workspace`, affichait « Tout est vert », et ne régénérait
+  rien. La seule voie de régénération documentée ne pouvait pas fonctionner sur le seul poste de
+  développement du dépôt.
+
+Le workflow `.github/workflows/regen-captures.yml` (`workflow_dispatch`) est la troisième voie :
+l'environnement du CI régénère lui-même. Même image, même digest, même
+`scripts/setup-render-env.sh` que le job `test-linux` — c'est la condition pour que les références
+produites soient celles que le gate acceptera. Il rejoue d'abord le gate SANS mise à jour (pour
+conserver les `*.diff.png`, qu'`egui_kittest` efface en mode mise à jour), puis régénère, publie
+l'artefact `captures-regenerees` (avant / diff / après, limité aux références réellement réécrites),
+et commite sur `dev` avec le bump que `scripts/bump-version.sh` aurait produit en local.
+
+**Ce qu'il n'automatise pas, et ne doit pas automatiser** : la relecture. La règle « régénérer est
+une AFFIRMATION » ci-dessus reste entière — le workflow écrit, il ne bénit pas. C'est l'artefact
+qu'on relit, et lui seul, pour attraper la régression qui allait devenir référence.
+
+**Garde-fous ajoutés le même jour**, chacun sur un trou constaté et non supposé :
+
+| Trou | Ce qui le bouche |
+| --- | --- |
+| Digest de l'image de rendu recopié dans trois fichiers, aucun contrôle | `scripts/verifier-digest-rendu.sh`, lancé par le job `fmt` et par `ci-local.sh` |
+| Captures jamais jouées sous Windows par `ci-local.sh` | étape sortie de la branche par plateforme — `overlay-testkit` ne dépend que de la LIB `overlay-ui`, il rend partout |
+| Un écart local ne disait rien (« rendu non épinglé ») | tri par ampleur : ≤ 300 px = bruit de rastérisation, au-delà = référence périmée, comptée en échec. Mesure du 2026-09-18 (97 captures en écart sous Windows) : 32 entre 48 et 224 px, 65 entre 552 et 97 201 px, **rien entre 224 et 552** |
+| `main.rs` (4 000 lignes, Windows-only) compilé par le seul CI | `cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay` dans `build-windows` ET dans `ci-local.sh` côté Windows — trois runs rouges du 2026-09-17 venaient de là (`a1d31c4`/`d978bd2`, réparés par `30ba296`) |
+| Push d'un changement de rendu sans références | avertissement (non bloquant) du hook `pre-push` |
+| `ubuntu-latest` bascule sur Ubuntu 26 le 2026-10-19 | `runs-on: ubuntu-24.04` épinglé sur les quatre jobs Linux |
+
 **État (2026-09-04) : Niveau 1 implémenté et validé de bout en bout, portée volontairement
 réduite pour l'instant.**
 
@@ -2303,7 +3497,7 @@ réduite pour l'instant.**
   (quelques lignes de séparation décalées de sub-pixels — rendu logiciel lavapipe, pas une
   régression), corrigé dans l'urgence en régénérant le snapshot depuis CET environnement, PUIS
   traité à la racine le même jour (voir juste en dessous). Point vérifié dans cette session :
-  `cargo tree -p overlay-app | grep testkit` ne remonte rien — `overlay-testkit` n'entre jamais dans
+  `cargo tree -p overlay-ui | grep testkit` ne remonte rien — `overlay-testkit` n'entre jamais dans
   le graphe du binaire livré.
 - **Clôturé (2026-09-04, suite)** — les trois manques listés ci-dessus au moment de l'écriture de
   ce paragraphe sont désormais traités :
@@ -2378,7 +3572,7 @@ Architecture, une fois ces prérequis validés :
   - topmost/stacking : `_NET_CLIENT_LIST_STACKING` (exposé par le WM EWMH) comparé avant/après le
     délai de grâce.
 - **Horloge injectable côté X11 aussi** : `sync_topmost`/`sync_windows` s'appuient directement sur
-  `std::time::Instant::now()` (`TOPMOST_DEMOTE_GRACE` 1,5 s, sondage 20 Hz) sans abstraction
+  `std::time::Instant::now()` (`TOPMOST_DEMOTE_GRACE` 100 ms, sondage 20 Hz) sans abstraction
   aujourd'hui. Extraire cette logique derrière une horloge substituable pour la couvrir par des
   tests **unitaires, synchrones, sans Xvfb**, sur le modèle de `overlay-ingest::Tailer::poll` (§12,
   L1). Réserver Xvfb à un très petit nombre de tests d'intégration tolérants en délai, qui vérifient
@@ -2422,18 +3616,19 @@ Xvfb avec preuve visuelle. Points 3 (`xtask visual-check`) et 5 (`override_redir
   unitaires de `topmost::decide` tournent nativement (`cargo test -p overlay-platform`, aucun Xvfb
   requis, voir sa doc).
 - **Point 2 (multi-fenêtres réel côté `overlay-ui`) : fait, y compris le rendu — nouveau binaire
-  `crates/overlay-ui/src/bin/overlay-ui-x11.rs`.** Plutôt que de dupliquer les 2 000+ lignes de
-  `main.rs` (fortement couplées à des appels Win32 bruts — `SetWindowPos`, `WS_EX_NOACTIVATE`/
-  `WS_EX_TOOLWINDOW`, `GetForegroundWindow`, non partageables), tout ce qui NE dépendait d'AUCUNE
-  API Windows en a d'abord été extrait vers la LIB (`overlay-ui/src/{frame,engine_thread,
-  alert_sound,logging}.rs`, voir la doc de `lib.rs`) : `frame::render` (boucle de peinture par
-  frame, générique wgpu/egui), `engine_thread::spawn_engine_thread` (thread d'ingestion, aucun
-  appel Windows), `alert_sound` (rodio pur), `logging`. `main.rs` consomme désormais ces mêmes
-  items depuis la lib au lieu de les définir localement — vérifié sans régression (`cargo check`/
-  `clippy -D warnings`/`fmt --check` propres sur la cible Windows croisée, `cargo test -p
-  overlay-testkit` toujours vert). Seul `init_gpu` (choix de backend GPU, DX12/DirectComposition
-  vs Vulkan/GL) reste dupliqué entre les deux binaires — pas du code partageable, le choix diffère
-  fondamentalement d'un OS à l'autre (§6.2).
+  `crates/overlay-ui/src/bin/wakfu-companion-overlay-x11.rs`.** Plutôt que de dupliquer les 2 000+
+  lignes de `main.rs` (fortement couplées à des appels Win32 bruts — `SetWindowPos`,
+  `WS_EX_NOACTIVATE`/ `WS_EX_TOOLWINDOW`, `GetForegroundWindow`, non partageables), tout ce qui NE
+  dépendait d'AUCUNE API Windows en a d'abord été extrait vers la LIB
+  (`overlay-ui/src/{frame,engine_thread, alert_sound,logging}.rs`, voir la doc de `lib.rs`) :
+  `frame::render` (boucle de peinture par frame, générique wgpu/egui),
+  `engine_thread::spawn_engine_thread` (thread d'ingestion, aucun appel Windows), `alert_sound`
+  (rodio pur), `logging`. `main.rs` consomme désormais ces mêmes items depuis la lib au lieu de les
+  définir localement — vérifié sans régression (`cargo check`/ `clippy -D warnings`/`fmt --check`
+  propres sur la cible Windows croisée, `cargo test -p overlay-testkit` toujours vert). Seul
+  `init_gpu` (choix de backend GPU, DX12/DirectComposition vs Vulkan/GL) reste dupliqué entre les
+  deux binaires — pas du code partageable, le choix diffère fondamentalement d'un OS à l'autre
+  (§6.2).
 
   Le nouveau binaire Linux (mode **invité uniquement** — pas de compte lié/synchro serveur L4-L5,
   voir sa doc de module pour le détail exact de ce qui est omis) réutilise ces modules partagés
@@ -2461,20 +3656,20 @@ Xvfb avec preuve visuelle. Points 3 (`xtask visual-check`) et 5 (`override_redir
   un bug d'ancrage — les deux zones ne se recouvriraient pas sur une vraie fenêtre de jeu.
 - **Point 3 (extraire `harness.sh`/`probe.rs` vers `xtask visual-check`) : fait.** Nouvelle
   sous-commande `cargo run --manifest-path xtask/Cargo.toml -- visual-check` — orchestre
-  Xvfb+openbox+xterm factice+**le vrai `overlay-ui-x11`** (compilé au vol) en Rust (garde RAII
-  `ProcessGuard` plutôt qu'un `trap` bash), assertions par le protocole X11 lui-même (`x11rb` :
-  Shape pour le click-through, `_NET_CLIENT_LIST_STACKING` pour le topmost/délai de grâce),
-  jamais une déduction visuelle. Toutes les assertions passent (ancrage, click-through 1→0→1 sur
-  deux bascules exactement, topmost focus-aware, démotion après délai de grâce, réaffirmation
-  immédiate) — capture finale envoyée à l'utilisateur en session. **Bug réel trouvé en
-  l'écrivant** : `xdotool search --name` échoue systématiquement dès que le pattern contient le
-  tiret cadratin `—` (U+2014) présent dans les titres de fenêtre réels — pas une histoire de
-  locale du process appelant (testé explicitement en `C.UTF-8`, même échec), plutôt une limite de
-  la regex POSIX étendue sous-jacente de `libxdo` face à l'UTF-8 multi-octets ; contourné en ne
-  passant jamais ce caractère à `xdotool` (motif ASCII sûr côté `search`, comparaison exacte
-  faite ensuite en Rust sur le titre déjà récupéré par `getwindowname`) — voir la doc de
-  `find_window_by_title`. Jamais appelée par `.github/workflows/ci.yml` (gouvernance §17.2 :
-  « jamais un gate CI par défaut » pour ce harnais précis), strictement à la demande.
+  Xvfb+openbox+xterm factice+**le vrai `wakfu-companion-overlay-x11`** (compilé au vol) en Rust
+  (garde RAII `ProcessGuard` plutôt qu'un `trap` bash), assertions par le protocole X11 lui-même
+  (`x11rb` : Shape pour le click-through, `_NET_CLIENT_LIST_STACKING` pour le topmost/délai de
+  grâce), jamais une déduction visuelle. Toutes les assertions passent (ancrage, click-through 1→0→1
+  sur deux bascules exactement, topmost focus-aware, démotion après délai de grâce, réaffirmation
+  immédiate) — capture finale envoyée à l'utilisateur en session. **Bug réel trouvé en l'écrivant**
+  : `xdotool search --name` échoue systématiquement dès que le pattern contient le tiret cadratin
+  `—` (U+2014) présent dans les titres de fenêtre réels — pas une histoire de locale du process
+  appelant (testé explicitement en `C.UTF-8`, même échec), plutôt une limite de la regex POSIX
+  étendue sous-jacente de `libxdo` face à l'UTF-8 multi-octets ; contourné en ne passant jamais ce
+  caractère à `xdotool` (motif ASCII sûr côté `search`, comparaison exacte faite ensuite en Rust sur
+  le titre déjà récupéré par `getwindowname`) — voir la doc de `find_window_by_title`. Jamais
+  appelée par `.github/workflows/ci.yml` (gouvernance §17.2 : « jamais un gate CI par défaut » pour
+  ce harnais précis), strictement à la demande.
 - **Point 4 (bug `global-hotkey` double-événement) : résolu des DEUX côtés.** Déjà corrigé côté
   Windows depuis le 2026-09-02 ; le nouveau binaire Linux filtre sur `HotKeyState::Pressed` dès
   son écriture (jamais réintroduit), vérifié sous Xvfb ci-dessus (3 appuis, 3 bascules, jamais 6).
@@ -2493,7 +3688,7 @@ maîtrisée) et pour `ureq`/`tokio` (refus d'un second modèle de concurrence sa
   documentées et pinnées — jamais d'`apt-get` ad hoc au fil d'une session.
 - **Dépendances Rust nouvelles** (`egui_kittest`, `x11rb` pour les assertions du harnais, une
   éventuelle lib de diff d'image) : en `[dev-dependencies]` d'`overlay-testkit` ou du harnais
-  Niveau 2 uniquement — jamais dans `overlay-ui`/`overlay-app`, chacune justifiée par une ligne
+  Niveau 2 uniquement — jamais dans `overlay-ui`, chacune justifiée par une ligne
   écrite (modèle §7.3 pour `ureq` vs `tokio`).
 - Aucune de ces dépendances ne remonte dans `[patch.crates-io]` du `Cargo.toml` racine — réservé au
   patch DirectComposition de production.
@@ -2517,7 +3712,7 @@ dev, plusieurs fois dans la journée avant que l'utilisateur ne le signale.
 Faire remonter l'intention rend les panneaux inertes **par construction** : aucun test n'a à se
 souvenir de neutraliser quoi que ce soit, et un nouveau panneau ne peut pas réintroduire le problème
 sans que cela se voie dans sa signature. Le seul point du binaire qui appelle `open::that` est
-l'hôte (`main.rs`, `bin/overlay-ui-x11.rs`) — c'est vérifiable d'un `grep`.
+l'hôte (`main.rs`, `bin/wakfu-companion-overlay-x11.rs`) — c'est vérifiable d'un `grep`.
 
 ### 17.4 Restitution humaine
 

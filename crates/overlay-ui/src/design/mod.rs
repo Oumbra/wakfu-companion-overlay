@@ -14,6 +14,7 @@
 //! | --- | --- | --- |
 //! | `design::assets` | manifeste : nom logique → fichier + découpage 9-slice | de la peinture |
 //! | `design::nine_slice` | peindre une texture à n'importe quelle taille | connaître un composant |
+//! | `design::fit` | inscrire une image de contenu dans sa boîte, à son rapport | choisir la boîte |
 //! | `design::fonts` | enregistrer les polices embarquées auprès d'egui | mettre en page |
 //! | `design::text` | le corps et la police d'un libellé | choisir quoi écrire |
 //! | `design::tokens` | couleurs et métriques mesurées, partagées | de la mise en page |
@@ -30,6 +31,7 @@
 
 pub mod assets;
 pub mod components;
+pub mod fit;
 pub mod fonts;
 pub mod icons;
 pub mod nine_slice;
@@ -41,6 +43,7 @@ use std::sync::Arc;
 pub use assets::DsTexture;
 pub use components::button::{button, Button, ButtonSize, ButtonState, ButtonVariant};
 pub use components::checkbox::{checkbox, paint as paint_checkbox, Checkbox, CheckboxState};
+pub use fit::{contain as contain_size, contain_rect};
 pub use icons::DsIcon;
 // Les trois fonctions de géométrie du repliable sont préfixées à la réexportation : `design::
 // closed_height` ne dirait pas de quoi, et le jour où un second conteneur en aura une, le nom nu
@@ -61,7 +64,7 @@ pub use components::info_text::{info_text, InfoText, InfoTone};
 pub use components::input::{input, Input, InputSize, InputState};
 pub use components::item_slot::{
     border_ring as item_slot_border_ring, item_slot, paint_order as item_slot_paint_order,
-    ItemRarity, ItemSlot, SelectionTone, SlotCount, SlotFrame, SlotLayer,
+    ItemRarity, ItemSlot, SelectionTone, SlotCount, SlotFrame, SlotGlyph, SlotLayer,
 };
 pub use components::label::{label, Label};
 pub use components::legend_tile::{
@@ -80,6 +83,7 @@ pub use components::portrait::{
     paint as paint_portrait, paint_percent as paint_portrait_percent,
     percent_of as portrait_percent, portrait, Portrait, PortraitShape,
 };
+pub use components::scrim::{scrim, Scrim, ScrimLayer};
 pub use components::scroll_area::{scroll_area, ScrollArea, ScrollAxis};
 pub use components::select::{select, select_multi, Select, SelectState};
 pub use components::separator::{separator, Separator};
@@ -88,6 +92,7 @@ pub use components::slider::{
     SliderState,
 };
 pub use components::stepper::{stepper, Stepper};
+pub use components::switch::{switch, Switch, SwitchState, SwitchVariant};
 pub use components::table::{
     column_spans as table_column_spans, is_striped as table_is_striped, table, Table, TableAlign,
     TableBody, TableColumn, TableRow, TableWidth,
@@ -303,6 +308,28 @@ impl DesignSystem {
             self.texture(texture),
             &texture.spec().slice,
             tint,
+        );
+    }
+
+    /// Peint `texture` en 9-slice dans `rect`, **les marges figées réduites par `scale`** — voir
+    /// `nine_slice::shape_scaled`. C'est la voie d'un composant servi plus petit que sa capture
+    /// (le switch à cases, 36 px pour une texture de 44) : coins, liseré et biseaux se réduisent
+    /// ensemble, le corps s'étire sur ce qui reste, et la largeur reste libre.
+    pub fn paint_scaled(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        texture: DsTexture,
+        tint: egui::Color32,
+        scale: f32,
+    ) {
+        nine_slice::paint_scaled(
+            painter,
+            rect,
+            self.texture(texture),
+            &texture.spec().slice,
+            tint,
+            scale,
         );
     }
 }

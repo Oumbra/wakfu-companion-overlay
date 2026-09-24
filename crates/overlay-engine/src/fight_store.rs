@@ -41,11 +41,16 @@ const APP_NAME: &str = "wakfu-companion-overlay-test";
 /// (crash sans jamais recevoir `CombatEnd`, ou overlay resté éteint plus d'une journée) — au-delà,
 /// le fichier est supprimé sans être restauré plutôt que de réafficher indéfiniment, au prochain
 /// démarrage, un combat que l'utilisateur a très probablement quitté depuis longtemps.
+///
+/// Appliqué à deux moments : au démarrage (`load_ongoing_fights`) et à chaque fois que la
+/// dernière fenêtre de jeu se ferme (`prune_stale_fights`, 2026-09-18) — un overlay qui reste
+/// lancé plusieurs jours ne repasse jamais par le premier, et garderait sinon sur disque, avec les
+/// noms de ses combattants, un combat que plus rien ne terminera.
 const MAX_FIGHT_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// Dossier de stockage par défaut — voir la doc de module.
 pub fn default_store_dir() -> PathBuf {
-    directories::ProjectDirs::from("", "", APP_NAME)
+    crate::app_dirs::project_dirs(APP_NAME)
         .map(|dirs| dirs.data_dir().join("data"))
         .unwrap_or_else(|| PathBuf::from("data"))
 }
@@ -66,12 +71,12 @@ pub fn save_fight(dir: &Path, fight: &FightSnapshot) {
         return; // ne devrait jamais arriver (types simples, toujours sérialisables)
     };
     if let Err(err) = std::fs::create_dir_all(dir) {
-        tracing::warn!(dir = %dir.display(), %err, "impossible de créer le dossier de sauvegarde des combats");
+        tracing::warn!(dir = %overlay_ingest::privacy::redact_path(dir), %err, "impossible de créer le dossier de sauvegarde des combats");
         return;
     }
     let path = fight_path(dir, fight.fight_id);
     if let Err(err) = std::fs::write(&path, json) {
-        tracing::warn!(path = %path.display(), %err, "impossible d'écrire l'état du combat (non restaurable après redémarrage)");
+        tracing::warn!(path = %overlay_ingest::privacy::redact_path(&path), %err, "impossible d'écrire l'état du combat (non restaurable après redémarrage)");
     }
 }
 
@@ -82,9 +87,49 @@ pub fn delete_fight(dir: &Path, fight_id: i64) {
     let path = fight_path(dir, fight_id);
     if let Err(err) = std::fs::remove_file(&path) {
         if err.kind() != std::io::ErrorKind::NotFound {
-            tracing::warn!(path = %path.display(), %err, "impossible de supprimer l'état de combat persisté");
+            tracing::warn!(path = %overlay_ingest::privacy::redact_path(&path), %err, "impossible de supprimer l'état de combat persisté");
         }
     }
+}
+
+/// Les fichiers `*.json` du dossier, dans l'ordre du système de fichiers — vide si le dossier
+/// n'existe pas (premier lancement, ou rien n'a jamais été persisté).
+fn fight_files(dir: &Path) -> Vec<std::fs::DirEntry> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.path().extension().and_then(|e| e.to_str()) == Some("json"))
+        .collect()
+}
+
+/// `true` si le fichier n'a pas été touché depuis plus de `MAX_FIGHT_AGE` — un combat en cours
+/// est réécrit à chaque lot qui le concerne (`save_fight`), sa date de modification est donc celle
+/// de sa dernière ligne de log. Une date illisible n'est jamais périmée (jamais de suppression
+/// sur un doute).
+fn is_stale(entry: &std::fs::DirEntry) -> bool {
+    entry
+        .metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age > MAX_FIGHT_AGE)
+}
+
+/// Supprime les combats persistés trop anciens (voir `MAX_FIGHT_AGE`) et rend leur nombre —
+/// appelé par `Engine::prune_stale_fights` quand la dernière fenêtre de jeu se ferme : plus de
+/// client, plus de combat qui puisse se terminer. Le seuil d'ancienneté est gardé plutôt que de
+/// tout effacer, pour le client qui plante en plein combat et s'y reconnecte après relance.
+/// Best-effort, comme le reste du module.
+pub fn prune_stale_fights(dir: &Path) -> usize {
+    let mut removed = 0;
+    for entry in fight_files(dir) {
+        if is_stale(&entry) && std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// Recharge tous les combats encore persistés — appelé une seule fois, à la construction de
@@ -93,22 +138,10 @@ pub fn delete_fight(dir: &Path, fight_id: i64) {
 /// (voir `MAX_FIGHT_AGE`) est simplement ignoré — et nettoyé du disque au passage pour ne pas le
 /// retenter à chaque démarrage — jamais une erreur bloquante.
 pub fn load_ongoing_fights(dir: &Path) -> Vec<FightSnapshot> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new(); // dossier absent : premier lancement, ou rien à restaurer
-    };
     let mut fights = Vec::new();
-    for entry in entries.flatten() {
+    for entry in fight_files(dir) {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let is_stale = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|modified| modified.elapsed().ok())
-            .is_some_and(|age| age > MAX_FIGHT_AGE);
-        if is_stale {
+        if is_stale(&entry) {
             let _ = std::fs::remove_file(&path);
             continue;
         }
@@ -238,6 +271,46 @@ mod tests {
         let restored = load_ongoing_fights(&dir);
         assert_eq!(restored, vec![ongoing_fight(1)]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Vieillit un fichier de `MAX_FIGHT_AGE` plus une heure, en jouant sur sa date de
+    /// modification — la seule chose que `is_stale` regarde.
+    fn vieillir(path: &std::path::Path) {
+        let file = std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("fichier de combat écrit par save_fight");
+        let past =
+            std::time::SystemTime::now() - MAX_FIGHT_AGE - std::time::Duration::from_secs(3600);
+        file.set_modified(past).expect("date de modification");
+    }
+
+    #[test]
+    fn prune_stale_fights_ne_retire_que_les_combats_perimes() {
+        let dir = temp_dir();
+        save_fight(&dir, &ongoing_fight(1));
+        save_fight(&dir, &ongoing_fight(2));
+        vieillir(&fight_path(&dir, 1));
+        assert_eq!(prune_stale_fights(&dir), 1);
+        assert!(
+            !fight_path(&dir, 1).exists(),
+            "le combat périmé est supprimé"
+        );
+        assert!(
+            fight_path(&dir, 2).exists(),
+            "le combat récent est conservé"
+        );
+        assert_eq!(
+            prune_stale_fights(&dir),
+            0,
+            "rien de plus à purger au second passage"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_stale_fights_sur_un_dossier_absent_rend_zero() {
+        assert_eq!(prune_stale_fights(&temp_dir()), 0);
     }
 
     #[test]

@@ -118,6 +118,8 @@ impl EnemyFrameScroll {
         // Cadre fixe — peint une seule fois, jamais redessiné pendant le scroll (voir doc de
         // module) : c'est le clip ci-dessous qui masque les portraits hors-champ, pas un
         // recouvrement du cadre.
+        // Panneau posé à droite : ce gabarit est du DÉCOR et le miroir le RETOURNE, comme celui
+        // du cadre exact (voir `combat_frame::CombatFrame::show` et `crate::mirror`).
         egui::Image::new(frame.largest_texture()).paint_at(ui, frame_rect);
 
         // Bande de clip : du 1ᵉʳ centre moins le rayon au dernier centre plus le rayon (voir doc de
@@ -189,41 +191,50 @@ impl EnemyFrameScroll {
                     remote_icon_textures,
                     fighter,
                 );
-                match portrait {
-                    Some(super::combat::FighterPortrait::ClassPortrait(texture)) => {
-                        egui::Image::new(&texture)
-                            .corner_radius(radius)
-                            .paint_at(ui, portrait_rect);
+                // **Inscrit dans l'emplacement, à son rapport** (`design::fit`) : la bande des
+                // ennemis est justement l'écran où les monstres servis par
+                // `wakassets/monsterIllustrations` — des bannières rectangulaires — étaient
+                // étirés en carré jusqu'au 2026-09-17.
+                let peindre = |ui: &egui::Ui, texture: &egui::TextureHandle, ko: bool| {
+                    let peint = crate::design::contain_rect(portrait_rect, texture.size_vec2());
+                    egui::Image::new(texture)
+                        .corner_radius(radius)
+                        .tint(super::combat::grey_tint_if_ko(ko))
+                        .paint_at(ui, peint);
+                };
+                // Panneau posé à droite : le portrait change de place, jamais de sens — même
+                // règle et même ancre que dans `combat_frame` (voir `crate::mirror`).
+                crate::mirror::upright_in(ui, portrait_rect, |ui| {
+                    match portrait {
+                        Some(super::combat::FighterPortrait::ClassPortrait(texture)) => {
+                            // Le portrait de classe a sa version grise PRÉCALCULÉE dans l'atlas : le
+                            // teinter en plus l'assombrirait deux fois.
+                            peindre(ui, &texture, false);
+                        }
+                        Some(super::combat::FighterPortrait::RemoteMonster(texture)) => {
+                            // Portrait RÉEL du monstre — pas de version grisée précalculée pour
+                            // celle-ci, simple tint si KO (voir `grey_tint_if_ko`).
+                            peindre(ui, &texture, fighter.is_ko);
+                        }
+                        None => {
+                            peindre(ui, icons.unknown_entity_texture(), fighter.is_ko);
+                        }
                     }
-                    Some(super::combat::FighterPortrait::RemoteMonster(texture)) => {
-                        // Portrait RÉEL du monstre — pas de version grisée précalculée pour
-                        // celle-ci, simple tint si KO (voir `grey_tint_if_ko`).
-                        egui::Image::new(&texture)
-                            .corner_radius(radius)
-                            .tint(super::combat::grey_tint_if_ko(fighter.is_ko))
-                            .paint_at(ui, portrait_rect);
+                    // Marques du bloc de sorts ICI, dans la bande de clip et avant tout le reste
+                    // (retour utilisateur du 13 sept. 2026) : le liseré suit le portrait au
+                    // défilement et se rogne avec lui au bord de la bande, et il passe SOUS le
+                    // pourcentage (peint plus bas) et SOUS la scrollbar (peinte en dernier) — jamais
+                    // par-dessus l'un ou l'autre.
+                    if let Some(marks) = marks {
+                        super::combat_spell_block::paint_marks(
+                            ui,
+                            portrait_rect,
+                            slot_id(ui, i, fighter),
+                            marks.ring_slot == Some(i),
+                            marks.dot_slot == Some(i),
+                        );
                     }
-                    None => {
-                        let image = egui::Image::new(icons.unknown_entity_texture())
-                            .corner_radius(radius)
-                            .tint(super::combat::grey_tint_if_ko(fighter.is_ko));
-                        image.paint_at(ui, portrait_rect);
-                    }
-                }
-                // Marques du bloc de sorts ICI, dans la bande de clip et avant tout le reste
-                // (retour utilisateur du 13 sept. 2026) : le liseré suit le portrait au
-                // défilement et se rogne avec lui au bord de la bande, et il passe SOUS le
-                // pourcentage (peint plus bas) et SOUS la scrollbar (peinte en dernier) — jamais
-                // par-dessus l'un ou l'autre.
-                if let Some(marks) = marks {
-                    super::combat_spell_block::paint_marks(
-                        ui,
-                        portrait_rect,
-                        slot_id(ui, i, fighter),
-                        marks.ring_slot == Some(i),
-                        marks.dot_slot == Some(i),
-                    );
-                }
+                });
             }
         });
 
@@ -263,11 +274,14 @@ impl EnemyFrameScroll {
             crate::design::tooltip(&response).text(fighter.name.as_str());
             let measured = metric.value_of(fighter);
             if measured > 0 {
-                crate::design::paint_portrait_percent(
-                    ui,
-                    portrait_rect,
-                    crate::design::portrait_percent(measured, total_damage),
-                );
+                // Même ancre que le portrait, peint plus haut : les deux se déplacent ensemble.
+                crate::mirror::upright_in(ui, portrait_rect, |ui| {
+                    crate::design::paint_portrait_percent(
+                        ui,
+                        portrait_rect,
+                        crate::design::portrait_percent(measured, total_damage),
+                    );
+                });
             }
         }
 

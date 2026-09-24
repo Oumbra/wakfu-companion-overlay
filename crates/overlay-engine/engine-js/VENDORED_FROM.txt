@@ -1,10 +1,33 @@
-f34e86967b7fd2a76acd94edf8a85cc8c5024c23
+7e716b852b66d4ef827c68eb1a0f1221d0b1f01b
 https://github.com/Oumbra/wakfu-companion
 
-Modifications locales — l'overlay et le web n'ont pas les mêmes fonctionnalités, le parseur
-diverge donc normalement du dépôt d'origine (décision utilisateur, 2026-09-13) :
+`src/log-parser.ts` et `src/log-entry.model.ts` sont remis à parité avec ce commit le 2026-09-19
+(vérifié par `diff` : le seul écart restant est la liste de divergences ci-dessous). Refaire ce
+`diff` avant d'y toucher plutôt que de porter une règle à l'aveugle — l'écart précédent avait
+laissé passer trois signaux : `client-lifecycle`, `item-loss` et la fermeture de session
+marchand/HDV « On annule ».
+
+Divergences locales assumées — l'overlay et le web n'ont pas les mêmes fonctionnalités, le
+parseur diverge donc normalement du dépôt d'origine (décision utilisateur, 2026-09-13) :
 - 2026-09-13 log-parser.ts : fenêtre de déduplication dédiée aux `spell-cast`
   (SPELL_CAST_DEDUPE_WINDOW_MS = 600 ms, mesurée sur tests/wakfu.log) — la fenêtre
   générale de 1 s avalait les relancers rapides d'un même sort.
 - 2026-09-13 log-parser.ts + log-entry.model.ts : nouvel événement `turn-ended`
   ("N secondes reportées pour le tour suivant."), frontière de tour pour les homonymes.
+- 2026-09-23 log-parser.ts : `FightParseState.lastActionMs` + `mostRecentlyActiveFight` — un nom
+  de cible porté par plusieurs combats concurrents se résout vers le combat où quelqu'un a agi le
+  plus récemment, jamais vers un combat sans aucune action (bug réel multi-compte : la rafale de
+  jointures d'un combat qui démarre volait les dégâts du combat en cours et y créait un attaquant
+  « Inconnu »). Le même défaut existe côté web (`resolveFightIdForName` y retombe encore sur
+  `currentFightId`) — à reporter.
+
+- 2026-09-23 log-parser.ts : correctifs de sécurité de l'audit du 2026-09-23, portés À L'IDENTIQUE
+  du correctif web (lot livré en patchs pour wakfu-companion, pas encore fusionné là-bas) —
+  `CLIENT_BUILD_DATE_RE` ancrée sur la ligne technique complète (une fausse date écrite dans un
+  canal de chat redatait l'historique), `TRADE_ITEM_RE` découpée sur `(refId=N)` (regex cubique),
+  tampon multi-lignes borné (200 lignes, 32 Kio). Ces trois points ne sont PAS des divergences :
+  ils disparaissent de cette liste une fois le web resynchronisé.
+
+`src/entry.ts` n'est pas vendu : c'est la façade QuickJS propre à l'overlay. Toute méthode
+publique de `LogParser` qu'elle expose (`parseLine`, `flush`, `reset`, `closeFight`) doit y être
+republiée sur `globalThis.wakfuEngine`, sans quoi l'hôte Rust ne peut pas l'appeler.

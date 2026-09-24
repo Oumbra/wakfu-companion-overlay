@@ -6,15 +6,81 @@ Overlay de jeu natif (Rust) pour [Wakfu](https://www.wakfu.com/), portage de
 alertes de drop, avec synchronisation de l'historique (combats, achats et récupérations de kamas à
 l'Hôtel de Vente, échanges) vers le même compte que l'application web.
 
-**Plateformes visées : Windows et Linux (X11 / XWayland).** macOS est hors périmètre.
-
-État : spikes de validation technique (`spikes/`) terminés ; L1 (ingestion) fait, L2 (UI) en
-cours — deux panneaux réels (dégâts du combat, récap de session) tournent déjà sur un vrai
-`wakfu.log` (`crates/`, workspace Cargo à la racine).
+**Plateformes visées : Windows et Linux (X11 / XWayland).**
 
 📄 **[Plan d'architecture technique](docs/plan-architecture.md)** — stack, modèle de threads,
 ingestion du log, rendu et click-through par OS, synchronisation serveur, budget mémoire,
 feuille de route et revue d'experts.
+
+## Installation
+
+Cette section s'adresse à qui veut simplement **utiliser** l'overlay. Pour compiler le projet
+soi-même, voir [« Mise en route (développement) »](#mise-en-route-développement) plus bas.
+
+Les binaires sont publiés sur la page **[Releases](https://github.com/Oumbra/wakfu-companion-overlay/releases/latest)**
+du dépôt, un par plateforme, compressés en gzip simple (pas une archive `.zip`/`.tar` — un seul
+fichier, à décompresser tel quel) :
+
+- `wakfu-companion-overlay-{version}-windows-x86_64.exe.gz`
+- `wakfu-companion-overlay-{version}-linux-x86_64.gz`
+
+Une fois installée, l'overlay se met à jour **seul** au démarrage suivant (`docs/plan-mise-a-jour.md`) :
+cette étape manuelle ne se refait qu'à la toute première installation.
+
+### Windows
+
+1. Télécharger `wakfu-companion-overlay-{version}-windows-x86_64.exe.gz` depuis la Release.
+2. Le décompresser en `.exe`. L'Explorateur Windows n'ouvre pas les `.gz` nativement ; deux façons
+   de s'en sortir sans rien installer de nouveau :
+   - **7-Zip** (souvent déjà présent) : clic droit sur le fichier → *7-Zip → Extraire ici*.
+   - **PowerShell**, sans outil externe :
+     ```powershell
+     $in  = [IO.File]::OpenRead("wakfu-companion-overlay-{version}-windows-x86_64.exe.gz")
+     $out = [IO.File]::Create("wakfu-companion-overlay.exe")
+     $gz  = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
+     $gz.CopyTo($out)
+     $gz.Dispose(); $out.Dispose(); $in.Dispose()
+     ```
+3. Lancer `wakfu-companion-overlay.exe`. Aucune dépendance à installer : DirectComposition et
+   DirectX 12 (backend `dx12` de wgpu) font partie de Windows 10/11.
+
+### Linux (X11 / XWayland)
+
+L'overlay vise **X11**, natif ou via **XWayland** — c'est le cas de toute session de bureau
+courante (GNOME, KDE, XFCE…), même sous Wayland natif, tant que XWayland est installé (il l'est par
+défaut sur la quasi-totalité des distributions grand public).
+
+1. Télécharger `wakfu-companion-overlay-{version}-linux-x86_64.gz` depuis la Release.
+2. Décompresser et rendre exécutable :
+   ```bash
+   gunzip wakfu-companion-overlay-{version}-linux-x86_64.gz
+   mv wakfu-companion-overlay-{version}-linux-x86_64 wakfu-companion-overlay
+   chmod +x wakfu-companion-overlay
+   ```
+3. Lancer : `./wakfu-companion-overlay`.
+
+Le binaire lie dynamiquement quelques bibliothèques système, quasiment toujours déjà présentes sur
+un poste de jeu (session X11 + son + carte graphique), mais listées ici pour les images minimales
+(conteneur, serveur, installation "core") :
+
+| Bibliothèque | Rôle | Debian / Ubuntu | Fedora | Arch / SteamOS | openSUSE |
+| --- | --- | --- | --- | --- | --- |
+| Vulkan (chargeur + pilote) | rendu wgpu — **aucun repli OpenGL**, un pilote Vulkan fonctionnel est obligatoire | `libvulkan1` + `mesa-vulkan-drivers` (ou pilote proprio NVIDIA) | `vulkan-loader` + `mesa-vulkan-drivers` | `vulkan-icd-loader` + `vulkan-radeon`/`vulkan-intel`/`nvidia-utils` selon le GPU | `libvulkan1` + `Mesa-vulkan-device-select` |
+| ALSA | lecture des sons d'alerte (`rodio`/`cpal`) | `libasound2` (`libasound2t64` sur les versions récentes) | `alsa-lib` | `alsa-lib` | `libasound2` |
+| X11 / xkbcommon | fenêtre, clic-traversant, raccourcis (`winit`, `x11rb`) | `libx11-6`, `libxkbcommon-x11-0` | `libX11`, `libxkbcommon-x11` | `libx11`, `libxkbcommon-x11` | `libX11-6`, `libxkbcommon-x11-0` |
+
+Sur un poste qui fait déjà tourner des jeux (pilote GPU installé, session graphique standard), ces
+paquets sont déjà en place — aucune manipulation n'est en général nécessaire.
+
+**Steam Deck (SteamOS)** : lancer le binaire depuis le **mode Bureau** (double-clic ou terminal) ;
+SteamOS fournit déjà XWayland, ALSA et le pilote Vulkan RADV, sans rien à installer. Le mode Jeu ne
+lance pas d'exécutable arbitraire hors de Steam — passer par le mode Bureau, éventuellement en
+ajoutant le binaire comme jeu non-Steam pour un accès rapide.
+
+**Compatibilité glibc** : le binaire est compilé sur Ubuntu (dernière image `ubuntu-latest` du CI).
+Sur une distribution **beaucoup plus ancienne** que sa glibc, le lancement peut échouer avec une
+erreur du type `version 'GLIBC_2.xx' not found` — dans ce cas, mettre à jour la distribution ou
+compiler depuis les sources (section suivante) plutôt que chercher un correctif ponctuel.
 
 ## Mise en route (développement)
 
@@ -45,9 +111,29 @@ entrent tout seuls dans ce conteneur quand la machine ne sait pas compiler (voir
 Avant de pousser (le hook `pre-push` le fait pour les lints) :
 
 ```bash
-bash scripts/ci-local.sh          # tout : format, clippy, tests
+bash scripts/ci-local.sh          # tout : format, clippy, tests, captures
 bash scripts/ci-local.sh --lint   # format + clippy seulement (rapide)
 ```
+
+### Captures de référence
+
+Le CI compare 153 captures d'interface sous un rendu Linux **figé** (conteneur épinglé par digest +
+Mesa épinglé). Une référence régénérée ailleurs — sous Windows, sous un autre Mesa — fait rougir le
+gate à coup sûr. Deux chemins, selon la machine :
+
+```bash
+# Linux + Docker : on se place dans l'environnement du CI
+bash scripts/ci-local.sh --captures-conteneur
+UPDATE_SNAPSHOTS=1 bash scripts/ci-local.sh --captures-conteneur   # régénérer
+```
+
+Sans Docker (poste Windows, session cloud) : **GitHub → Actions → « Régénérer les captures (rendu
+du CI) » → Run workflow**. Il régénère dans le conteneur du CI, publie l'avant/diff/après en
+artefact — **à relire, c'est là qu'on attrape une régression promue en référence** — et pousse le
+commit.
+
+Un `bash scripts/ci-local.sh` ordinaire joue les captures sur toute plateforme et signale les écarts
+trop grands pour du bruit de rastérisation (seuil réglable par `WAKFU_SEUIL_BRUIT_CAPTURES`).
 
 ## Numéro de version
 
@@ -82,27 +168,30 @@ fusion : rejouer un commit déjà versionné le bumperait une seconde fois.
 
 ## Publication (Release GitHub) et mise à jour automatique
 
-Plan de référence : [`docs/plan-mise-a-jour.md`](docs/plan-mise-a-jour.md). Une Release se
-publie **en fusionnant `dev` dans `main`** : `.github/workflows/release.yml` lit la version du
+Plan de référence : [`docs/plan-mise-a-jour.md`](docs/plan-mise-a-jour.md). Une Release se publie
+**en fusionnant `dev` dans `main`** : `.github/workflows/release.yml` lit la version du
 `Cargo.toml`, s'arrête si le tag `v{version}` existe déjà, compile les deux binaires en release
-(Windows `overlay-ui.exe`, Linux `overlay-ui-x11`), puis `cargo xtask dist` les compresse en gzip,
-écrit le manifeste `latest.json` (SHA-256 des assets et des binaires installés), le signe avec la
-clé privée `minisign` des secrets du dépôt et revérifie la signature avec
-[`wakfu-overlay.pub`](wakfu-overlay.pub) avant de créer la Release. Le différentiel n'est pour
-l'instant que **mesuré** (rapport dans le résumé du job) ; il sera publié quand la mesure le
-justifiera.
+(Windows `wakfu-companion-overlay.exe`, Linux `wakfu-companion-overlay-x11`), puis
+`cargo xtask dist` les compresse en gzip, écrit le manifeste `latest.json` (SHA-256 des assets et
+des binaires installés), le signe avec la clé privée `minisign` des secrets du dépôt et revérifie
+la signature avec [`wakfu-overlay.pub`](wakfu-overlay.pub) avant de créer la Release. Le
+différentiel n'est pour l'instant que **mesuré** (rapport dans le résumé du job) ; il sera publié
+quand la mesure le justifiera.
 
-Un binaire de Release vise toujours l'API de prod ; les scripts de prévisualisation pointent, eux,
-sur le déploiement dev via `WAKFU_COMPANION_API_URL`.
+Un binaire de Release vise toujours l'API de prod ; un binaire compilé avec tout autre profil
+(`preview`, debug) vise le déploiement dev — le choix est figé à la compilation
+(`crates/overlay-sync/build.rs`), `WAKFU_COMPANION_API_URL` le surcharge à l'exécution.
 
 ## Crates (`crates/`)
 
 | Crate | Lot | Contenu |
 | --- | --- | --- |
 | [`overlay-ingest`](crates/overlay-ingest/) | L1 ✅ | Suivi de `wakfu.log` : découverte de chemin, lecture incrémentale, rotation/troncature. `cargo test -p overlay-ingest`. |
-| [`overlay-app`](crates/overlay-app/) | L1 (câblage) | Binaire minimal : branche `overlay-ingest` sur la console pour l'observer sur un vrai `wakfu.log`. `cargo run -p overlay-app`. |
-| [`overlay-engine`](crates/overlay-engine/) | L2 🟡 | QuickJS + `LogParser` vendu depuis `wakfu-companion` → `LogEntry` → `SessionSnapshot` (agrégation Rust). `cargo test -p overlay-engine`. |
-| [`overlay-ui`](crates/overlay-ui/) | L2 🟡 | Premier overlay réel : fenêtre S1 + panneaux Dégâts du combat/Récap de session, ancré sur la fenêtre du jeu, sur un vrai `wakfu.log`. `.\preview.ps1` (Windows) ou `preview.sh` (Linux) depuis le dossier du crate. |
+| [`overlay-engine`](crates/overlay-engine/) | L2 ✅ | QuickJS + `LogParser` vendu depuis `wakfu-companion` → `LogEntry` → `SessionSnapshot` (agrégation Rust). `cargo test -p overlay-engine`. |
+| [`overlay-ui`](crates/overlay-ui/) | L2 ✅ | Premier overlay réel : fenêtre S1 + panneaux Dégâts du combat/Récap de session, ancré sur la fenêtre du jeu, sur un vrai `wakfu.log`. `.\preview.ps1` (Windows) ou `preview.sh` (Linux) depuis le dossier du crate. |
+| [`overlay-platform`](crates/overlay-platform/) | L2 ✅ | Primitives spécifiques à l'OS pour `overlay-ui` : découverte de la fenêtre du jeu, décision topmost, clic-traversant. |
+| [`overlay-sync`](crates/overlay-sync/) | L3–L5 ✅ | Réseau : appairage/auth native, catalogue (fetch + cache disque + repli embarqué), file de synchro SQLite idempotente vers l'API. |
+| [`overlay-testkit`](crates/overlay-testkit/) | L7 | Harnais de rendu offscreen des panneaux `overlay-ui` (153 captures de référence, voir « Captures de référence » plus haut). |
 
 ## Spikes (`spikes/`)
 
@@ -110,3 +199,35 @@ sur le déploiement dev via `WAKFU_COMPANION_API_URL`.
 | --- | --- | --- |
 | [`s1-window-windows`](spikes/s1-window-windows/) | ✅ validé | `.\preview.ps1` depuis le dossier du spike |
 | [`s2-engine-quickjs`](spikes/s2-engine-quickjs/) | ✅ validé | voir son README |
+| [`s3-window-linux`](spikes/s3-window-linux/) | ✅ validé | `harness.sh` depuis le dossier du spike (Xvfb) |
+| [`s4-capture-hors-focus`](spikes/s4-capture-hors-focus/) | ✅ validé | voir son README (Windows) |
+
+## Projet non officiel — Wakfu, Ankama et vous
+
+Wakfu Companion est un **projet de fan, gratuit et sans but lucratif**, qui n'est ni édité, ni
+hébergé, ni approuvé par Ankama et n'a aucun lien avec cette société. **WAKFU est une marque
+d'Ankama.** Les noms, images, icônes et éléments d'interface du jeu reproduits dans ce dépôt et dans
+le binaire restent la propriété d'Ankama Games et ne servent qu'à illustrer ; tout contenu lui
+appartenant est retiré sur simple demande de sa part (`contact@wakfu-companion.com`).
+
+Les données de jeu affichées (objets, monstres, raretés, catégories) descendent des fichiers que
+Ankama met à disposition des projets communautaires, sous sa
+[licence d'utilisation des données Wakfu](https://static.ankama.com/comm/2019_03/2019-03-11_Licence%20d'utilisation_Donne_es%20Wakfu_v.1%20(1).pdf)
+(usage personnel et non commercial), qui impose la mention suivante :
+
+> WAKFU MMORPG : © 2012-2026 Ankama Studio. Tous droits réservés.
+
+**Ce que l'overlay fait vis-à-vis du client de jeu, et ce que les CGU d'Ankama en disent**, est
+détaillé dans [`docs/analyse-cgu.md`](docs/analyse-cgu.md) et rappelé dans l'onglet « À propos »
+de l'overlay. En deux mots : il lit le fichier `wakfu.log` que le jeu écrit lui-même, ne se
+connecte jamais aux serveurs d'Ankama, ne lit pas la mémoire du client et ne modifie aucun de ses
+fichiers ; deux fonctions optionnelles vont plus loin (frappe d'une commande dans le chat sur
+raccourci, lecture de l'image de la fenêtre pour la notification de tour). Les
+[CGU d'Ankama](https://www.wakfu.com/fr/cgu) n'autorisent **aucun programme tiers par défaut** :
+utiliser cet overlay relève de l'appréciation et de la seule responsabilité de chaque joueur.
+
+## Licence
+
+[MIT](LICENSE) pour le code de ce dépôt. Cette licence ne couvre **pas** les éléments appartenant
+à Ankama (voir la section précédente) ni les polices (`assets/fonts/`, OFL et UFL, licences
+jointes) ni les sons (`crates/overlay-ui/assets/sounds/README.md`).

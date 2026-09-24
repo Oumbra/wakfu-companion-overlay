@@ -6,11 +6,12 @@
 # `workflow_dispatch` uniquement une fois écrit (§17.2 : « jamais un gate CI par défaut »
 # pour ce harnais précis) — le contenu de ce fichier n'a donc pas vocation à y faire de la place.
 #
-# `overlay-ui::main` (le binaire `overlay-ui`) importe `windows::` sans `cfg` et ne compile QUE
-# sous Windows — d'où le découpage par paquet/binaire plutôt que `--workspace` partout : sa LIB
+# `overlay-ui::main` (le binaire `wakfu-companion-overlay`, nommé ainsi par le `[[bin]]` de son
+# Cargo.toml et non d'après le paquet) importe `windows::` sans `cfg` et ne compile QUE sous
+# Windows — d'où le découpage par paquet/binaire plutôt que `--workspace` partout : sa LIB
 # (`--lib`) compile nativement sous Linux (voir `crates/overlay-ui/src/lib.rs`), tout comme le
-# second binaire du même paquet, `overlay-ui-x11` (§17.2 du plan) — build/clippy/test le ciblent
-# donc explicitement en plus de `--lib`.
+# second binaire du même paquet, `wakfu-companion-overlay-x11` (§17.2 du plan) — build/clippy/test
+# le ciblent donc explicitement en plus de `--lib`.
 #
 # `--no-fail-fast` sur CHAQUE `cargo test` : sans lui, cargo s'arrête au premier BINAIRE de test en
 # échec et n'exécute pas les suivants. Ce n'est pas une subtilité théorique — `tests/design_gallery.rs`
@@ -26,7 +27,11 @@
 # ce script est le garde-fou qui évite de découvrir un `fmt`/`clippy` rouge après coup, et il ne
 # protège que ce qu'il connaît. UNE seule divergence assumée : le job `test-linux` tourne ici dans
 # un conteneur au rendu figé (voir sa doc), là où le script local tourne sur la machine du dev — il
-# se contente d'avertir quand son Mesa diffère de celui du CI.
+# ne compte alors en échec que les écarts de capture trop grands pour du bruit de rastérisation.
+#
+# Workflow voisin : `.github/workflows/regen-captures.yml` (« Régénérer les captures »), lancé à la
+# main, réécrit les références DANS ce même conteneur. C'est la seule voie de régénération depuis un
+# poste Windows ou une session cloud, qui n'ont pas de Docker.
 #
 # La version de Rust vient de `rust-toolchain.toml` (épinglée), pas d'un `@stable` flottant : voir
 # la doc de ce fichier — c'est la dérive de version qui a tenu ce CI rouge du 2026-09-01 au
@@ -53,10 +58,19 @@ on:
       - '**/*.md'
       - '.claude/**'
   workflow_dispatch:
+  # Appelé aussi par `release-pr.yml` (job `ci`) : une branche de release n'est fusionnée dans
+  # `main` qu'après ce CI complet sur son commit de tête — sans `paths-ignore`, une release de
+  # pure documentation doit avoir un verdict elle aussi.
+  workflow_call:
 
 # Le travail se fait par rafales de petits commits successifs sur `dev` (voir l'historique) : sans
 # ce garde-fou, chaque push d'une rafale lançait cinq jobs complets dont seul le dernier importait.
 # Seul le run le plus récent d'une même branche survit ; les précédents sont annulés.
+# Lecture seule : ce workflow ne publie rien (audit de sécurité du 2026-09-23). Sans ce bloc, le
+# jeton hérite des droits par défaut du dépôt, écriture comprise.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -67,20 +81,40 @@ env:
   # « ajoute un backtrace » pour comprendre.
   RUST_BACKTRACE: 1
 
+# **`ubuntu-24.04`, jamais `ubuntu-latest`** (épinglé le 2026-09-18). GitHub annonce la bascule de
+# `ubuntu-latest` vers Ubuntu 26 à partir du 2026-10-19 (annotation « notice » sur chaque run,
+# actions/runner-images#14748) : c'est un changement d'OS, de version d'APT et de toolchain système
+# qui arriverait un matin, sur du code que personne n'a touché. Ce dépôt a déjà payé ce prix une
+# fois — dix jours de CI rouge sur une toolchain Rust flottante —, et le job `test-linux` épingle
+# jusqu'au DIGEST de son conteneur pour la même raison. La date de la bascule est le bon moment pour
+# monter à `ubuntu-26.04` : dans son propre commit, en regardant ce qui casse.
 jobs:
   fmt:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Purement textuel, aucune compilation : d'où sa place dans le job le plus rapide. Vérifie que
+      # l'image de base du rendu porte le MÊME digest dans `ci.yml`, `regen-captures.yml` et
+      # `.github/ci-image/Dockerfile` — une divergence ferait régénérer les références sous un Mesa
+      # qui n'est plus celui du gate. Voir l'en-tête du script.
+      - name: image de base du rendu, cohérente partout
+        run: bash scripts/verifier-digest-rendu.sh
+      # Même nature, même place : textuel et instantané. Le dépôt est public — une fixture
+      # `wakfu.log` brute y publierait un jeton de session, une IP, un nom de compte Windows et les
+      # pseudonymes et messages de tous les joueurs croisés ce jour-là (constat C1 de
+      # `docs/analyse-rgpd.md`). Doublé par le hook `pre-commit`, qui ne survit pas à un conteneur
+      # de session cloud : c'est CETTE étape qui fait foi.
+      - name: fixtures sans données réelles
+        run: bash scripts/check-fixtures.sh
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - run: cargo fmt --all -- --check
       - run: cargo fmt --manifest-path xtask/Cargo.toml -- --check
 
   clippy-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - name: dépendances système (rendu logiciel egui_kittest + son rodio)
@@ -88,18 +122,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libasound2-dev pkg-config
       - uses: ./.github/actions/vendor-wgpu-hal
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
             . -> target
             xtask -> target
-      - run: cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app --all-targets -- -D warnings
-      - run: cargo clippy -p overlay-ui --lib --bin overlay-ui-x11 -- -D warnings
+      - run: cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform --all-targets -- -D warnings
+      - run: cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay-x11 -- -D warnings
       - run: cargo clippy -p overlay-testkit --all-targets -- -D warnings
       - run: cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
 
   test-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # **Conteneur ÉPINGLÉ PAR DIGEST, pas par tag** : le tag `ubuntu:24.04` désigne une image
     # différente à chaque point release. Depuis que la comparaison de captures est un GATE (voir
     # l'étape `overlay-testkit` plus bas), l'environnement de rendu ne peut plus bouger tout seul —
@@ -120,7 +154,7 @@ jobs:
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ca-certificates curl git
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: environnement de rendu épinglé (Mesa/lavapipe, instantané daté — voir le script)
         run: bash scripts/setup-render-env.sh
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
@@ -129,13 +163,13 @@ jobs:
             | sh -s -- -y --no-modify-path --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: ./.github/actions/vendor-wgpu-hal
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: . -> target
-      - run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform -p overlay-app
+      - run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform
       - run: cargo test --no-fail-fast -p overlay-ui --lib
-      - name: overlay-ui-x11 — compile (pas de tests unitaires, voir bin/overlay-ui-x11.rs)
-        run: cargo build -p overlay-ui --bin overlay-ui-x11
+      - name: binaire Linux/X11 — compile (pas de tests unitaires, voir son fichier)
+        run: cargo build -p overlay-ui --bin wakfu-companion-overlay-x11
       # **GATE depuis le 2026-09-13** (§17.1 du plan). Ce n'était plus tenable en « informatif » :
       # l'étape a caché vingt-et-une captures périmées pendant une semaine. Ce qui a rendu la
       # promotion possible, c'est l'environnement de rendu figé ci-dessus — un gate sur un rendu
@@ -165,7 +199,7 @@ jobs:
       # contrat : si le gate est rouge, ces images existent forcément.
       - name: "captures en écart — rendu obtenu et diff (diagnostic)"
         if: always() && steps.captures.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: captures-en-ecart
           path: |
@@ -177,24 +211,36 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
       - uses: ./.github/actions/vendor-wgpu-hal
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: . -> target
       - run: cargo build --workspace
+      # **Le code `cfg(windows)` n'était linté nulle part** (ajouté le 2026-09-18). `clippy-linux`
+      # compile `overlay-ui --lib` sous Linux : tout ce qui est derrière un `cfg(windows)` y est
+      # invisible — `turn_watch/capture.rs` (PrintWindow/GDI) et `turn_watch/notify.rs` en entier,
+      # et le binaire `wakfu-companion-overlay` (`main.rs`, 4 000 lignes) n'y compile même pas. Côté
+      # Windows, ce job ne faisait qu'un `build` : aucun lint. Résultat au premier essai de cette
+      # étape : un `chunks_exact_mut` que clippy réclame depuis toujours dans `capture.rs`, jamais vu
+      # de personne.
+      #
+      # Même PORTÉE que la ligne équivalente de `clippy-linux` (lib + le binaire de la plateforme,
+      # pas `--all-targets`) : les deux jobs se répartissent ainsi les deux moitiés de `overlay-ui`
+      # sans qu'aucune ne soit tenue à un verdict que l'autre n'applique pas.
+      - run: cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay -- -D warnings
       - name: tests purs (sans GPU) — overlay-testkit/overlay-ui restent couverts côté Linux (lavapipe)
-        run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-app
+        run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync
 
   mem-budget:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
         run: rustup toolchain install --no-self-update
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: xtask -> target
       - run: cargo run --manifest-path xtask/Cargo.toml --release -- mem-budget

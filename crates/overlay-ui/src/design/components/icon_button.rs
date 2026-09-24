@@ -446,8 +446,13 @@ impl Widget for IconButton {
 ///
 /// Extraite d'[`icon_draw_size`] pour cette raison — elle en est le cœur, et le seul appelant
 /// n'était plus le bouton icône.
+///
+/// C'est le cas **carré** de [`crate::design::fit::contain`], la règle commune à tout ce qui se
+/// peint à son rapport — glyphes du design system ici, images de contenu venues du CDN là. Une
+/// seule des deux calcule, l'autre l'appelle : deux copies de cette division finiraient par
+/// diverger.
 pub fn glyph_fit(native: Vec2, box_side: f32) -> Vec2 {
-    native * (box_side / native.x.max(native.y))
+    crate::design::fit::contain(Vec2::splat(box_side), native)
 }
 
 /// Taille à laquelle peindre l'icône sur un bouton de côté `button_size`.
@@ -465,7 +470,12 @@ pub fn glyph_fit(native: Vec2, box_side: f32) -> Vec2 {
 ///
 /// Fonction libre plutôt que corps de `Widget::ui` : c'est le seul calcul du composant qui peut se
 /// tromper en silence, et il s'éprouve sans GPU (voir les tests en bas de ce fichier).
-fn icon_draw_size(native: Vec2, content: Option<f32>, button_size: f32, reference: f32) -> Vec2 {
+pub(super) fn icon_draw_size(
+    native: Vec2,
+    content: Option<f32>,
+    button_size: f32,
+    reference: f32,
+) -> Vec2 {
     let scale = button_size / reference;
     match content {
         // Rapport commun aux deux axes : une icône normalisée garde ses proportions.

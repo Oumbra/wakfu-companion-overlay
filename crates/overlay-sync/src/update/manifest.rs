@@ -54,6 +54,15 @@ pub struct Installed {
     pub sha256: String,
 }
 
+/// Nom de fichier nu : ni séparateur, ni `..`, ni caractère de contrôle, ni nom vide.
+fn is_plain_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains(['/', '\\', ':'])
+        && !name.chars().any(char::is_control)
+}
+
 /// Verdict d'une vérification.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Verdict {
@@ -108,6 +117,15 @@ impl Manifest {
             return Ok(Verdict::UpToDate);
         }
         let asset = self.asset_for(PLATFORM)?.clone();
+        // Le nom devient un chemin (`dossier de mise à jour / nom`) : un simple nom de fichier,
+        // jamais un chemin. La signature couvre déjà le manifeste ; ce contrôle ne coûte rien et
+        // ne dépend pas d'elle (audit de sécurité du 2026-09-23).
+        if !is_plain_file_name(&asset.name) {
+            return Err(UpdateError::Manifest(format!(
+                "nom d'asset refusé : {:?}",
+                asset.name
+            )));
+        }
         let mandatory = match &self.minimum_version {
             Some(min) => current_v < parse_version(min)?,
             None => false,
@@ -261,5 +279,17 @@ pub(crate) mod tests {
             Manifest::parse_verified(json.as_bytes(), &sig, &pk),
             Err(UpdateError::Manifest(_))
         ));
+    }
+
+    #[test]
+    fn un_nom_d_asset_n_est_jamais_un_chemin() {
+        assert!(is_plain_file_name(
+            "wakfu-companion-overlay-windows-x86_64.exe.gz"
+        ));
+        for name in [
+            "", ".", "..", "../x.gz", "a/b.gz", "a\\b.gz", "C:x.gz", "x\n.gz",
+        ] {
+            assert!(!is_plain_file_name(name), "{name:?}");
+        }
     }
 }

@@ -34,6 +34,15 @@
 //!   connue et comparable — [`tokens::ICON_BUTTON_CONTENT`] — ce qui permet de le normaliser.
 //! - **`libre`** : détouré sans bouton porteur, ou sans mesure consignée. Le normaliser sur un
 //!   étalon qu'il ne partage pas le rendrait faux ; il garde sa taille native.
+//! - **`couleur`** (2026-09-16) : un glyphe **en couleurs**, pas un blanc à teinter — libre de
+//!   taille, et peint tel quel. C'est l'exception à la règle « toutes les icônes sont
+//!   monochromes » du skill `design-asset`, réservée aux glyphes dont la couleur porte le sens :
+//!   les cinq du panneau Combat (vert = alliés, orange = ennemis ; dague, cœur vert d'armure, cœur
+//!   rouge de soin). Passés au blanc par transfert de luminance (essai du 2026-09-16), les deux
+//!   silhouettes ne se distinguaient plus que par la position des bras, et les deux cœurs
+//!   devenaient des taches. Un composant qui teinte ses glyphes (`design::switch`) peint ceux-ci
+//!   en blanc et les **atténue** hors sélection ([`tokens::ICON_NATIVE_DIM`]) au lieu de les
+//!   colorer.
 
 use crate::design::tokens;
 
@@ -82,10 +91,22 @@ macro_rules! ds_icons {
                     $(DsIcon::$variant => ds_icons!(@etalon $etalon),)*
                 }
             }
+
+            /// Le glyphe est-il en couleurs natives (catégorie `couleur`, voir la doc de
+            /// module) ? Un composant qui teinte ses glyphes ne doit pas teinter celui-ci.
+            pub fn native_color(self) -> bool {
+                match self {
+                    $(DsIcon::$variant => ds_icons!(@couleur $etalon),)*
+                }
+            }
         }
     };
     (@etalon socle) => { Some(tokens::ICON_BUTTON_CONTENT) };
     (@etalon libre) => { None };
+    (@etalon couleur) => { None };
+    (@couleur couleur) => { true };
+    (@couleur socle) => { false };
+    (@couleur libre) => { false };
 }
 
 /// Description statique d'un glyphe : nom de cache egui et octets PNG embarqués.
@@ -171,6 +192,15 @@ ds_icons! {
         /// Corbeille (`icons/icon-delete.png`, 12 × 14) — la suppression d'un élément d'une liste, sur
         /// socle de bouton icône (`interface-personnage-equiement.png`, barre d'outils du build).
         Delete => "icon-delete", socle;
+
+        /// Crayon (`icons/icon-edit.png`, 14 × 14) — **modifier une entrée d'une liste**, le
+        /// pendant de [`DsIcon::Delete`] avec qui il partage la barre d'outils d'une tuile.
+        ///
+        /// Détouré par l'utilisateur le 2026-09-16 (démélange direct fond → glyphe) pour l'onglet
+        /// « Personnages », où le bouton de modification portait jusque-là [`DsIcon::Option`] faute
+        /// de crayon au registre. Le trait diagonal est le crayon ; les trois tirets sous lui
+        /// appartiennent au dessin, ce n'est pas une frange de détourage.
+        Edit => "icon-edit", socle;
 
         /// Point d'interrogation (`icons/icon-help.png`, 12 × 12) — le bouton d'aide en tête de
         /// fenêtre (`interface-personnage-equiement.png`, coin haut-droit).
@@ -279,6 +309,29 @@ ds_icons! {
         /// `DsIcon::content_size`. Même statut que [`DsIcon::BagIn`].
         Lock => "icon-lock", socle;
 
+        /// Cadenas ouvert (`icons/icon-lock-open.png`, 16 × 14) — déverrouillé, le pendant de
+        /// [`DsIcon::Lock`].
+        ///
+        /// **Dessiné, pas détouré** (2026-09-17) : le jeu n'a pas de cadenas ouvert à prélever. Le
+        /// corps reprend `icon-lock.png` pixel pour pixel, l'anse seule change — pivotée HORS du
+        /// gabarit du corps, son montant libre à droite, dans le vide. Retenue par l'utilisateur
+        /// sur planche parmi cinq anses, puis quatre réglages de celle-ci. Blanc pur et alpha
+        /// binaire comme sa source, donc aucune frange à tolérer dans
+        /// `les_glyphes_d_icone_sont_detoures_au_pixel_pres`.
+        ///
+        /// `socle` par DESTINATION et non par mesure : elle n'a jamais vécu sur un bouton du jeu,
+        /// mais elle alternera avec [`DsIcon::Lock`] sur le même bouton icône, et deux états d'un
+        /// même bouton doivent partager l'étalon. **Conséquence à connaître** : `icon_draw_size`
+        /// ramène la PLUS GRANDE dimension à [`tokens::ICON_BUTTON_CONTENT`], or l'anse sortie
+        /// porte celle-ci de 14 à 16 px. À socle égal, le corps du cadenas ouvert est donc peint
+        /// 12,5 % plus court que celui du fermé — un saut visible là où les deux états alternent.
+        /// Si cet écart gêne à l'usage, la variante compacte écartée sur la planche (débordement
+        /// de 2 px, boîte 14 × 14, donc même grande dimension que `Lock`) s'accorde sans toucher
+        /// au code.
+        ///
+        /// **Pas encore d'appelant** : rien ne se verrouille dans l'overlay à ce jour.
+        LockOpen => "icon-lock-open", socle;
+
         /// Histogramme croissant (`icons/icon-order.png`, 14 × 14) — tri par valeur. Détouré
         /// `--from-button --floor 45` (ombre portée du glyphe sur aplat, voir
         /// `references/recettes-icones.md`), d'où `DsIcon::content_size`. Même statut que
@@ -344,4 +397,54 @@ ds_icons! {
         /// `--from-button`, sur socle sombre uni. Pas de `DsIcon::content_size`. Même statut que
         /// [`DsIcon::BagIn`].
         Xp => "icon-xp", libre;
+
+        /// Épée (`icons/icon-sword.png`, 24 × 25) — combat. Détourée le 2026-09-16 par
+        /// `demix_flat` (glyphe blanc à même le décor uni, sans bouton porteur — voir
+        /// `references/recettes-icones.md` du skill `design-asset`), d'où `libre`. Premier
+        /// appelant : la case « combats gagnés − perdus » de la bande Récap (`panels::recap`), où
+        /// elle remplace la dague colorée [`DsIcon::MetricDamage`] par un glyphe blanc à teinter
+        /// comme ses voisins.
+        Sword => "icon-sword", libre;
+
+        /// Horloge (`icons/icon-clock.png`, 19 × 19) — durée. Même provenance, même recette et même
+        /// statut que [`DsIcon::Sword`]. Premier appelant : la case « durée de session » de la bande
+        /// Récap, où elle remplace [`DsIcon::Calendar`] — le registre porte enfin un cadran, la
+        /// bande n'a plus à emprunter une grille de calendrier pour dire une heure.
+        Clock => "icon-clock", libre;
+
+        /// Signe ♂ (`icons/icon-male.png`, 14 × 14) — genre masculin, case gauche du switch de
+        /// genre du jeu. Détouré le 2026-09-16 SANS `--from-button` (glyphe posé sur le décor
+        /// sombre de la capture, réglages par défaut, `luma-light`). Pas de `DsIcon::content_size` :
+        /// le jeu le peint à sa taille native dans une case de 40px, c'est cette taille qui fait foi
+        /// (voir `design::switch`).
+        Male => "icon-male", libre;
+
+        /// Signe ♀ (`icons/icon-female.png`, 10 × 16) — genre féminin, case droite du même switch.
+        /// Même provenance, même réglage et même statut que [`DsIcon::Male`].
+        Female => "icon-female", libre;
+
+        /// Silhouette verte d'allié (`icons/icon-allies.png`, 18 × 22) — case gauche du switch
+        /// de camp du panneau Combat. Le fichier du dépôt web (`header-allies.png`), rogné à sa
+        /// boîte d'encre, entré au design system le 2026-09-16 avec la migration du switch ; il
+        /// vivait jusque-là dans `ui_icons.rs`. En couleurs : voir la catégorie `couleur`.
+        Allies => "icon-allies", couleur;
+
+        /// Silhouette orange d'ennemi (`icons/icon-enemies.png`, 20 × 22) — case droite du même
+        /// switch. Même provenance et même statut que [`DsIcon::Allies`].
+        Enemies => "icon-enemies", couleur;
+
+        /// Dague (`icons/icon-metric-damage.png`, 18 × 17) — dégâts infligés, première case du
+        /// switch de grandeur du panneau Combat. Icône DU JEU, celle du sélecteur web
+        /// `app-entity-stat-tabs` (`icons/di.png` du dépôt communautaire `Vertylo/wakassets`),
+        /// embarquée depuis le 2026-09-14 (`ui_icons.rs`), au design system depuis le
+        /// 2026-09-16. En couleurs : voir la catégorie `couleur`.
+        MetricDamage => "icon-metric-damage", couleur;
+
+        /// Cœur vert à flèche (`icons/icon-metric-armor.png`, 22 × 20) — armure donnée, case du
+        /// milieu. `aptitudes/234.png` du même dépôt ; même statut que [`DsIcon::MetricDamage`].
+        MetricArmor => "icon-metric-armor", couleur;
+
+        /// Cœur rouge à croix (`icons/icon-metric-heal.png`, 22 × 20) — soins prodigués, dernière
+        /// case. `aptitudes/12.png` du même dépôt ; même statut que [`DsIcon::MetricDamage`].
+        MetricHeal => "icon-metric-heal", couleur;
 }

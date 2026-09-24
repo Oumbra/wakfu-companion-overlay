@@ -32,6 +32,26 @@
 //!    Ce qui la lève : **recevoir une entrée soi-même**. Une fenêtre-leurre de trois pixels sous
 //!    le curseur, un clic synthétique dessus, et le process est « celui qui a reçu la dernière
 //!    entrée » — le jeu ne reçoit rien, le curseur ne bouge pas ([`focus_via_decoy`]).
+//! 3. Ce process est lancé **par le shell**, comme un programme qu'on double-clique : un
+//!    exécutable de sous-système *console* reçoit alors de Windows une fenêtre de terminal, qui
+//!    surgit par-dessus le jeu, apparaît dans la barre des tâches et lui dispute le premier plan
+//!    le temps de sa course. Les deux gestionnaires possibles (ci-dessous) sont donc fenêtrés sans
+//!    fenêtre — `overlay-focus` depuis le 2026-09-14, l'overlay lui-même depuis le 2026-09-17
+//!    (`windows_subsystem = "windows"` en tête de `main.rs`) : rien à l'écran dans les deux cas.
+//!    **Attention avant de changer le sous-système de l'un ou de l'autre** : c'est le seul
+//!    garde-fou : ce gestionnaire ne doit jamais rien afficher.
+//!
+//! ### Quel gestionnaire est enregistré, et lequel arrive chez l'utilisateur
+//!
+//! [`register_protocol`] préfère `overlay-focus.exe` (minuscule, démarre plus vite) **quand il est
+//! à côté de l'overlay**, et enregistre l'overlay lui-même sinon. Ce « sinon » est le cas
+//! NOMINAL hors développement : la Release ne publie qu'un binaire par plateforme
+//! (`.github/workflows/release.yml`, et `overlay_sync::update` en remplace exactement un), donc
+//! `overlay-focus.exe` n'existe que dans un `target/` de compilation. C'est ce qui a fait durer le
+//! défaut de la console : corrigé le 2026-09-14 en déportant le focus dans un binaire sans
+//! console, il est resté entier chez l'utilisateur, où le gestionnaire était — et reste —
+//! l'overlay. Livrer deux fichiers supposerait de les mettre à jour tous les deux ; c'est le
+//! sous-système de l'overlay qui a été corrigé à la place.
 //!
 //! ## Le son
 //!
@@ -44,8 +64,8 @@ use windows::Data::Xml::Dom::XmlDocument;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_WRITE,
-    REG_OPTION_NON_VOLATILE, REG_SZ,
+    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
+    KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ,
 };
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
@@ -128,6 +148,34 @@ pub fn register_identity(dir: &std::path::Path, icon_png: &[u8]) {
     tracing::info!("[tour] identité de notification : {DISPLAY_NAME} ({APP_USER_MODEL_ID})");
 }
 
+/// **Retire du registre tout ce que [`register_identity`] y a écrit** — les deux arbres `HKCU`,
+/// celui de l'identité de notification (`Software\\Classes\\AppUserModelId\\…`, nom d'affichage et
+/// chemin de l'icône) et celui du protocole d'activation (`Software\\Classes\\wakfu-companion`, la
+/// ligne de commande de l'exécutable — donc souvent le nom d'utilisateur OS dans son chemin).
+///
+/// Appelé par `crate::local_data` sur [`crate::local_data::Scope::Everything`] : l'effacement
+/// complet promet l'état d'une installation neuve, et l'icône déposée à côté des gabarits part
+/// avec le dossier de données. Best-effort comme l'enregistrement : une clé absente (identité
+/// jamais posée parce que les notifications de tour n'ont jamais servi) est le résultat attendu,
+/// un refus est journalisé et rien de plus.
+pub fn unregister_identity() {
+    unsafe {
+        for subkey in [
+            format!("Software\\Classes\\AppUserModelId\\{APP_USER_MODEL_ID}"),
+            format!("Software\\Classes\\{PROTOCOL}"),
+        ] {
+            let subkey_w = wide(&subkey);
+            let status = RegDeleteTreeW(HKEY_CURRENT_USER, PCWSTR(subkey_w.as_ptr()));
+            if status.is_err() {
+                // `ERROR_FILE_NOT_FOUND` inclus : rien à retirer, c'est le cas le plus courant.
+                tracing::debug!("[données locales] HKCU\\{subkey} non retiré : {status:?}");
+            } else {
+                tracing::info!("[données locales] clé de registre retirée : HKCU\\{subkey}");
+            }
+        }
+    }
+}
+
 /// Schéma d'URI du protocole d'activation — `wakfu-companion:focus?hwnd=<entier>`.
 pub const PROTOCOL: &str = "wakfu-companion";
 
@@ -139,9 +187,10 @@ fn register_protocol() {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    // Le binaire dédié `overlay-focus.exe`, à côté de l'overlay, n'a pas de console (voir
-    // `src/bin/overlay-focus.rs`) et démarre plus vite : c'est lui qu'on enregistre quand il est
-    // là ; l'overlay lui-même sinon (il sait aussi le faire, voir `main`).
+    // Le binaire dédié `overlay-focus.exe` démarre plus vite : c'est lui qu'on enregistre quand il
+    // est à côté de l'overlay (poste de développement) ; l'overlay lui-même sinon — le cas de
+    // toute Release, qui ne publie qu'un binaire (voir la doc de module, « Quel gestionnaire est
+    // enregistré »). Ni l'un ni l'autre n'ouvre de fenêtre.
     unsafe {
         let set = |subkey: &str, name: Option<&str>, value: &str| {
             let subkey_w = wide(subkey);
@@ -184,7 +233,10 @@ fn register_protocol() {
             None,
             &format!("\"{}\" \"%1\"", handler.display()),
         );
-        tracing::info!("[tour] protocole {PROTOCOL}: → {}", handler.display());
+        tracing::info!(
+            "[tour] protocole {PROTOCOL}: → {}",
+            overlay_ingest::privacy::redact_path(&handler)
+        );
     }
 }
 
@@ -237,6 +289,11 @@ pub fn show(title: &str, body: &str, hwnd: isize) -> windows::core::Result<()> {
 /// une entrée soi-même** — voir [`focus_via_decoy`]. L'appel direct reste tenté d'abord, il
 /// suffit quand le process est lancé depuis une fenêtre ordinaire (test à la main).
 pub fn focus_window(hwnd: isize) {
+    // L'URI peut être lancée par n'importe quelle page web (`wakfu-companion:focus?hwnd=N`) :
+    // seule une fenêtre du client Wakfu est acceptée, jamais une autre fenêtre du bureau.
+    if !crate::game_window::is_game_window(hwnd) {
+        return;
+    }
     let hwnd = HWND(hwnd as *mut _);
     // Ce process n'a pas de journal (voir `main`) : une ligne horodatée dans `focus.log`, à côté
     // des gabarits, dit s'il a été lancé et ce que Windows a répondu.
@@ -246,7 +303,7 @@ pub fn focus_window(hwnd: isize) {
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(dir.join("focus.log"))
+                .open(dir.join(super::FOCUS_LOG))
             {
                 let _ = writeln!(
                     f,

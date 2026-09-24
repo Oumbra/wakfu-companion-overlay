@@ -21,7 +21,7 @@ use serde::Deserialize;
 
 use crate::roster::normalize_wakfu_name;
 
-/// D'où vient l'icône — détermine le sous-dossier `wakassets` (voir `IconRef::image_url`).
+/// D'où vient l'icône — détermine le sous-dossier `wakassets` (voir `IconRef::image_path`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IconKind {
     Item,
@@ -51,11 +51,17 @@ pub enum IconKind {
     /// (`overlay-ui::panels::combat_spell_block`), résolue par `crate::spells::SpellIndex` depuis
     /// le référentiel embarqué `assets/spells.json`. Même nature que les autres variantes : une
     /// image distante, téléchargée et mise en cache par le même `RemoteIconStore`. Le `gfx_id`
-    /// est le numéro de fichier extrait de l'URL `picture` du référentiel.
+    /// est le numéro de fichier du chemin `picture` du référentiel.
     Spell,
+    /// Icône de bonus PA/PM (`wakassets/timePointBonus/{n}.png`) — les « 1 PM », « 10 PA »… que
+    /// `assets/monster-spells.json` range parmi les sorts des monstres depuis le référentiel
+    /// enrichi du 2026-09-21. Même circuit que [`IconKind::Spell`] ; seul le sous-dossier du CDN
+    /// change, et c'est le dossier du chemin `picture` qui choisit entre les deux
+    /// (`crate::spells::picture_icon`).
+    TimePointBonus,
 }
 
-/// Référence suffisante pour construire l'URL de l'icône réelle — voir `image_url`. `gfx_id` est
+/// Référence suffisante pour construire le chemin de l'icône réelle — voir `image_path`. `gfx_id` est
 /// toujours une chaîne ici même pour un objet (dont le `gfxId` catalogue est numérique) : la seule
 /// utilisation qu'on en fait est une interpolation dans une URL, pas de calcul dessus.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,25 +71,48 @@ pub struct IconRef {
 }
 
 impl IconRef {
-    /// Miroir exact d'`itemImageCandidates`/`monsterImageCandidates` (`item-icon.component.ts`,
-    /// `entity-icon.component.ts`) — CDN communautaire `wakassets`, seule source retenue par le
-    /// web pour ce niveau de détail (pas de repli officiel Ankama, `pictureUrl` volontairement
-    /// exclu de l'index compact, voir sa doc côté serveur). Un seul candidat ici (pas les deux
-    /// sources `monsters`/`monsterIllustrations` du web pour un monstre) : suffisant pour la
-    /// grande majorité des cas, un vrai repli en cascade viendra avec le reste du lot L3 si
-    /// nécessaire une fois le premier résultat observé en usage réel.
-    pub fn image_url(&self) -> String {
-        let folder = match self.kind {
+    /// Sous-dossier `wakassets` de la **première** source d'une icône — voir [`Self::image_paths`].
+    fn primary_folder(&self) -> &'static str {
+        match self.kind {
             IconKind::Item => "items",
             IconKind::Monster => "monsters",
             IconKind::Rarity => "rarities",
             IconKind::ItemCategory => "itemTypes",
             IconKind::Spell => "spells",
-        };
-        format!(
-            "https://vertylo.github.io/wakassets/{folder}/{}.png",
-            self.gfx_id
-        )
+            IconKind::TimePointBonus => "timePointBonus",
+        }
+    }
+
+    /// Le chemin de la source principale de l'icône, relatif à l'origine des icônes
+    /// (`items/1234.png`) — le premier élément de [`Self::image_paths`], seul chemin à essayer
+    /// pour tout ce qui n'est pas un monstre. C'est le chemin **`wakassets`**, que l'API relaie
+    /// tel quel (`GET /api/v1/icons/{folder}/{gfxId}.png`, voir `overlay_sync::client::icon_url`) :
+    /// depuis le 2026-09-19 l'overlay ne parle plus à `vertylo.github.io` lui-même (constat C10 de
+    /// `docs/analyse-rgpd.md` — l'adresse IP de l'utilisateur et la liste des icônes qu'il demande
+    /// ne sortent plus vers GitHub Pages). Sert aussi de nom lisible dans le journal et les tests.
+    pub fn image_path(&self) -> String {
+        format!("{}/{}.png", self.primary_folder(), self.gfx_id)
+    }
+
+    /// Miroir exact d'`itemImageCandidates`/`monsterImageCandidates` (`item-icon.component.ts`,
+    /// `entity-icon.component.ts`) — CDN communautaire `wakassets`, seule source retenue par le
+    /// web pour ce niveau de détail (pas de repli officiel Ankama, `pictureUrl` volontairement
+    /// exclu de l'index compact, voir sa doc côté serveur). **Dans l'ordre où les essayer** : la
+    /// première qui répond gagne, comme la cascade `(error)` de l'`<img>` côté web.
+    ///
+    /// Un monstre a **deux** sources : `monsters/{gfxId}.png` (icône carrée standard) puis
+    /// `monsterIllustrations/{gfxId}.png` — `wakassets` répartit les monstres entre ces deux
+    /// dossiers, jamais le même `gfxId` dans les deux, et certains boss n'existent que dans le
+    /// second (vécu 2026-09-16 sur un fichier utilisateur : « Troolk Hoogan », « The
+    /// Undertroolker », « Rey Mystroolrio » sans image dans l'overlay alors que le site les
+    /// affichait — 34 des 61 monstres du référentiel d'origine étaient dans ce cas, voir le
+    /// `CLAUDE.md` de `wakfu-companion`). Les autres genres n'ont qu'une source.
+    pub fn image_paths(&self) -> Vec<String> {
+        let mut paths = vec![self.image_path()];
+        if self.kind == IconKind::Monster {
+            paths.push(format!("monsterIllustrations/{}.png", self.gfx_id));
+        }
+        paths
     }
 
     /// La gemme d'une rareté — `wakassets/rarities/{n}.png`, comme `wakfuRarityIconUrl` côté web.
@@ -846,30 +875,57 @@ mod tests {
     }
 
     #[test]
-    fn image_url_utilise_le_bon_sous_dossier() {
+    fn image_path_utilise_le_bon_sous_dossier() {
         let item = IconRef {
             kind: IconKind::Item,
             gfx_id: "1234".to_string(),
         };
+        assert_eq!(item.image_path(), "items/1234.png");
+        assert_eq!(item.image_paths(), vec!["items/1234.png"]);
+        let monster = IconRef {
+            kind: IconKind::Monster,
+            gfx_id: "5421".to_string(),
+        };
+        assert_eq!(monster.image_path(), "monsters/5421.png");
         assert_eq!(
-            item.image_url(),
-            "https://vertylo.github.io/wakassets/items/1234.png"
+            monster.image_paths(),
+            vec!["monsters/5421.png", "monsterIllustrations/5421.png"]
         );
+        assert_eq!(
+            IconRef::for_rarity(WakfuRarity::Mythical).image_path(),
+            "rarities/3.png"
+        );
+        assert_eq!(
+            IconRef::for_item_category(WakfuItemCategory::Resources).image_path(),
+            "itemTypes/226.png"
+        );
+    }
+
+    /// Seul un monstre a une seconde source (`monsterIllustrations`), toujours APRÈS `monsters`
+    /// — même ordre que `monsterImageCandidates` côté web ; un objet n'en a qu'une.
+    #[test]
+    fn un_monstre_a_deux_sources_dimage_dans_lordre_du_web() {
         let monster = IconRef {
             kind: IconKind::Monster,
             gfx_id: "5421".to_string(),
         };
         assert_eq!(
-            monster.image_url(),
-            "https://vertylo.github.io/wakassets/monsters/5421.png"
+            monster.image_paths(),
+            vec![
+                "monsters/5421.png".to_string(),
+                "monsterIllustrations/5421.png".to_string(),
+            ]
         );
+        let item = IconRef {
+            kind: IconKind::Item,
+            gfx_id: "1234".to_string(),
+        };
+        assert_eq!(item.image_paths(), vec![item.image_path()]);
         assert_eq!(
-            IconRef::for_rarity(WakfuRarity::Mythical).image_url(),
-            "https://vertylo.github.io/wakassets/rarities/3.png"
-        );
-        assert_eq!(
-            IconRef::for_item_category(WakfuItemCategory::Resources).image_url(),
-            "https://vertylo.github.io/wakassets/itemTypes/226.png"
+            IconRef::for_rarity(WakfuRarity::Mythical)
+                .image_paths()
+                .len(),
+            1
         );
     }
 
@@ -956,12 +1012,12 @@ mod tests {
     fn tout_et_monstres_ne_sont_pas_des_categories() {
         let hors_categorie = ["-1", "282"];
         assert_eq!(
-            IconRef::for_all_categories().image_url(),
-            "https://vertylo.github.io/wakassets/itemTypes/-1.png"
+            IconRef::for_all_categories().image_path(),
+            "itemTypes/-1.png"
         );
         assert_eq!(
-            IconRef::for_monster_category().image_url(),
-            "https://vertylo.github.io/wakassets/itemTypes/282.png"
+            IconRef::for_monster_category().image_path(),
+            "itemTypes/282.png"
         );
         for categorie in [
             WakfuItemCategory::Equipment,

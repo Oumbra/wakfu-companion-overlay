@@ -128,6 +128,21 @@ impl GameWindowTracker {
         (value != 0).then_some(value)
     }
 
+    /// Le curseur **en coordonnées d'écran** (relatives à la racine), en pixels — pendant X11 de
+    /// `GetCursorPos`.
+    ///
+    /// Sert au glisser-déposer de la bande Récap (`overlay_ui::recap_placement::drag_offset`, qui
+    /// porte le diagnostic) : c'est le seul repère qui ne bouge pas quand on déplace la fenêtre
+    /// qu'on est en train de suivre. Le curseur qu'egui rapporte, lui, est mesuré depuis le coin
+    /// de cette fenêtre — s'en servir pour la déplacer la faisait vibrer.
+    ///
+    /// `None` si la requête échoue (connexion perdue) ; l'appelant laisse alors la bande où elle
+    /// est plutôt que de la poser n'importe où.
+    pub fn cursor_position(&self) -> Option<(i32, i32)> {
+        let reply = self.conn.query_pointer(self.root).ok()?.reply().ok()?;
+        Some((reply.root_x.into(), reply.root_y.into()))
+    }
+
     /// Demande au gestionnaire de fenêtres de donner le focus à `window` — pendant EWMH de
     /// `SetForegroundWindow` : un `ClientMessage` `_NET_ACTIVE_WINDOW` envoyé à la racine, que
     /// tout WM EWMH honore (avec sa propre politique de vol de focus, que l'overlay ne cherche pas

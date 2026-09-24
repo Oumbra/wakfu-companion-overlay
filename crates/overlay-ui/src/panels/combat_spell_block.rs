@@ -297,6 +297,36 @@ pub fn show(
         egui::vec2(BLOCK_WIDTH, block_height(rows)),
         egui::Sense::hover(),
     );
+    // **Panneau posé à droite** : ce bloc change de côté SANS que ses tuiles s'inversent — le
+    // premier sort du tour reste à gauche, le dernier à droite, et chaque image reste à l'endroit
+    // (voir `crate::mirror`, et le retour utilisateur : « pour les sorts pareil, il faut mettre
+    // dans l'ordre qui est de base »). Un seul bloc pour tout ce qui suit, ancré sur son
+    // emplacement.
+    crate::mirror::upright_in(ui, block, |ui| {
+        show_block(
+            ui,
+            selection,
+            selected,
+            remote_icons,
+            remote_icon_textures,
+            block,
+            casts,
+        );
+    });
+}
+
+/// Le contenu du bloc, tel qu'il a toujours été peint — extrait de [`show`] pour tenir dans le
+/// bloc de mise en page que celle-ci déclare (voir `crate::mirror`).
+#[allow(clippy::too_many_arguments)]
+fn show_block(
+    ui: &mut egui::Ui,
+    selection: SpellSelection,
+    selected: &overlay_engine::FighterDamage,
+    remote_icons: &RemoteIconStore,
+    remote_icon_textures: &mut RemoteIconTextures,
+    block: egui::Rect,
+    casts: &[overlay_engine::SpellCastRecord],
+) {
     let painter = ui.painter().clone();
     painter.rect_filled(block, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
 
@@ -335,11 +365,13 @@ pub fn show(
 
         match texture {
             Some(texture) => {
+                // Inscrite à son rapport, comme toute image du CDN (`design::fit`) : les icônes de
+                // `wakassets/spells` sont carrées aujourd'hui, la règle vaut le jour où l'une ne
+                // l'est plus.
+                let peint = crate::design::contain_rect(rect, texture.size_vec2());
                 egui::Image::new(&texture)
-                    .fit_to_exact_size(rect.size())
-                    .maintain_aspect_ratio(false)
                     .corner_radius(SPELL_ROUNDING as u8)
-                    .paint_at(ui, rect);
+                    .paint_at(ui, peint);
             }
             None => {
                 painter.rect_filled(rect, SPELL_ROUNDING, SPELL_PLACEHOLDER_FILL);

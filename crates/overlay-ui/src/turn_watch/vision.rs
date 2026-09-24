@@ -251,14 +251,47 @@ pub struct Glyph {
 
 /// Luminance au-dessus de laquelle un pixel est « texte » : le nom est blanc pur anti-aliasé sur
 /// un fond de luminance ~12 (mesuré). 170 garde le corps des lettres, écarte l'anti-aliasing.
+///
+/// Ce seuil vaut pour un écran **non voilé**. Le jeu assombrit tout l'écran derrière certaines
+/// fenêtres modales — la sélection des bonus de tour, qui s'ouvre **au début du tour** et attend
+/// le joueur : le nom est bien affiché, mais éteint. Un seuil absolu ne lit alors plus rien, et un
+/// joueur qui n'a pas la fenêtre sous les yeux n'est jamais prévenu — c'est justement lui que la
+/// surveillance sert.
+///
+/// Mesuré le 2026-09-17 sur « Canis Furiosus », même bande au repos puis sous le voile : le voile
+/// est **affine**, `voilé ≈ 11 + 0,255 × clair` — le noir monte à ~12, le blanc tombe à 76, le
+/// panneau doré s'éteint en (55, 62, 52). [`extract_glyph`] transpose donc le seuil entre le pixel
+/// le plus sombre et le plus clair de la zone quand rien n'y atteint le blanc : 170 sur 0–255
+/// devient 55 sur 12–76, et le glyphe voilé est **identique** au glyphe clair (similarité 1,0). Un
+/// seuil purement proportionnel (50) laissait passer l'anti-aliasing et tombait à 0,81, sous le
+/// seuil de reconnaissance du watcher.
 const TEXT_LUMA: u32 = 170;
+
+/// Écart de luminance entre le pixel le plus sombre et le plus clair de la zone en dessous duquel
+/// elle est tenue pour vide plutôt que voilée : l'écran noir du début de combat, une bande sans
+/// widget. Sous le voile mesuré, l'écart est de 64 — une marge d'un tiers.
+const VEILED_MIN_CONTRAST: u32 = 40;
+
+/// Seuil de texte pour une zone dont les pixels vont de `floor` à `peak` : [`TEXT_LUMA`] tel quel
+/// dès que du blanc est présent, transposé sur `floor..=peak` sous un voile, `None` s'il n'y a
+/// rien à lire.
+fn text_threshold(floor: u32, peak: u32) -> Option<u32> {
+    if peak >= TEXT_LUMA {
+        Some(TEXT_LUMA)
+    } else if peak.saturating_sub(floor) >= VEILED_MIN_CONTRAST {
+        Some(floor + ((peak - floor) * TEXT_LUMA + 127) / 255)
+    } else {
+        None
+    }
+}
 
 /// Extrait le texte de `area` : binarise, garde le **bloc de lignes le plus dense** (le nom, pas
 /// un reflet du médaillon d'initiative quelques lignes plus haut), puis, dans ces lignes, le
 /// **bloc de colonnes contigu le plus à droite** (le nom est aligné à droite ; un trou d'un tiers
 /// de la hauteur de la zone — 12 colonnes à 100 %, deux fois l'espace entre deux mots — le sépare
-/// de tout ce qui traîne à gauche, l'étincelle animée typiquement). `None` si rien de blanc — pas
-/// de widget, ou le tout début d'un combat.
+/// de tout ce qui traîne à gauche, l'étincelle animée typiquement). `None` si rien de clair — pas
+/// de widget, ou le tout début d'un combat. Sous un voile, le seuil se transpose entre le pixel le
+/// plus sombre et le plus clair de la zone (voir [`TEXT_LUMA`]).
 pub fn extract_glyph(band: &Band, area: Rect) -> Option<Glyph> {
     let area = Rect {
         x0: area.x0.min(band.width),
@@ -271,15 +304,19 @@ pub fn extract_glyph(band: &Band, area: Rect) -> Option<Glyph> {
     }
     let w = area.width() as usize;
     let h = area.height() as usize;
-    let mut bits = vec![false; w * h];
-    let mut row_count = vec![0u32; h];
-    for y in 0..h {
-        for x in 0..w {
-            let on = band.luma(area.x0 + x as u32, area.y0 + y as u32) >= TEXT_LUMA;
-            bits[y * w + x] = on;
-            row_count[y] += on as u32;
-        }
-    }
+    let lumas: Vec<u32> = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .map(|(x, y)| band.luma(area.x0 + x as u32, area.y0 + y as u32))
+        .collect();
+    let (floor, peak) = lumas
+        .iter()
+        .fold((u32::MAX, 0), |(lo, hi), &l| (lo.min(l), hi.max(l)));
+    let threshold = text_threshold(floor, peak)?;
+    let bits: Vec<bool> = lumas.iter().map(|&l| l >= threshold).collect();
+    let row_count: Vec<u32> = bits
+        .chunks_exact(w)
+        .map(|row| row.iter().map(|&on| on as u32).sum())
+        .collect();
     // Lignes : parmi les blocs de lignes portant du texte (trous de 2 lignes tolérés, le corps
     // d'une lettre n'en a pas), celui qui porte le plus de pixels.
     let mut best: Option<(usize, usize, u32)> = None; // (top, bottom, pixels)
@@ -394,6 +431,31 @@ impl Glyph {
             h: img.height(),
             bits: img.pixels().map(|p| p.0[0] >= 128).collect(),
         })
+    }
+}
+
+/// Voile modal du jeu appliqué à une bande, tel que mesuré le 2026-09-17 : fondu à 74,5 % vers un
+/// bleu nuit (noir → (4, 15, 19), blanc pur → (68, 79, 83)). Pour tester sur les noms dont on n'a
+/// pas de capture voilée.
+#[cfg(test)]
+fn veiled(band: &Band) -> Band {
+    let blend = |v: u8, dark: u32, white: u32| (dark + v as u32 * (white - dark) / 255) as u8;
+    let rgba = band
+        .rgba
+        .chunks_exact(4)
+        .flat_map(|p| {
+            [
+                blend(p[0], 4, 68),
+                blend(p[1], 15, 79),
+                blend(p[2], 19, 83),
+                p[3],
+            ]
+        })
+        .collect();
+    Band {
+        width: band.width,
+        height: band.height,
+        rgba,
     }
 }
 
@@ -516,6 +578,57 @@ mod tests {
             y1: 95,
         };
         assert!(extract_glyph(&band, area).is_none());
+    }
+
+    #[test]
+    fn le_nom_se_lit_sous_le_voile_des_bonus_de_tour() {
+        // Vraie capture : sélection des bonus de tour ouverte, tout l'écran assombri, le widget
+        // « Fin du tour » affiche « Canis Furiosus » sous le voile. Le panneau n'est plus doré —
+        // la géométrie vient d'une bande au repos de même taille, comme dans le watcher.
+        let voile = fixture("voile-canis");
+        assert!(find_gold_panel(&voile).is_none());
+        let repos = fixture("repos-oumbra");
+        let area = name_area_above(find_gold_panel(&repos).unwrap(), &repos);
+        let glyph = extract_glyph(&voile, area).expect("un nom sous le voile");
+        // « Canis Furiosus » à 100 % : ~140 × 13 px, sans descendante.
+        assert!((120..=170).contains(&glyph.w), "{}x{}", glyph.w, glyph.h);
+        assert!((11..=16).contains(&glyph.h), "{}x{}", glyph.w, glyph.h);
+    }
+
+    #[test]
+    fn le_meme_nom_se_lit_pareil_sous_le_voile_et_au_repos() {
+        // Réel contre réel : « Canis Furiosus » au repos (capture du 2026-09-17 15:18, panneau
+        // doré) et sous le voile des bonus de tour (15:08). Le gabarit appris au repos doit
+        // reconnaître le nom voilé au seuil du watcher.
+        let repos = fixture("repos-canis");
+        let voile = fixture("voile-canis");
+        let panel = find_gold_panel(&repos).expect("panneau doré au repos");
+        let area = name_area_above(panel, &repos);
+        let clair = extract_glyph(&repos, area).expect("un nom au repos");
+        let sombre = extract_glyph(&voile, area).expect("un nom sous le voile");
+        let s = similarity(&clair, &sombre);
+        assert!(s >= 0.97, "similarité {s}");
+    }
+
+    #[test]
+    fn le_voile_ne_change_pas_le_glyphe() {
+        // Voile synthétique sur un autre nom : même binarisation, gabarit clair contre voilé.
+        let repos = fixture("repos-oumbra");
+        let area = name_area_above(find_gold_panel(&repos).unwrap(), &repos);
+        let clair = extract_glyph(&repos, area).unwrap();
+        let sombre = extract_glyph(&veiled(&repos), area).expect("un nom sous le voile");
+        let s = similarity(&clair, &sombre);
+        assert!(s >= 0.95, "similarité {s}");
+    }
+
+    #[test]
+    fn le_seuil_suit_le_pic_sous_le_voile_seulement() {
+        assert_eq!(text_threshold(0, 255), Some(TEXT_LUMA));
+        assert_eq!(text_threshold(12, TEXT_LUMA), Some(TEXT_LUMA));
+        // Le voile mesuré : 12..=76 → 55, celui qui rend le glyphe clair à l'identique.
+        assert_eq!(text_threshold(12, 76), Some(55));
+        assert_eq!(text_threshold(12, 12 + VEILED_MIN_CONTRAST - 1), None);
+        assert_eq!(text_threshold(0, 0), None);
     }
 
     #[test]

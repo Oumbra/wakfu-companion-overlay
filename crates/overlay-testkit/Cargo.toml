@@ -3,6 +3,7 @@ name = "overlay-testkit"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 description = "Harnais de rendu offscreen pour overlay-ui (§17.1 du plan) : rejoue les panneaux egui à partir d'un snapshot dérivé du rejeu réel de wakfu.log, sans fenêtre système ni GPU physique — voir tests/panels.rs."
 
 [dependencies]

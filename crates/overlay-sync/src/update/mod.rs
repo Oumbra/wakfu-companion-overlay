@@ -59,13 +59,87 @@ pub const PLATFORM: &str = "unsupported";
 /// Surcharge de l'origine des fichiers de Release — un dossier servi en HTTP local
 /// (`python -m http.server` sur la sortie de `xtask dist`) suffit à rejouer tout le mécanisme sans
 /// publier quoi que ce soit. Sans elle, GitHub Releases.
+///
+/// **Schéma imposé** (constat C16 de `docs/analyse-rgpd.md`, 2026-09-19) : `https://`, ou `http://`
+/// vers la boucle locale seulement. Un manifeste trafiqué est déjà rejeté par la signature, mais
+/// une base `http://` distante ferait voyager en clair, vers une origine choisie par
+/// l'environnement, la version demandée et l'exe téléchargé — rien ne justifie de l'accepter.
+/// Valeur refusée : ignorée avec un `warn!`, l'overlay se rabat sur GitHub.
 const OVERRIDE_ENV: &str = "WAKFU_OVERLAY_UPDATE_URL";
+
+/// La base surchargée, si elle est posée **et** acceptable — voir [`OVERRIDE_ENV`].
+fn override_base() -> Option<String> {
+    let base = std::env::var(OVERRIDE_ENV).ok()?;
+    if override_allowed(&base) {
+        Some(base.trim_end_matches('/').to_owned())
+    } else {
+        tracing::warn!(
+            "{OVERRIDE_ENV} ignorée : seul https:// (ou http:// vers la boucle locale) est accepté"
+        );
+        None
+    }
+}
+
+/// `https://` partout, `http://` vers `127.0.0.1`, `localhost` ou `[::1]` uniquement. Même règle
+/// pour l'origine de l'API (`client::base_url_override`).
+///
+/// **Autorité stricte** (audit de sécurité du 2026-09-23, O8) : aucune information d'utilisateur
+/// (`user:mdp@`) n'est admise, ni en `http://` ni en `https://`. Sans cette règle,
+/// `http://localhost:1@evil.example/` passait pour la boucle locale alors que la requête part, EN
+/// CLAIR, vers `evil.example` — jeton porteur et historique compris. Le port, s'il est donné, ne
+/// porte que des chiffres ; tout caractère inattendu (espace, contrôle, `\`) fait refuser.
+pub(crate) fn override_allowed(base: &str) -> bool {
+    let (rest, loopback_only) = if let Some(rest) = base.strip_prefix("https://") {
+        (rest, false)
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        (rest, true)
+    } else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty()
+        || authority
+            .chars()
+            .any(|c| c == '@' || c == '\\' || c.is_whitespace() || c.is_control())
+        || base.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return false;
+    }
+    let (host, port) = if let Some(after) = authority.strip_prefix('[') {
+        // Littéral IPv6 : `[addr]` puis, éventuellement, `:port`.
+        let Some((addr, tail)) = after.split_once(']') else {
+            return false;
+        };
+        let port = match tail {
+            "" => None,
+            _ => match tail.strip_prefix(':') {
+                Some(port) => Some(port),
+                None => return false,
+            },
+        };
+        (format!("[{addr}]"), port)
+    } else {
+        match authority.split_once(':') {
+            Some((host, port)) => (host.to_owned(), Some(port)),
+            None => (authority.to_owned(), None),
+        }
+    };
+    if host.is_empty() || host == "[]" {
+        return false;
+    }
+    if let Some(port) = port {
+        if port.is_empty() || port.len() > 5 || !port.bytes().all(|b| b.is_ascii_digit()) {
+            return false;
+        }
+    }
+    !loopback_only || matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]")
+}
 
 /// URL du manifeste (et de sa signature : même base, `SIGNATURE_NAME`).
 pub fn manifest_url(name: &str) -> String {
-    match std::env::var(OVERRIDE_ENV) {
-        Ok(base) => format!("{}/{name}", base.trim_end_matches('/')),
-        Err(_) => format!("{RELEASES_BASE_URL}/latest/download/{name}"),
+    match override_base() {
+        Some(base) => format!("{base}/{name}"),
+        None => format!("{RELEASES_BASE_URL}/latest/download/{name}"),
     }
 }
 
@@ -73,9 +147,9 @@ pub fn manifest_url(name: &str) -> String {
 /// portant aucune URL absolue (§5 du plan : c'est ce qui permet de le relayer par l'API un jour
 /// sans le réécrire).
 pub fn asset_url(version: &str, name: &str) -> String {
-    match std::env::var(OVERRIDE_ENV) {
-        Ok(base) => format!("{}/{name}", base.trim_end_matches('/')),
-        Err(_) => format!("{RELEASES_BASE_URL}/download/v{version}/{name}"),
+    match override_base() {
+        Some(base) => format!("{base}/{name}"),
+        None => format!("{RELEASES_BASE_URL}/download/v{version}/{name}"),
     }
 }
 
@@ -87,7 +161,7 @@ pub fn updates_dir() -> PathBuf {
     const APP_NAME: &str = "wakfu-companion-overlay";
     #[cfg(test)]
     const APP_NAME: &str = "wakfu-companion-overlay-test";
-    directories::ProjectDirs::from("", "", APP_NAME)
+    overlay_engine::app_dirs::project_dirs(APP_NAME)
         .map(|dirs| dirs.data_dir().join("updates"))
         .unwrap_or_else(|| PathBuf::from("updates"))
 }
@@ -270,7 +344,56 @@ mod tests {
             asset_url("0.21.0", "a.gz"),
             "http://127.0.0.1:8000/dist/a.gz"
         );
+        // `http://` hors boucle locale : ignorée, retour à GitHub.
+        std::env::set_var(OVERRIDE_ENV, "http://example.com/dist/");
+        assert_eq!(
+            manifest_url(MANIFEST_NAME),
+            "https://github.com/Oumbra/wakfu-companion-overlay/releases/latest/download/latest.json"
+        );
         std::env::remove_var(OVERRIDE_ENV);
+    }
+
+    #[test]
+    fn schema_de_la_surcharge() {
+        assert!(override_allowed("https://example.com/dist"));
+        assert!(override_allowed("http://127.0.0.1:8000/dist/"));
+        assert!(override_allowed("http://localhost/dist"));
+        assert!(override_allowed("http://[::1]:8000/dist"));
+        assert!(!override_allowed("http://example.com/dist/"));
+        assert!(!override_allowed("http://127.0.0.1.evil.com/"));
+        assert!(!override_allowed("ftp://127.0.0.1/"));
+        assert!(!override_allowed("127.0.0.1:8000"));
+    }
+
+    /// O8 : une information d'utilisateur dans l'autorité ferait partir la requête ailleurs
+    /// qu'annoncé (`http://localhost:1@evil.example/` vise `evil.example`, en clair).
+    #[test]
+    fn surcharge_sans_information_d_utilisateur() {
+        for refused in [
+            "http://localhost:1@evil.example/",
+            "http://127.0.0.1@evil.example/",
+            "http://[::1]@evil.example/",
+            "http://[::1]evil.example/",
+            "http://localhost:80:80/",
+            "http://localhost:abc/",
+            "http://localhost:/",
+            "http://localhost\\@evil.example/",
+            "http:// localhost/",
+            "https://user:pass@example.com/dist",
+            "https://@example.com/",
+            "https:///dist",
+            "https://",
+        ] {
+            assert!(!override_allowed(refused), "{refused}");
+        }
+        for accepted in [
+            "http://localhost:8788",
+            "http://127.0.0.1:8000/dist?x=@y",
+            "http://[::1]/",
+            "https://example.com:8443/dist",
+        ] {
+            assert!(override_allowed(accepted), "{accepted}");
+        }
     }
 
     #[test]

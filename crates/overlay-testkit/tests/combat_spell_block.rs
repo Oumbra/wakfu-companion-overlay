@@ -222,11 +222,12 @@ fn last_ally_caster_name(fight: &FightSnapshot) -> &str {
 /// `tests/panels.rs::panneau_combat_tooltip_switch_allies_ennemis_au_dessus`. Depuis l'échange du
 /// 15 sept. (voir `panels::combat`), le switch coiffe la colonne des PORTRAITS : il ne dépend plus
 /// de la largeur du cadre ni du `COLUMN_GAP` qui menaient jusqu'au bandeau leader, et les deux
-/// tests retombent donc sur la même abscisse. Abscisse : 8 de marge du harnais, 5 (switch centré
-/// dans les 70 px du cadre) et 15 (moitié de `SWITCH_OPTION_WIDTH`), soit 28 pour « Alliés », 30 de
-/// plus (58) pour « Ennemis ». Ordonnée : 8, 50 et 13, soit 71.
-const SWITCH_ALLIES: egui::Pos2 = egui::pos2(28.0, 71.0);
-const SWITCH_ENEMIES: egui::Pos2 = egui::pos2(58.0, 71.0);
+/// tests retombent donc sur la même abscisse. Depuis le 16 sept. (`design::switch`), son bandeau
+/// est calé à gauche sur le cadre. Abscisse : 8 de marge du harnais, 6 (`LEADER_PANEL_PADDING`)
+/// et 17,5 (moitié d'une case à l'échelle 36/44, 35), soit 31 pour « Alliés », une case et un
+/// séparateur (37) de plus (68) pour « Ennemis ». Ordonnée : 8, 50 et 18, soit 76.
+const SWITCH_ALLIES: egui::Pos2 = egui::pos2(31.0, 76.0);
+const SWITCH_ENEMIES: egui::Pos2 = egui::pos2(68.0, 76.0);
 
 fn click_at(harness: &mut Harness<'_>, pos: egui::Pos2) {
     harness.remove_cursor();
@@ -315,13 +316,21 @@ fn bloc_de_sorts_selection_par_le_cadre() {
                 portraits,
                 combat_frame,
                 icons,
+                // Ni bustes de classe ni serveurs de jeu ici : ils n'existent que pour l'onglet
+                // « Personnages » de la fenêtre Options.
+                avatars: None,
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -332,8 +341,14 @@ fn bloc_de_sorts_selection_par_le_cadre() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -429,4 +444,107 @@ fn bloc_de_sorts_selection_par_le_cadre() {
             .is_some(),
         "l'épingle ennemie doit survivre à un aller-retour en vue Alliés"
     );
+}
+
+/// **« Activer le suivi des sorts » décoché : le bloc disparaît, et les marques avec lui**
+/// (2026-09-15, `panels::feature_switch::FeatureToggles::spells`).
+///
+/// Mêmes données que `bloc_de_sorts_selection_par_le_cadre` ci-dessus, dont la première capture
+/// (`combat_spell_block_suivi_auto`) montre l'état complet : c'est la comparaison des deux qui dit
+/// ce que la case retire — la colonne de droite s'arrête au dernier groupe de dégâts, et le
+/// médaillon d'Anonyme-Ouginak1 ne porte plus ni liseré ni point. Les portraits, les barres et le switch,
+/// eux, ne bougent pas : la case ne coupe QUE la ligne de sorts.
+///
+/// L'assertion double la capture sur le point qu'un œil ne vérifie pas : plus aucun nœud
+/// d'accessibilité de sort, donc plus rien à survoler ni à lire au lecteur d'écran.
+#[test]
+fn bloc_de_sorts_coupe_par_les_options() {
+    let snapshot = replay_real_log();
+    let fight: FightSnapshot = snapshot
+        .fights
+        .first()
+        .cloned()
+        .expect("au moins un combat dans le rejeu");
+    let auto_selected_first_spell = {
+        let idx = fight
+            .last_ally_caster
+            .expect("le premier combat du rejeu a au moins un sort allié");
+        let fighter = &fight.fighters[idx];
+        let cast = &fighter.last_turn_casts[0];
+        let name =
+            resolve_cast(fighter, &cast.spell).map_or(cast.spell.clone(), |r| r.name.to_string());
+        format!("Sort 1 : {name}")
+    };
+
+    let remote_icon_store = RemoteIconStore::empty();
+    preload_spell_fixtures(&remote_icon_store, &fight);
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let mut textures = Textures {
+        portraits: None,
+        combat_frame: None,
+        icons: None,
+    };
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Combat,
+                fight: Some(&fight),
+                portraits,
+                combat_frame,
+                icons,
+                // Ni bustes de classe ni serveurs de jeu ici : ils n'existent que pour l'onglet
+                // « Personnages » de la fenêtre Options.
+                avatars: None,
+                game_servers: &Default::default(),
+                combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
+                watchlist: &[],
+                watchlist_enabled: true,
+                // La seule différence avec le test ci-dessus.
+                spells_enabled: false,
+                combat_on_right: false,
+                watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
+                options: None,
+                veiled: false,
+                login: None,
+                card_settings: None,
+            },
+        );
+    });
+
+    harness.run();
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Image, auto_selected_first_spell.as_str())
+            .is_none(),
+        "suivi des sorts coupé : aucun sort ne doit rester déclaré à l'accessibilité"
+    );
+    harness.snapshot("combat_spell_block_coupe");
 }

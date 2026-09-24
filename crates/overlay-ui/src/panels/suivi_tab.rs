@@ -19,14 +19,17 @@
 //!    *composer* une liste, pas à la lire — les compteurs vivants restent au bandeau in-game, où
 //!    les lire est justement le but. La cible d'un décompte, elle, n'est pas une mesure mais un
 //!    **réglage** de l'entrée, au même titre que son mode : elle reste ([`design::SlotCount::Target`]).
-//! 2. **Le mode se choisit AVANT le nom.** Incrémental ou décompte, et en décompte la quantité de
-//!    départ : les deux sont figés à la création côté web (« Cible fixée à la création »), les
-//!    demander après coup mentirait sur ce que la tuile permet ensuite.
+//! 2. **Le mode se choisit AVANT le nom.** Incrémental, décompte ou objectif (2026-09-17 : l'inverse
+//!    du décompte, le compteur part de zéro et monte jusqu'à la quantité choisie), et pour les deux
+//!    modes à cible la quantité : les deux sont figés à la création côté web (« Cible fixée à la
+//!    création »), les demander après coup mentirait sur ce que la tuile permet ensuite.
 //! 3. **Le retrait se fait à la tuile, au survol, et sans confirmation.** La croix n'apparaît que
 //!    sur la tuile survolée et vire au rouge sous le pointeur. Aucune boîte : la fenêtre est
 //!    transactionnelle, « Annuler » rattrape tout et « Valider » est une seconde garde.
 //! 4. **La sélection multiple est un MODE**, pas une case permanente. Sélection vide = « Supprimer
-//!    tout » (aucune exclusion cochée), la règle du web — voir [`bulk_label`].
+//!    tout » (aucune exclusion cochée), la règle du web — voir
+//!    [`bulk_select::bulk_label`]. La mécanique du mode est partagée avec les onglets « Alertes »
+//!    et « Chat » depuis le 2026-09-16 : elle vit dans [`crate::panels::bulk_select`].
 //! 5. **Rien n'est écrit avant « Valider »** : l'onglet travaille sur un brouillon que l'appelant
 //!    lui prête, comme l'onglet Alertes.
 //!
@@ -37,23 +40,14 @@
 //! croix fléchée — vit dans [`crate::panels::tile_reorder`], partagée avec le bandeau : les deux
 //! écrans réordonnent la même liste.
 //!
-//! ## Écouter l'alerte avant de la mériter
+//! ## Le son de l'alerte se règle ailleurs
 //!
-//! La ligne « Tester le son de l'alerte » (2026-09-15), posée juste sous la phrase de l'onglet,
-//! joue le son du **décompte arrivé à 0** — la seule alerte que le suivi déclenche
-//! ([`overlay_engine::watchlist::WatchlistAlert`], `alert_sound::play_countdown_alert`). C'est la
-//! même ligne que dans « Alertes » et « Chat », au son près : chacun des trois écrans fait
-//! entendre celui qu'il commande, et aucun n'oblige à provoquer l'événement pour savoir ce qu'on
-//! entendra en jeu — un décompte se mérite, lui, en ramassant ce qu'on suit. Elle vit dans
-//! [`crate::panels::sound_row`], partagée avec les deux autres onglets.
-//!
-//! Juste dessous, la case **« Couper le son des notifications »** (2026-09-15) : le décompte à
-//! zéro affiche toujours sa carte par-dessus le jeu, il ne fait plus de bruit. C'est le demi-pas
-//! qui manquait entre « tout actif » et la case « Activer le Suivi », qui, elle, coupe la carte
-//! ET le son.
-//!
-//! Les deux vivent avant le formulaire d'ajout et non dans un des blocs qui composent la liste :
-//! c'est le son de l'onglet qu'elles règlent, pas l'entrée qu'on est en train de créer.
+//! L'essai du son du **décompte arrivé à 0 / objectif atteint** — la seule alerte que le suivi
+//! déclenche ([`overlay_engine::watchlist::WatchlistAlert`], `alert_sound::play_countdown_alert`) — et sa
+//! sourdine ont quitté cet onglet le 2026-09-15 pour la section « Suivi » de l'onglet
+//! « Paramètres », avec celles des Alertes, du Chat et du Combat
+//! ([`crate::panels::notifications`]). Cet onglet ne garde que ce qu'il liste : les objets suivis
+//! et leurs compteurs.
 //!
 //! ## Le brouillon ne porte QUE des définitions
 //!
@@ -65,10 +59,13 @@
 //! brouillon** et garde celui du moteur — valider ne doit pas annuler un ramassage.
 
 use egui::{Color32, Rect, RichText, Vec2};
-use overlay_engine::{CatalogIndex, IconRef, WatchlistEntry, WatchlistKind, WatchlistMode};
+use overlay_engine::{
+    CatalogIndex, IconRef, WatchlistEntry, WatchlistKind, WatchlistMode,
+    DEFAULT_ALERT_DURATION_SECONDS, MAX_ALERT_DURATION_SECONDS, MIN_ALERT_DURATION_SECONDS,
+};
 
-use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, IconContext, SlotFrame};
-use crate::panels::{feature_switch, sound_row, tile_reorder};
+use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, SlotFrame};
+use crate::panels::{bulk_select, feature_switch, notifications, tile_reorder};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -96,21 +93,6 @@ const FORM_ROW_GAP: f32 = 6.0;
 const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, la valeur arrêtée pour l'onglet Alertes.
 const SECTION_GAP: f32 = 18.0;
-
-/// Hauteur de la ligne d'en-tête de la liste — **le côté du bouton icône, pas une valeur ronde**.
-///
-/// Elle valait 34 px alors que le bouton de suppression multiple en mesure 36 : centré dans une
-/// ligne plus courte que lui, il débordait d'un pixel en haut ET en bas, et ce débordement du bas
-/// mangeait la gouttière qui le séparait de la première tuile. Le bouton semblait alors posé sur
-/// la grille (relevé par l'utilisateur le 2026-09-14). La ligne fait désormais la taille de son
-/// plus haut occupant : plus rien n'en sort, et [`LIST_HEADER_GAP`] reste entier.
-const LIST_HEADER_HEIGHT: f32 = design::tokens::ICON_BUTTON_SIZE;
-/// Gouttière entre l'en-tête de la liste et la première rangée de tuiles.
-///
-/// Le titre, plus court que le bouton, garde l'air que lui donne sa ligne ; le bouton, lui, n'a que
-/// cette gouttière. 6 px : l'écart mesuré sous le titre sans qu'elle repousse la grille au point de
-/// détacher l'en-tête de ce qu'il commande.
-const LIST_HEADER_GAP: f32 = 6.0;
 
 /// Côté d'une tuile — **l'emplacement d'objet du jeu**, celui du bandeau de suivi.
 const TILE: f32 = design::tokens::ITEM_SLOT_SIZE;
@@ -160,6 +142,8 @@ pub enum AddMode {
     #[default]
     Up,
     Down,
+    /// Objectif (2026-09-17) : part de zéro et monte jusqu'à la quantité choisie.
+    Goal,
 }
 
 impl AddMode {
@@ -167,7 +151,140 @@ impl AddMode {
         match self {
             AddMode::Up => WatchlistMode::Up,
             AddMode::Down => WatchlistMode::Down,
+            AddMode::Goal => WatchlistMode::Goal,
         }
+    }
+
+    /// Vrai pour les deux modes qui demandent une quantité (décompte et objectif) — c'est ce test
+    /// qui fait apparaître la ligne « Quantité » du formulaire.
+    fn has_target(self) -> bool {
+        self.to_watchlist().has_target()
+    }
+}
+
+/// Réglages de la carte de **décompte arrivé à zéro** — durée d'affichage et fermeture manuelle.
+///
+/// Le pendant, pour le Suivi, de [`crate::panels::chat_tab::ChatToastSettings`] : la carte que
+/// `engine_thread` pose quand un compteur en mode `down` atteint 0
+/// (`panels::watchlist::WatchlistToastReason::Countdown`) se réglait jusqu'ici avec celle des
+/// ramassages, sur la durée du profil de compte — deux alertes différentes partageaient un seul
+/// réglage, et le Suivi n'avait aucun moyen de tenir sa carte plus longtemps que celle d'une
+/// alerte de drop. Demande utilisateur du 2026-09-16 : la section « Suivi » de l'onglet
+/// « Paramètres » gagne sa ligne « Fermeture automatique des notifications de décompte », à
+/// l'image de celles des sections « Alertes » et « Chat ».
+///
+/// **Persisté localement** (`config::OverlayConfig::countdown_alert_duration_seconds`), pour la
+/// même raison que le réglage du chat : il n'a pas d'équivalent web, et le serveur n'accepte que
+/// des clés connues. Les bornes, elles, sont celles du web (0,5 à 30 s) — une carte du Suivi n'a
+/// pas de raison de se régler autrement qu'une carte d'alerte.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CountdownToastSettings {
+    /// Durée d'affichage de la carte, en secondes. Ignorée quand [`Self::manual_close`] est vrai.
+    pub duration_seconds: f32,
+    /// La carte ne se ferme qu'à la main.
+    pub manual_close: bool,
+}
+
+impl Default for CountdownToastSettings {
+    fn default() -> Self {
+        Self {
+            duration_seconds: DEFAULT_ALERT_DURATION_SECONDS,
+            manual_close: false,
+        }
+    }
+}
+
+impl CountdownToastSettings {
+    /// Pose une durée, bornée aux mêmes limites que celle des alertes de ramassage.
+    pub fn set_duration(&mut self, seconds: f32) {
+        self.duration_seconds = if seconds.is_finite() {
+            seconds.clamp(MIN_ALERT_DURATION_SECONDS, MAX_ALERT_DURATION_SECONDS)
+        } else {
+            DEFAULT_ALERT_DURATION_SECONDS
+        };
+    }
+}
+
+/// **Ce que devient un suivi qui vient d'aboutir** — les deux cases de la section « Suivi » de
+/// l'onglet « Paramètres » (2026-09-17, demande utilisateur).
+///
+/// Un décompte arrivé à 0 et un objectif atteint ont fini leur travail : l'entrée ne sert plus à
+/// rien et encombre la bande. Elle est donc **retirée**, du Suivi comme du compte, une fois la
+/// célébration jouée — et c'est ce retrait qui rendait la question « et si c'était une erreur ? »
+/// inévitable. La réponse de l'utilisateur, le 2026-09-17, est de ne PAS rendre le geste
+/// rattrapable après coup mais de le rendre **réglable avant** : ces deux cases, actives par
+/// défaut.
+///
+/// **L'animation DÉPEND du retrait** (décision utilisateur du 2026-09-18, qui revient sur les
+/// « quatre combinaisons » de la veille) : la célébration est l'adieu de la tuile, une tuile qui
+/// reste n'a rien à célébrer. La case « Activer l'animation » est donc grisée sous « Supprimer les
+/// éléments suivis » décochée — sans changer de valeur, comme la sourdine sous la notification de
+/// tour — et [`Self::animates`] est ce que l'hôte lit, jamais `animate` seul :
+///
+/// | Retrait | Animation | Ce qui se passe |
+/// | --- | --- | --- |
+/// | ✔ | ✔ | la tuile célèbre, puis disparaît (le défaut) |
+/// | ✔ | ✘ | la tuile disparaît tout de suite, sans cérémonie |
+/// | ✘ | (grisée) | rien ne bouge — seul le toast signale l'événement |
+///
+/// **Persistés localement** (`config::OverlayConfig`), pour la même raison que
+/// [`CountdownToastSettings`] : pas d'équivalent web, et le serveur n'accepte que des clés
+/// connues. Le retrait, lui, part bien au compte — c'est son effet qui est synchronisé, pas le
+/// réglage qui le déclenche.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompletionSettings {
+    /// Retirer l'entrée du Suivi — et du compte — quand elle est complétée.
+    pub remove: bool,
+    /// Jouer la célébration sur la tuile (voir `design::item_slot::completion`).
+    pub animate: bool,
+}
+
+impl Default for CompletionSettings {
+    fn default() -> Self {
+        Self {
+            remove: true,
+            animate: true,
+        }
+    }
+}
+
+impl CompletionSettings {
+    /// La célébration se joue-t-elle : `animate` **et** `remove` — la case d'animation grisée
+    /// (retrait décoché) garde sa valeur mais ne vaut plus, voir la doc du type.
+    pub fn animates(self) -> bool {
+        self.remove && self.animate
+    }
+
+    /// Le délai à attendre avant de retirer l'entrée, en secondes — la durée de la célébration
+    /// quand elle est jouée, **zéro sinon**.
+    ///
+    /// C'est ici, et pas dans l'hôte, parce que les deux réglages se lisent ensemble : sans
+    /// animation il n'y a rien à attendre, et une attente de 3,5 s devant une tuile immobile
+    /// passerait pour un bug.
+    pub fn removal_delay_seconds(self) -> f32 {
+        if self.animates() {
+            design::tokens::ITEM_SLOT_COMPLETION_DURATION
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Ce qu'il faut à la section « Suivi » de l'onglet « Paramètres » pour régler la fermeture de
+/// cette carte — voir `panels::notifications::ToastClose` : le bornage reste ici, le peintre n'en
+/// refait pas un à lui.
+impl notifications::ToastClose for CountdownToastSettings {
+    fn manual_close(&self) -> bool {
+        self.manual_close
+    }
+    fn set_manual_close(&mut self, manual: bool) {
+        self.manual_close = manual;
+    }
+    fn duration_seconds(&self) -> f32 {
+        self.duration_seconds
+    }
+    fn set_duration(&mut self, seconds: f32) {
+        CountdownToastSettings::set_duration(self, seconds);
     }
 }
 
@@ -178,14 +295,29 @@ pub struct SuiviTabState {
     pub search: String,
     /// Mode du prochain ajout.
     pub mode: AddMode,
-    /// Quantité de départ du prochain décompte.
+    /// Quantité du prochain décompte (valeur de départ) ou objectif (valeur d'arrivée).
     pub target: i64,
     /// Mode « sélection multiple » ouvert.
     pub select_mode: bool,
     /// Clés des tuiles cochées — voir [`entry_key`].
     pub selected: Vec<String>,
+    /// **Les entrées que cette édition a retirées du brouillon**, dans l'ordre des gestes — voir
+    /// [`oublier`].
+    ///
+    /// Elles partent avec les définitions à la validation : le moteur ne peut pas deviner autrement
+    /// qu'une entrée du brouillon est la RECRÉATION d'une entrée supprimée, et lui garderait alors
+    /// son compteur (bug du 2026-09-15 : un décompte supprimé à 50 puis recréé à 10 affichait
+    /// 50/10). L'état est neuf à chaque ouverture de la fenêtre, comme le brouillon : « Annuler »
+    /// jette les deux ensemble.
+    pub retirees: Vec<WatchlistEntry>,
     /// La fenêtre « Objets de la recette », ouverte — `None` le reste du temps.
     pub recipe: Option<RecipeDialogState>,
+    /// La durée d'affichage de la carte de décompte **telle que tapée** — voir
+    /// `panels::notifications::AutoClose::input` pour pourquoi une chaîne et non un nombre.
+    /// **Le champ qu'elle alimente est peint dans l'onglet « Paramètres »**, section « Suivi » ;
+    /// elle vit ici, avec le reste de ce que l'onglet du même nom garde entre deux frames, comme
+    /// `chat_tab::ChatTabState::duration_input` pour la carte de chat.
+    pub duration_input: String,
 }
 
 impl Default for SuiviTabState {
@@ -197,7 +329,9 @@ impl Default for SuiviTabState {
             target: TARGET_MIN,
             select_mode: false,
             selected: Vec::new(),
+            retirees: Vec::new(),
             recipe: None,
+            duration_input: String::new(),
         }
     }
 }
@@ -255,17 +389,11 @@ pub struct SuiviTabContext<'a> {
     pub remote_icon_textures: &'a mut RemoteIconTextures,
     /// Repli quand l'icône n'est pas encore descendue du CDN.
     pub icons: &'a UiIcons,
-    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer le Suivi » peinte tout
+    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer le suivi » peinte tout
     /// en haut de l'onglet (voir `panels::feature_switch`), pas un réglage que cet onglet
     /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
     /// contenu sous la case est grisé et inerte.
     pub enabled: &'a mut bool,
-    /// **Le son de l'alerte de décompte est-il coupé ?** — brouillon de la case « Couper le son
-    /// des notifications » (voir `panels::sound_row`), posée juste sous la ligne d'essai. Coupé,
-    /// le décompte à zéro affiche toujours sa carte : c'est le SON qui se tait, pas la
-    /// fonctionnalité (celle-ci a sa propre case, [`Self::enabled`]). Comme tout le reste de la
-    /// fenêtre, c'est « Valider » qui l'emporte.
-    pub muted: &'a mut bool,
     pub availability: SuiviAvailability,
 }
 
@@ -274,9 +402,6 @@ pub struct SuiviTabContext<'a> {
 pub enum SuiviTabAction {
     #[default]
     None,
-    /// « Tester le son » : jouer le son du décompte arrivé à 0
-    /// (`alert_sound::play_countdown_alert`) — l'appelant seul a le périphérique audio.
-    TestSound,
     /// Résoudre les ingrédients de cet objet — l'appelant seul a le réseau
     /// (`overlay_sync::client::fetch_item_detail`, sur un thread).
     ResolveRecipe(i64),
@@ -290,14 +415,31 @@ pub enum SuiviTabAction {
 /// fonctions de clé côte à côte, c'est une sélection qui survit à un aller-retour dans l'un et se
 /// perd dans l'autre.
 pub(crate) fn entry_key(entry: &WatchlistEntry) -> String {
+    key_of(&entry.name, entry.catalog_id)
+}
+
+/// La même clé, **construite depuis un nom et un id** plutôt que depuis une entrée entière.
+///
+/// Écrite pour les complétions (2026-09-17) : le thread Engine annonce qu'un suivi vient
+/// d'aboutir à partir d'une `WatchlistAlert`, qui porte bien le nom et l'id du catalogue mais
+/// n'est pas une `WatchlistEntry`. Recopier le `format!` là-bas aurait rendu la clé de l'alerte
+/// silencieusement divergente de celle de la tuile le jour où l'une des deux change — exactement
+/// le défaut que la doc d'[`entry_key`] met en garde de commettre entre deux écrans.
+pub fn key_of(name: &str, catalog_id: Option<i64>) -> String {
     format!(
         "{}::{}",
-        entry.name,
-        entry
-            .catalog_id
-            .map(|id| id.to_string())
-            .unwrap_or_default()
+        name,
+        catalog_id.map(|id| id.to_string()).unwrap_or_default()
     )
+}
+
+/// Note des entrées comme retirées de CETTE édition — voir [`SuiviTabState::retirees`].
+///
+/// Une même entrée peut y figurer plusieurs fois (supprimée, recréée, re-supprimée) : seule sa
+/// PRÉSENCE compte côté moteur, et dédoublonner ici coûterait une comparaison pour rien sur une
+/// liste qui tient toujours dans quelques dizaines d'entrées.
+fn oublier(state: &mut SuiviTabState, retirees: Vec<WatchlistEntry>) {
+    state.retirees.extend(retirees);
 }
 
 /// Peint l'onglet dans le panneau de section de la fenêtre Options.
@@ -322,17 +464,12 @@ pub fn show(
     feature_switch::show(
         ui,
         ctx.enabled,
-        "Activer le Suivi",
+        "Activer le suivi",
         "Décoché, le bandeau de suivi n'affiche plus rien par-dessus le jeu et l'alerte de \
          décompte ne se déclenche plus. Votre liste et vos compteurs sont conservés : les \
          rallumer les retrouve tels quels.",
         "suivi.activer",
     );
-
-    if sound_row::show(ui, width, "suivi", Some(ctx.muted)) {
-        action = SuiviTabAction::TestSound;
-    }
-    ui.add_space(SECTION_GAP);
 
     add_form(ui, state, width);
     ui.add_space(SECTION_GAP * 0.75);
@@ -342,7 +479,7 @@ pub fn show(
     ui.add_space(SECTION_GAP);
 
     list_header(ui, state, ctx, width);
-    ui.add_space(LIST_HEADER_GAP);
+    ui.add_space(bulk_select::HEADER_GAP);
 
     if ctx.availability == SuiviAvailability::Loading {
         loading_row(ui, panel.inner);
@@ -366,13 +503,13 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// **Le bloc de formulaire** : le mode, et en décompte la quantité de départ.
+/// **Le bloc de formulaire** : le mode, et en décompte ou en objectif la quantité.
 ///
-/// La seconde ligne n'apparaît qu'en décompte : en incrémental le compteur part de zéro et monte,
-/// il n'y a aucune quantité à demander, et laisser la ligne grisée occuperait la place d'un réglage
-/// qui n'existe pas.
+/// La seconde ligne n'apparaît que pour un mode à cible : en incrémental le compteur part de zéro
+/// et monte sans limite, il n'y a aucune quantité à demander, et laisser la ligne grisée occuperait
+/// la place d'un réglage qui n'existe pas.
 fn add_form(ui: &mut egui::Ui, state: &mut SuiviTabState, width: f32) {
-    let rows = if state.mode == AddMode::Down { 2 } else { 1 };
+    let rows = if state.mode.has_target() { 2 } else { 1 };
     let height = FORM_ROW_HEIGHT * rows as f32 + FORM_ROW_GAP * (rows - 1) as f32;
     let block = ui.allocate_space(Vec2::new(width, height)).1;
     ui.painter()
@@ -381,7 +518,7 @@ fn add_form(ui: &mut egui::Ui, state: &mut SuiviTabState, width: f32) {
     let mode_row = Rect::from_min_size(block.min, Vec2::new(width, FORM_ROW_HEIGHT));
     mode_line(ui, state, mode_row);
 
-    if state.mode == AddMode::Down {
+    if state.mode.has_target() {
         let target_row = Rect::from_min_size(
             egui::pos2(block.left(), mode_row.bottom() + FORM_ROW_GAP),
             Vec2::new(width, FORM_ROW_HEIGHT),
@@ -390,13 +527,13 @@ fn add_form(ui: &mut egui::Ui, state: &mut SuiviTabState, width: f32) {
     }
 }
 
-/// La ligne « Type de compteur » — **deux boutons segmentés**, l'actif en or.
+/// La ligne « Type de compteur » — **trois boutons segmentés**, l'actif en or.
 ///
-/// **Choix assumé, faute d'idiome relevé.** Le web emploie un interrupteur à deux positions avec
-/// fond glissant ; le jeu n'en a aucun — son vocabulaire pour un choix binaire est la case à
-/// cocher, et pour un choix exclusif entre deux actions nommées, le bouton. Deux cases mutuellement
-/// exclusives seraient un contresens (une case dit « oui/non », pas « l'un ou l'autre »), et une
-/// liste déroulante à deux entrées cacherait la moitié du choix derrière un clic.
+/// **Choix assumé, faute d'idiome relevé.** Le web emploie un interrupteur à positions avec fond
+/// glissant ; le jeu n'en a aucun — son vocabulaire pour un choix binaire est la case à cocher, et
+/// pour un choix exclusif entre des actions nommées, le bouton. Des cases mutuellement exclusives
+/// seraient un contresens (une case dit « oui/non », pas « l'un ou l'autre »), et une liste
+/// déroulante à trois entrées cacherait le choix derrière un clic.
 fn mode_line(ui: &mut egui::Ui, state: &mut SuiviTabState, row: Rect) {
     let mut cell =
         ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(Vec2::new(FORM_ROW_PAD_X, 0.0))));
@@ -419,6 +556,11 @@ fn mode_line(ui: &mut egui::Ui, state: &mut SuiviTabState, row: Rect) {
                 AddMode::Down,
                 "Décompte",
                 "Le compteur part de la quantité choisie et descend vers zéro.",
+            ),
+            (
+                AddMode::Goal,
+                "Objectif",
+                "Le compteur part de zéro et monte jusqu'à la quantité choisie.",
             ),
         ] {
             let actif = actuel == mode;
@@ -555,13 +697,13 @@ fn add_field(
     categories.dedup();
     let mut filters = vec![design::AutocompleteFilter::all(
         "Tout",
-        texture_id(ui, ctx, &IconRef::for_all_categories()),
+        texture(ui, ctx, &IconRef::for_all_categories()),
     )];
     for category in categories {
         filters.push(design::AutocompleteFilter::category(
             category_key(category),
             category_label(category),
-            texture_id(ui, ctx, &IconRef::for_item_category(category)),
+            texture(ui, ctx, &IconRef::for_item_category(category)),
         ));
     }
     // Le filtre « Monstres » ferme la bande, comme le web le fait en domaine « les deux ».
@@ -569,7 +711,7 @@ fn add_field(
         filters.push(design::AutocompleteFilter::category(
             MONSTER_FILTER_KEY,
             "Monstres",
-            texture_id(ui, ctx, &IconRef::for_monster_category()),
+            texture(ui, ctx, &IconRef::for_monster_category()),
         ));
     }
 
@@ -583,11 +725,8 @@ fn add_field(
             .any(|e| e.catalog_id == Some(item.id) || e.name == item.name);
         let mut entry =
             design::AutocompleteEntry::new(item.name.clone(), category_key(item.category));
-        if let Some((id, size)) = texture(ui, ctx, &IconRef::for_rarity(item.rarity)) {
-            entry.gem = Some(id);
-            entry.gem_size = size;
-        }
-        entry.image = texture_id(ui, ctx, &item.icon);
+        entry.gem = texture(ui, ctx, &IconRef::for_rarity(item.rarity));
+        entry.image = texture(ui, ctx, &item.icon);
         entry.disabled = deja;
         if deja {
             entry.mention = Some("déjà suivi".to_string());
@@ -606,7 +745,7 @@ fn add_field(
             .any(|e| e.catalog_id == Some(monstre.id) || e.name == monstre.name);
         // **Pas de gemme** : un monstre n'a pas de rareté.
         let mut entry = design::AutocompleteEntry::new(monstre.name.clone(), MONSTER_FILTER_KEY);
-        entry.image = texture_id(ui, ctx, &monstre.icon);
+        entry.image = texture(ui, ctx, &monstre.icon);
         entry.disabled = deja;
         if deja {
             entry.mention = Some("déjà suivi".to_string());
@@ -654,8 +793,8 @@ fn add_field(
 /// Ajoute une entrée au brouillon, avec le mode et la cible du formulaire — et remet celui-ci à
 /// zéro, comme `resetAddForm` côté web.
 ///
-/// `count` part de ce que le mode impose, mais c'est indicatif : la validation le recalcule depuis
-/// l'état vivant du moteur (voir la doc de module).
+/// `count` part de ce que le mode impose (la cible en décompte, zéro sinon), mais c'est indicatif :
+/// la validation le recalcule depuis l'état vivant du moteur (voir la doc de module).
 fn push_entry(
     entries: &mut Vec<WatchlistEntry>,
     name: &str,
@@ -664,15 +803,20 @@ fn push_entry(
     state: &mut SuiviTabState,
 ) {
     let mode = state.mode.to_watchlist();
-    let countdown_target = match mode {
-        WatchlistMode::Down => state.target.max(TARGET_MIN),
-        WatchlistMode::Up => 0,
+    let countdown_target = if mode.has_target() {
+        state.target.max(TARGET_MIN)
+    } else {
+        0
     };
     entries.push(WatchlistEntry {
         name: name.to_string(),
         kind,
         mode,
-        count: countdown_target,
+        count: if mode == WatchlistMode::Down {
+            countdown_target
+        } else {
+            0
+        },
         countdown_target,
         catalog_id,
     });
@@ -680,101 +824,51 @@ fn push_entry(
 }
 
 /// L'en-tête de la liste : son titre à gauche, ses commandes à droite.
+///
+/// **La mécanique vit dans [`bulk_select`]**, partagée avec les onglets « Alertes » et « Chat »
+/// depuis le 2026-09-16 : les trois écrans composent une liste avec le même geste, ils ne peuvent
+/// pas le faire chacun à leur façon.
 fn list_header(
     ui: &mut egui::Ui,
     state: &mut SuiviTabState,
     ctx: &mut SuiviTabContext<'_>,
     width: f32,
 ) {
-    let row = ui.allocate_space(Vec2::new(width, LIST_HEADER_HEIGHT)).1;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row));
-    let mut bascule = false;
-    let mut supprimer = false;
-    let total = ctx.entries.len();
-    let selection = state.selected.len();
-    let select_mode = state.select_mode;
-    let availability = ctx.availability;
-    cell.horizontal_centered(|ui| {
-        ui.add(design::heading("Éléments suivis"));
-        // **Rien à commander quand il n'y a rien à lister** : pendant que la liste descend, le
-        // bouton disparaît au lieu de rester grisé — le geste n'a pas d'objet.
-        if availability != SuiviAvailability::Ready {
-            return;
-        }
-        let mut droite = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(row)
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        );
-        let mut bouton = design::icon_button(DsIcon::Delete)
-            .context(IconContext::Panel)
-            .tooltip(if select_mode {
-                "Quitter la sélection"
-            } else {
-                "Suppression multiple"
-            })
-            .log_name("suivi.selection");
-        if select_mode {
-            // Le mode ouvert se lit sur le bouton lui-même, comme un onglet actif.
-            bouton = bouton.preview_state(design::IconButtonState::Hovered);
-        }
-        if droite.add(bouton).clicked() {
-            bascule = true;
-        }
-        if select_mode {
-            droite.add_space(8.0);
-            if droite
-                .add(
-                    // **Rouge**, comme le « Annuler » du pied de page — décision explicite de
-                    // l'utilisateur le 2026-09-13, qui prévaut sur la règle « le rouge est réservé
-                    // au pied de fenêtre » que l'onglet Alertes avait posée.
-                    design::button(bulk_label(selection, total))
-                        .variant(ButtonVariant::Danger)
-                        .size(ButtonSize::Height(28.0))
-                        .min_width(150.0)
-                        .tooltip(
-                            "Retire les tuiles cochées du suivi — annulable tant que la fenêtre \
-                             n'est pas validée",
-                        )
-                        .log_name("suivi.supprimer-groupe"),
-                )
-                .clicked()
-            {
-                supprimer = true;
-            }
-        }
-    });
+    let demande = bulk_select::show(
+        ui,
+        width,
+        bulk_select::BulkHeader {
+            title: "Éléments suivis",
+            removable: ctx.entries.len(),
+            bulk_tooltip: "Retire les tuiles cochées du suivi — annulable tant que la fenêtre \
+                           n'est pas validée",
+            log_prefix: "suivi",
+            // Pendant que la liste descend, il n'y a rien à commander : ce qu'on retirerait
+            // serait écrasé par la liste qui arrive.
+            enabled: ctx.availability == SuiviAvailability::Ready,
+        },
+        bulk_select::BulkSelection {
+            mode: &mut state.select_mode,
+            keys: &mut state.selected,
+        },
+    );
 
-    if supprimer {
-        // Sélection vide : on retire TOUT (aucune exclusion cochée) — voir [`bulk_label`].
-        if state.selected.is_empty() {
+    match demande {
+        bulk_select::BulkRequest::None => {}
+        // Sélection vide : on retire TOUT (aucune exclusion cochée) — voir `bulk_select::bulk_label`.
+        bulk_select::BulkRequest::All => {
+            oublier(state, ctx.entries.clone());
             ctx.entries.clear();
-        } else {
-            let cochees: std::collections::HashSet<&String> = state.selected.iter().collect();
-            ctx.entries
-                .retain(|entry| !cochees.contains(&entry_key(entry)));
         }
-        state.select_mode = false;
-        state.selected.clear();
-    } else if bascule {
-        state.select_mode = !state.select_mode;
-        state.selected.clear();
-    }
-}
-
-/// Le libellé du bouton de suppression groupée — **la règle du web**, reprise telle quelle.
-///
-/// Aucune tuile cochée se lit « aucune exclusion » et non « rien à faire » : le bouton porte alors
-/// « Supprimer tout » et agit sur la liste entière. Tout cocher à la main donne le même libellé, par
-/// cohérence — même résultat, deux chemins pour y arriver.
-///
-/// **Partagée avec le bandeau**, comme [`entry_key`] : le bouton y est le même, jusqu'à sa
-/// variante et sa hauteur.
-pub(crate) fn bulk_label(selected: usize, total: usize) -> String {
-    if selected == 0 || selected == total {
-        "Supprimer tout".to_string()
-    } else {
-        format!("Supprimer ({selected})")
+        bulk_select::BulkRequest::Keys(cles) => {
+            let cochees: std::collections::HashSet<&String> = cles.iter().collect();
+            let (retirees, restantes): (Vec<_>, Vec<_>) = ctx
+                .entries
+                .drain(..)
+                .partition(|entry| cochees.contains(&entry_key(entry)));
+            *ctx.entries = restantes;
+            oublier(state, retirees);
+        }
     }
 }
 
@@ -794,7 +888,8 @@ fn tile_grid(
             key: entry_key(entry),
             name: entry.name.clone(),
             kind: entry.kind,
-            target: (entry.mode == WatchlistMode::Down).then_some(entry.countdown_target),
+            target: entry.mode.has_target().then_some(entry.countdown_target),
+            mode: entry.mode,
             icon: match entry.kind {
                 WatchlistKind::Item => ctx.catalog.find_item_icon(&entry.name, entry.catalog_id),
                 WatchlistKind::Enemy => {
@@ -852,15 +947,18 @@ fn tile_grid(
     // réversible deux fois, une boîte de confirmation par-dessus n'ajoutait qu'un clic
     // (décision du 2026-09-13, appliquée du même coup à l'onglet Alertes).
     if let Some(cle) = retrait {
+        let retirees: Vec<WatchlistEntry> = ctx
+            .entries
+            .iter()
+            .filter(|entry| entry_key(entry) == cle)
+            .cloned()
+            .collect();
         ctx.entries.retain(|entry| entry_key(entry) != cle);
+        oublier(state, retirees);
         state.selected.retain(|k| *k != cle);
     }
     if let Some(cle) = bascule {
-        if let Some(pos) = state.selected.iter().position(|k| *k == cle) {
-            state.selected.remove(pos);
-        } else {
-            state.selected.push(cle);
-        }
+        bulk_select::toggle(&mut state.selected, &cle);
     }
 }
 
@@ -869,8 +967,11 @@ struct TileData {
     key: String,
     name: String,
     kind: WatchlistKind,
-    /// La cible, pour un décompte — `None` en incrémental, et la tuile ne porte alors aucun chiffre.
+    /// La cible, pour un décompte ou un objectif — `None` en incrémental, et la tuile ne porte
+    /// alors aucun chiffre.
     target: Option<i64>,
+    /// Le mode, pour le glyphe du coin haut-gauche (voir `panels::watchlist::slot_glyph`).
+    mode: WatchlistMode,
     icon: Option<IconRef>,
     rarity: overlay_engine::WakfuRarity,
 }
@@ -890,7 +991,7 @@ enum TileClick {
 /// | Élément | Ce qu'il dit |
 /// | --- | --- |
 /// | Cadre | ce qu'est l'entrée : bordure de **rareté** pour un objet, cadre neutre pour un monstre |
-/// | Bas-droit | la **cible** d'un décompte (`/50`) — et rien du tout pour un incrémental |
+/// | Bas-droit | la **cible** d'un décompte ou d'un objectif (`/50`) — et rien du tout pour un incrémental |
 /// | Croix haut-droite | retrait — **seulement sur la tuile survolée**, rouge sous le pointeur |
 /// | Case haut-gauche | sélection — **seulement en mode sélection**, et elle remplace la croix |
 /// | Liseré rouge | la tuile est cochée — le ton destructif, la sélection ne mène qu'au retrait |
@@ -922,8 +1023,10 @@ fn tracked_tile(
     let icon_id = tuile
         .icon
         .as_ref()
-        .and_then(|icon| texture_id(ui, ctx, icon))
-        .unwrap_or_else(|| ctx.icons.unknown_entity_texture().id());
+        .and_then(|icon| texture(ui, ctx, icon))
+        .unwrap_or_else(|| {
+            egui::load::SizedTexture::from_handle(ctx.icons.unknown_entity_texture())
+        });
 
     // **`ui.put` dans un ENFANT, jamais sur le `ui` de la rangée** : `Ui::put` ouvre un scope, et un
     // scope avance le curseur du parent — la tuile suivante démarrerait au mauvais endroit. Piège
@@ -945,6 +1048,9 @@ fn tracked_tile(
     if let Some(target) = tuile.target {
         slot = slot.count(design::SlotCount::Target(target));
     }
+    // Le même glyphe que le bandeau, dans le gris de la cible ici (voir `design::SlotGlyph`).
+    // L'infobulle, elle, reste le nom seul : décision du 2026-09-17, qui confirme celle du 13.
+    slot = slot.glyph(crate::panels::watchlist::slot_glyph(tuile.mode));
     cellule.put(rect, slot);
 
     let ds = design::DesignSystem::get(ui.ctx());
@@ -1084,38 +1190,25 @@ fn category_label(category: overlay_engine::WakfuItemCategory) -> &'static str {
     }
 }
 
-/// La texture d'une icône distante, si elle est déjà descendue du CDN — `None` sinon, et l'appelant
-/// se peint sans elle.
-fn texture_id(
-    ui: &egui::Ui,
-    ctx: &mut SuiviTabContext<'_>,
-    icon: &IconRef,
-) -> Option<egui::TextureId> {
-    texture(ui, ctx, icon).map(|(id, _)| id)
-}
-
-/// La texture ET sa taille native, pour ce qui doit être peint à son rapport — la gemme de rareté.
+/// La texture d'une icône distante **avec sa taille native**, si elle est déjà descendue du CDN —
+/// `None` sinon, et l'appelant se peint sans elle.
+///
+/// La taille n'est pas un supplément : tout ce qui vient du CDN est peint à son rapport
+/// (`design::fit`), gemme de 13 × 20 comme bannière de `monsterIllustrations`. C'est pourquoi les
+/// composants prennent une `SizedTexture` et non un `TextureId` nu.
 fn texture(
     ui: &egui::Ui,
     ctx: &mut SuiviTabContext<'_>,
     icon: &IconRef,
-) -> Option<(egui::TextureId, Vec2)> {
+) -> Option<egui::load::SizedTexture> {
     ctx.remote_icon_textures
         .resolve(ui.ctx(), ctx.remote_icons, icon)
-        .map(|handle| (handle.id(), handle.size_vec2()))
+        .map(|handle| egui::load::SizedTexture::from_handle(&handle))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn le_libelle_groupe_dit_tout_quand_rien_n_est_coche() {
-        // Une sélection vide se lit « aucune exclusion », pas « rien à faire » — règle du web.
-        assert_eq!(bulk_label(0, 12), "Supprimer tout");
-        assert_eq!(bulk_label(12, 12), "Supprimer tout");
-        assert_eq!(bulk_label(3, 12), "Supprimer (3)");
-    }
 
     #[test]
     fn la_cle_distingue_deux_homonymes_d_id_different() {
@@ -1236,5 +1329,33 @@ mod recette_tests {
         };
         track_recipe_lines(&mut entries, &[], &mut state);
         assert!(state.recipe.is_none());
+    }
+
+    #[test]
+    fn l_animation_ne_vaut_qu_avec_le_retrait() {
+        // Décision du 2026-09-18 : la case « Activer l'animation de complétion » est grisée
+        // sous « Supprimer les éléments suivis » décochée, et sa valeur — conservée — ne vaut
+        // plus. L'hôte ne doit donc ni attendre ni faire célébrer une tuile qui reste.
+        let duree = design::tokens::ITEM_SLOT_COMPLETION_DURATION;
+        let defaut = CompletionSettings::default();
+        assert!(defaut.animates());
+        assert_eq!(defaut.removal_delay_seconds(), duree);
+
+        let sans_retrait = CompletionSettings {
+            remove: false,
+            animate: true,
+        };
+        assert!(
+            !sans_retrait.animates(),
+            "case grisée : sa valeur ne compte pas"
+        );
+        assert_eq!(sans_retrait.removal_delay_seconds(), 0.0);
+
+        let sans_animation = CompletionSettings {
+            remove: true,
+            animate: false,
+        };
+        assert!(!sans_animation.animates());
+        assert_eq!(sans_animation.removal_delay_seconds(), 0.0);
     }
 }

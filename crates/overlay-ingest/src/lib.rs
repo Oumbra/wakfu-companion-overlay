@@ -3,6 +3,7 @@
 //! §3 : ce crate ne parse rien, il découpe des lignes complètes et les publie par lots.
 
 pub mod discovery;
+pub mod privacy;
 pub mod rotation;
 pub mod tailer;
 pub mod watcher;
