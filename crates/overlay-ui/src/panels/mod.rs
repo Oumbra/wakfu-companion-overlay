@@ -4,7 +4,9 @@
 //! récap reste inline dans `main.rs::render` (voir la doc de tête de ce fichier pour le périmètre
 //! exact).
 
+pub mod a_propos_tab;
 pub mod alerts_tab;
+pub mod bulk_select;
 pub mod chamfer;
 pub mod chat_tab;
 pub mod combat;
@@ -13,12 +15,16 @@ pub mod combat_frame;
 pub mod combat_frame_scroll;
 mod combat_scrollbar;
 pub mod combat_spell_block;
+pub mod drag;
 pub mod feature_switch;
 pub mod login;
+pub mod notifications;
 pub mod options_modal;
+pub mod personnages_tab;
 pub mod raccourcis_tab;
+pub mod recap;
 pub mod recipe_dialog;
-pub mod sound_row;
 pub mod suivi_tab;
+pub mod tile_button;
 pub mod tile_reorder;
 pub mod watchlist;

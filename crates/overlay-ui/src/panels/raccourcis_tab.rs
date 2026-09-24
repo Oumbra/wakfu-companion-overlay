@@ -457,11 +457,15 @@ mod tests {
     #[test]
     fn recherche_sur_libelle_section_et_combinaison() {
         let bindings = ShortcutBindings::default();
-        let quit = ShortcutAction::Quit;
-        assert!(matches_search(quit, bindings.get(quit), ""));
-        assert!(matches_search(quit, bindings.get(quit), "quitter"));
-        assert!(matches_search(quit, bindings.get(quit), "overlay"));
-        assert!(matches_search(quit, bindings.get(quit), "ctrl+shift+q"));
-        assert!(!matches_search(quit, bindings.get(quit), "combat"));
+        let options = ShortcutAction::Options;
+        assert!(matches_search(options, bindings.get(options), ""));
+        assert!(matches_search(options, bindings.get(options), "ouvrir"));
+        assert!(matches_search(options, bindings.get(options), "overlay"));
+        assert!(matches_search(
+            options,
+            bindings.get(options),
+            "ctrl+shift+o"
+        ));
+        assert!(!matches_search(options, bindings.get(options), "combat"));
     }
 }

@@ -1,5 +1,5 @@
 //! Cache disque des icônes réelles d'objets/monstres/raretés/catégories (`wakassets`, voir
-//! `overlay_engine::IconRef::image_url`) — évite de retélécharger la même image à chaque
+//! `overlay_engine::IconRef::image_paths`) — évite de retélécharger la même image à chaque
 //! lancement. Un fichier PNG par icône plutôt qu'une base : le contenu ne change jamais pour un
 //! `gfx_id` donné (image statique d'un CDN tiers), donc pas de notion d'expiration/`ETag` à gérer
 //! ici (contrairement à `catalog_cache.rs`, dont le contenu évolue avec le référentiel du jeu).
@@ -14,16 +14,19 @@ const APP_NAME: &str = "wakfu-companion-overlay";
 const APP_NAME: &str = "wakfu-companion-overlay-test";
 
 fn cache_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", APP_NAME).map(|dirs| dirs.data_dir().join("icons"))
+    overlay_engine::app_dirs::project_dirs(APP_NAME).map(|dirs| dirs.data_dir().join("icons"))
 }
 
 fn file_path(kind: IconKind, gfx_id: &str) -> Option<PathBuf> {
     let folder = match kind {
         IconKind::Item => "items",
+        // Un monstre servi par le second dossier du CDN (`monsterIllustrations/`, voir
+        // `IconRef::image_paths`) se range quand même ici : le cache est indexé par icône, pas par
+        // URL gagnante, et un `gfx_id` n'existe jamais dans les deux dossiers à la fois.
         IconKind::Monster => "monsters",
         // Huit fichiers en tout, et jamais renouvelés : les gemmes se mettent en cache comme le
         // reste plutôt que d'être retéléchargées à chaque lancement. Même nom de dossier que le
-        // sous-dossier du CDN (`IconRef::image_url`), pour que le cache se lise comme l'URL.
+        // sous-dossier du CDN (`IconRef::image_path`), pour que le cache se lise comme l'URL.
         IconKind::Rarity => "rarities",
         // Même dossier que le CDN. Attention au garde-fou juste en dessous : le bouton « Tout »
         // porte le numéro `-1`, qui ne contient aucun séparateur de chemin — il passe, et doit
@@ -31,6 +34,7 @@ fn file_path(kind: IconKind, gfx_id: &str) -> Option<PathBuf> {
         IconKind::ItemCategory => "itemTypes",
         // Même dossier que le CDN, là encore — voir `overlay_engine::spells`.
         IconKind::Spell => "spells",
+        IconKind::TimePointBonus => "timePointBonus",
     };
     // `gfx_id` vient du catalogue serveur, jamais construit à partir d'une entrée non fiable —
     // mais un id qui contiendrait par accident un séparateur de chemin ne doit quand même jamais

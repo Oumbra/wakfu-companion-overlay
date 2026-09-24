@@ -61,7 +61,12 @@ fn dossier() -> std::path::PathBuf {
 }
 
 /// Une rangée : un ton, ses trois états, pour un cadre donné.
-fn rangee(ui: &mut egui::Ui, icone: egui::TextureId, frame: SlotFrame, ton: SelectionTone) {
+fn rangee(
+    ui: &mut egui::Ui,
+    icone: egui::load::SizedTexture,
+    frame: SlotFrame,
+    ton: SelectionTone,
+) {
     ui.horizontal(|ui| {
         for (selection, _) in ETATS {
             let mut slot = design::item_slot()
@@ -93,7 +98,9 @@ fn main() {
             overlay_ui::style::apply(&ctx);
             // Un glyphe du manifeste en guise d'icône : la planche juge le CADRE et sa sélection,
             // pas l'icône — et le harnais n'a pas de catalogue distant.
-            let icone = design::DesignSystem::get(&ctx).icon(DsIcon::Kamas).id();
+            let icone = egui::load::SizedTexture::from_handle(
+                design::DesignSystem::get(&ctx).icon(DsIcon::Kamas),
+            );
 
             ui.spacing_mut().item_spacing.y = 8.0;
 

@@ -1,7 +1,15 @@
-//! Tests d'intégration sur le vrai `wakfu.log` vendu depuis `wakfu-companion` (même fichier que
-//! le spike S2, `spikes/s2-engine-quickjs/tests/wakfu.log`, 10 975 lignes) — pas un fichier
-//! synthétique : on veut vérifier que `Engine` produit un récap plausible sur de vraies données de
-//! jeu, pas juste que le code s'exécute sans paniquer.
+//! Tests d'intégration sur le `wakfu.log` de référence (même fichier que le spike S2,
+//! `spikes/s2-engine-quickjs/tests/wakfu.log`, 10 975 lignes) — une vraie session de jeu, pas un
+//! fichier synthétique : on veut vérifier que `Engine` produit un récap plausible sur des données
+//! de jeu réelles, pas juste que le code s'exécute sans paniquer.
+//!
+//! **La fixture est PSEUDONYMISÉE** (constat C1 de `docs/analyse-rgpd.md`, dépôt public) : jeton
+//! de session neutralisé, IP locale en `192.0.2.10` (RFC 5737), nom de compte Windows en
+//! `anonymous`, personnages du compte en `Anonyme-<Classe><N>` avec des identifiants numériques
+//! en `9000_000x`, auteurs de chat tiers en `Anonyme-NNN` et leurs messages remplacés par du
+//! lorem ipsum. Seule la STRUCTURE est réelle — enchaînement des combats, races, dégâts, soins,
+//! horodatages. Ne jamais y recoller un extrait de journal brut : `scripts/check-fixtures.sh`
+//! (hook `pre-commit` et étape de CI) le refuse.
 
 use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};

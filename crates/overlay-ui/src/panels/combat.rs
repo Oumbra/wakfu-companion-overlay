@@ -308,15 +308,16 @@
 //! entre les boutons de la planche de référence.
 //!
 //! **Refonte 2026-09-06 (marge du panneau, 15e retour)** : les refontes précédentes du 8e au 10e
-//! retour n'avaient corrigé que les REPLIS du placement (aujourd'hui dans `design::tooltip`) (quel `RectAlign::BOTTOM*`
-//! choisir une fois `TOP` rejeté) sans jamais s'attaquer à la cause — le switch Alliés/Ennemis reste
-//! collé au bord SUPÉRIEUR du panneau (`inner_margin` nul), donc `TOP` échoue TOUJOURS pour lui,
-//! quel que soit le repli disponible : les deux infobulles s'affichaient en dessous plutôt qu'au-
-//! dessus (nouveau retour utilisateur explicite : « les tooltips du switch alliés/ennemis
-//! s'affichent en dessous au lieu d'au dessus [...] agrandis légèrement l'overlay combat »). Voir
-//! `render_content::COMBAT_TOP_MARGIN` : le panneau gagne une marge haute (44px) suffisante pour que
-//! `TOP` tienne enfin — la fenêtre Combat (`main.rs`/`bin/overlay-ui-x11.rs::WINDOW_SIZE`) est
-//! agrandie d'autant pour ne rien compresser d'autre.
+//! retour n'avaient corrigé que les REPLIS du placement (aujourd'hui dans `design::tooltip`) (quel
+//! `RectAlign::BOTTOM*` choisir une fois `TOP` rejeté) sans jamais s'attaquer à la cause — le
+//! switch Alliés/Ennemis reste collé au bord SUPÉRIEUR du panneau (`inner_margin` nul), donc `TOP`
+//! échoue TOUJOURS pour lui, quel que soit le repli disponible : les deux infobulles s'affichaient
+//! en dessous plutôt qu'au- dessus (nouveau retour utilisateur explicite : « les tooltips du switch
+//! alliés/ennemis s'affichent en dessous au lieu d'au dessus [...] agrandis légèrement l'overlay
+//! combat »). Voir `render_content::COMBAT_TOP_MARGIN` : le panneau gagne une marge haute (44px)
+//! suffisante pour que `TOP` tienne enfin — la fenêtre Combat
+//! (`main.rs`/`bin/wakfu-companion-overlay-x11.rs::WINDOW_SIZE`) est agrandie d'autant pour ne rien
+//! compresser d'autre.
 //!
 //! **Refonte 2026-09-07 (vision ennemie, scroll infini)** — demande utilisateur explicite (les
 //! breaches peuvent aligner 40 à 60+ monstres, jamais affichables en liste plate lisible) :
@@ -394,6 +395,71 @@
 //! est voulu (décision utilisateur explicite, 15 sept. 2026, voir CLAUDE.md « Ce que l'overlay
 //! affiche diffère du site ») — temps réel ici, bilan de fin de combat là-bas. Ne pas aligner les
 //! deux.
+//!
+//! **Deux interrupteurs le commandent (2026-09-15)**, section « Combat » de l'onglet
+//! « Paramètres » (`panels::feature_switch::FeatureToggles`) :
+//!
+//! - « Activer le détail des combats » coupe le panneau ENTIER — c'est [`should_show`] qui le dit,
+//!   et les deux hôtes qui masquent la fenêtre OS
+//!   (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`). Ce module
+//!   ne peint donc jamais avec cette case décochée.
+//! - « Activer le suivi des sorts » coupe la seule ligne de sorts (paramètre `spells_enabled` de
+//!   [`show`], déjà combiné avec la case ci-dessus par l'hôte) : le bloc `combat_spell_block`,
+//!   mais aussi les marques qu'il pose sur les médaillons et l'épinglage au clic — sans bloc à
+//!   lire, un liseré ne désignerait plus rien. Portraits, barres et switches ne bougent pas.
+//!
+//! **Refonte 2026-09-16 (switches au design system)** — les deux switches, peints à la main
+//! jusque-là (piste `TINT_MEDIUM` bordée de `TINT_STRONG`, option active `ACCENT`, 30 × 26 par
+//! option), sont désormais `design::switch` : le sélecteur exclusif du jeu, ses six textures, ses
+//! cases de fond kaki biseauté (active) ou gris-brun (inactive). Décisions prises sur rendu du
+//! harnais (avant / après en artefact, quatre variantes) :
+//!
+//! - **À l'échelle 36/44** (`SWITCH_SCALE`, via `Switch::scale`) : le switch du jeu réduit
+//!   homothétiquement — cases de 35 × 36, séparateur de 2, liseré, biseaux et glyphes réduits
+//!   dans le même rapport. Deux cases = 72px, trois = 109px. Trois tailles ont été rendues le
+//!   même jour avant celle-ci : 26px de haut par étirement du 9-slice (« on a l'impression
+//!   d'avoir compressé le switch »), le standard de 44 (« le rendu dans le jeu est relativement
+//!   imposant »), puis cette réduction — « vraiment scaler à double dimension pour ne pas perdre
+//!   le rendu visuel ». Les deux bandeaux font 48px, la colonne des barres descend d'autant
+//!   (`BARS_COLUMN_TOP_OFFSET`).
+//! - **Bandeaux opacifiés conservés** (`LEADER_PANEL_FILL`), avec leurs marges de 6px. Le
+//!   bandeau de camp, qui faisait la largeur du cadre, s'élargit à 84px pour loger le switch de
+//!   72 avec ses marges : **calé à gauche sur le cadre**, il déborde de 14px vers la gouttière
+//!   des colonnes (retour utilisateur : les marges latérales du bandeau doivent rester celles du
+//!   design, pas se résorber sur la gauche) — sans rencontrer le bandeau leader, qui commence
+//!   plus bas (`BARS_COLUMN_TOP_OFFSET`).
+//! - **Variante premier plan** (demande utilisateur du même jour, après les décisions ci-dessus) :
+//!   `SwitchVariant::FirstPlan` remplace le cadre kaki du sélecteur de genre par le socle de
+//!   bouton icône de premier plan du jeu (`button-icon-first-plan.png` et son `-hover`), celui des
+//!   boutons du carré de contrôle du Suivi. Ces deux switches sont les seuls contrôles de
+//!   l'overlay à flotter PAR-DESSUS la scène : ils portent désormais la matière que le jeu emploie
+//!   à cet endroit. `SWITCH_SCALE` disparaît avec ce changement — la variante est native à 36px, il
+//!   n'y a plus rien à réduire. Les switches passent de 72 et 109px à **74 et 112** (une gouttière
+//!   de 2px subsiste entre deux socles, qui portent chacun leurs quatre coins), la hauteur ne bouge
+//!   pas, et les deux bandeaux comme `BARS_COLUMN_TOP_OFFSET` en dérivent sans être touchés. La
+//!   case choisie ne se lit plus à un fond kaki mais au socle éclairci, à son icône en couleur
+//!   pleine et à son liseré (voir `design::SwitchVariant`). Quatre allers-retours sur rendu ont
+//!   réglé le détail le même jour : glyphe ramené au plafond commun (il avait grossi de 68 %,
+//!   faute d'étalon d'encre sur les glyphes en couleurs), socles collés par un chevauchement de
+//!   2 px, survol qui allume le glyphe EN MÊME TEMPS que le socle (sans quoi l'icône restait
+//!   éteinte sur un fond allumé), et liseré `#126068` de la case choisie — devenu nécessaire,
+//!   justement, parce que le survol allume tout.
+//! - **Le total du bandeau leader** ne disposait que de 69px (190 − 12 de marges − 109 de
+//!   switch) : assez pour six chiffres au corps de 18, pas pour sept (« 1 047 404 » = 79px,
+//!   qui mordait de 10px sur la case Soins — capture utilisateur du même jour). Décision sur
+//!   rendu (huit variantes en artefact) : le bandeau **déborde de 6px de chaque côté**
+//!   (`LEADER_PANEL_OVERHANG`, en permanence — pas de saut de largeur en cours de combat) et le
+//!   total passe au **corps 16 au-delà de six chiffres** (`TOTAL_FONT_SIZE_COMPACT`) : 71px
+//!   dans 81, 10px d'air. Réduire seul aurait demandé 15px de corps (3px d'air, le total ne se
+//!   détache plus des lignes), élargir seul 8px de chaque côté au moins, au-delà de la
+//!   gouttière de 6 — le bandeau montait sur l'ornement du cadre des portraits.
+//! - **Icônes en couleurs** : les cinq glyphes (`DsIcon::Allies`/`Enemies`/`Metric*`, catégorie
+//!   `couleur`) restent ceux du jeu et du site, peints tels quels sur la case active et
+//!   atténués ailleurs. Passés au monochrome du design system, alliés et ennemis ne se
+//!   distinguaient plus que par la position des bras, et les deux cœurs devenaient des taches.
+//!
+//! Les infobulles (« Alliés (F2) », « Dégâts infligés (F3) »…) sont les libellés des cases, portés
+//! par le composant ; `UiIcons` ne porte plus ces cinq textures.
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, SessionSnapshot};
 
@@ -424,7 +490,7 @@ pub enum CombatSide {
 
 impl CombatSide {
     /// Inverse le camp affiché — utilisé par le raccourci global `ShortcutAction::CombatSide`
-    /// (`main.rs::App::toggle_combat_side`) en plus du clic direct sur `paint_side_switch` : retour
+    /// (`main.rs::App::toggle_combat_side`) en plus du clic direct sur le switch de camp : retour
     /// utilisateur explicite (« en mode toggle, c'est-à-dire que quand on appuie, ça inverse la
     /// sélection »), un seul raccourci pour les deux camps plutôt qu'un par camp.
     pub fn toggled(self) -> Self {
@@ -459,12 +525,12 @@ impl CombatMetric {
     pub const ALL: [Self; 3] = [Self::Damage, Self::Armor, Self::Heal];
 
     /// Icône DU JEU de cette grandeur — les mêmes que le sélecteur `app-entity-stat-tabs` du dépôt
-    /// web (voir `UiIcons`), embarquées plutôt que chargées depuis le CDN.
-    pub fn icon(self, icons: &UiIcons) -> &egui::TextureHandle {
+    /// web, au registre du design system (catégorie `couleur`, voir `design::icons`).
+    pub fn icon(self) -> design::DsIcon {
         match self {
-            Self::Damage => icons.metric_damage(),
-            Self::Armor => icons.metric_armor(),
-            Self::Heal => icons.metric_heal(),
+            Self::Damage => design::DsIcon::MetricDamage,
+            Self::Armor => design::DsIcon::MetricArmor,
+            Self::Heal => design::DsIcon::MetricHeal,
         }
     }
 
@@ -511,9 +577,15 @@ impl CombatMetric {
     }
 }
 
-const SWITCH_HEIGHT: f32 = 26.0;
-const SWITCH_OPTION_WIDTH: f32 = 30.0;
-const SWITCH_ICON_SIZE: f32 = 15.0;
+/// Hauteur des deux switches — **36px**, et elle n'est plus réglée ici : c'est le côté natif du
+/// socle de premier plan (`design::tokens::SWITCH_FIRST_PLAN_SIZE`), donc ce qu'annonce
+/// `Switch::desired_size` sans échelle ni hauteur imposée.
+///
+/// L'échelle 36/44 qui précédait (`SWITCH_SCALE`, réduction homothétique du cadre du jeu de 44 à
+/// 36) a disparu avec elle : la variante premier plan n'a rien à réduire, elle est déjà à sa
+/// taille. La valeur, elle, ne change pas d'un pixel — les deux bandeaux et
+/// `BARS_COLUMN_TOP_OFFSET` en dérivent et ne bougent donc pas non plus.
+const SWITCH_HEIGHT: f32 = design::tokens::SWITCH_FIRST_PLAN_SIZE;
 /// Écart vertical entre deux portraits de la liste "plate", et entre deux groupes nom+barre de la
 /// colonne de droite (même rythme pour les deux colonnes, demande utilisateur explicite). Resserré
 /// une 4e fois (6 px → 4 px → 2 px → 1 px, retour utilisateur répété : « il y a un écart non
@@ -530,11 +602,9 @@ const COLUMN_GAP: f32 = 6.0;
 //
 // `DAMAGE_ACCENT` a disparu le 2026-09-12 : c'était un doublon pur de `tokens::METER_FILL`, dont
 // la doc porte déjà l'historique des neuf retours utilisateur qui ont séparé, fusionné puis
-// re-séparé cette teinte de l'accent.
-use crate::design::tokens::{
-    METER_FILL as DAMAGE_ACCENT, OVERLAY_ACCENT as ACCENT, OVERLAY_TINT_MEDIUM as TINT_MEDIUM,
-    OVERLAY_TINT_STRONG as TINT_STRONG,
-};
+// re-séparé cette teinte de l'accent. `ACCENT`, `TINT_MEDIUM` et `TINT_STRONG` ne servaient plus
+// ici qu'aux deux switches peints à la main, partis dans `design::switch` le 2026-09-16.
+use crate::design::tokens::METER_FILL as DAMAGE_ACCENT;
 
 /// Hauteur d'une barre de dégâts — mesurée sur la maquette fournie par l'utilisateur (capture
 /// d'écran 2026-09-02, ~16 px de haut). Une première itération l'avait portée à 18 px sans
@@ -560,6 +630,16 @@ pub(super) const GROUP_NAME_BAR_GAP: f32 = 0.0;
 use crate::design::tokens::OVERLAY_TEXT as TEXT_COLOR;
 
 const TOTAL_FONT_SIZE: f32 = 18.0;
+/// Corps du total au-delà de `TOTAL_FULL_SIZE_MAX_DIGITS` chiffres. Mesuré par egui sur
+/// « 1 047 404 » (16 sept. 2026) : 79px au corps de 18, 71 à 16, 66 à 15, 62 à 14 — dans les
+/// 81px laissés au total (190 + 12 de débord − 12 de marges − 109 de switch), 16 laisse 10px
+/// d'air ; 15 aurait tenu sans débord du bandeau mais avec 3px seulement, et à 14 le total ne se
+/// détache plus des chiffres des lignes (13px).
+const TOTAL_FONT_SIZE_COMPACT: f32 = 16.0;
+/// Nombre de chiffres jusqu'auquel le total garde `TOTAL_FONT_SIZE` : six chiffres (« 999 999 »,
+/// ≈ 9,9px par chiffre et 4,7 par espace au corps de 18, soit 64px) tiennent dans la place
+/// disponible ; sept ne tiennent qu'au corps compact.
+const TOTAL_FULL_SIZE_MAX_DIGITS: usize = 6;
 /// Air VISIBLE entre la ligne leader et le premier groupe — 10 px depuis le 12 sept. 2026 (retour
 /// utilisateur : le même écart que `combat_spell_block::BLOCK_GAP` entre le dernier groupe et le
 /// bloc de sorts, « pour l'homogénéité entre les blocs »). `show` en retranche l'`item_spacing`
@@ -573,6 +653,14 @@ pub(super) const NAME_FONT_SIZE: f32 = 13.0;
 /// espacement interne avant l'encre visible : l'écart géométrique posé ici est bien symétrique,
 /// même si l'œil peut lire une petite différence côté texte — retour utilisateur, 7e retour).
 const LEADER_PANEL_PADDING: f32 = 6.0;
+/// Débord du bandeau leader de chaque côté de la colonne des barres — **permanent**, pas
+/// seulement au million (décision utilisateur du 16 sept. 2026 : le bandeau ne change pas de
+/// largeur en cours de combat, seul le corps du total bascule). Vaut la gouttière des colonnes :
+/// à gauche le bandeau la remplit exactement sans monter sur l'ornement du cadre des portraits
+/// (dès 7px il le touchait, vu sur rendu), à droite il déborde d'autant pour rester centré sur
+/// la colonne. Le switch de grandeur, calé à `LEADER_PANEL_PADDING` du bord du bandeau, tombe
+/// donc au ras de la colonne. Peint hors allocation, comme le débord du bandeau de camp.
+const LEADER_PANEL_OVERHANG: f32 = COLUMN_GAP;
 /// Air sous le bandeau du switch Alliés/Ennemis, avant le cadre des portraits. Resserré à 5 px
 /// (demande utilisateur, 15 sept. 2026 : « rapproche-le du template, au moins 5 pixels ») plutôt
 /// que de reprendre `TOTAL_GAP` : ce bandeau n'introduit pas une liste comme le bandeau leader, il
@@ -611,7 +699,21 @@ pub fn show(
     // Voir `panels::watchlist::WatchlistAssets::shortcuts` : même raison, ici pour l'infobulle du
     // switch Alliés/Ennemis.
     shortcuts: &ShortcutBindings,
-) {
+    // Le suivi des sorts est-il actif ? — case « Activer le suivi des sorts » de la section
+    // « Combat » des Options (2026-09-15, `feature_switch::FeatureToggles::spells_visible`, qui
+    // combine déjà cette case avec celle dont elle dépend). `false` retire le bloc « ligne de
+    // sorts » ET les deux marques qu'il pose sur les médaillons : sans bloc à lire, un liseré et
+    // un point sur un portrait ne désigneraient plus rien.
+    spells_enabled: bool,
+    // Ce que l'hôte sait de la fenêtre et que le panneau ne peut pas savoir : verrou et hauteur
+    // personnalisée de son déplacement vertical (2026-09-17) — voir [`CombatChrome`].
+    chrome: CombatChrome,
+) -> CombatOutcome {
+    // **La poignée de déplacement déclarée en TOUT PREMIER** (2026-09-17) : dans une même couche,
+    // egui donne le pointeur au DERNIER widget déclaré — la lisière du bord est donc la plus basse
+    // de la pile, et le cadre des portraits, dont l'ornement la chevauche, garde ses clics. Elle
+    // se PEINT en revanche à la fin, par-dessus tout (voir [`side_handle`]).
+    let handle = side_handle(ui, chrome.locked);
     // Ordre STABLE (pas trié par dégâts, voir doc de module et `FightSnapshot::fighters`) — c'est
     // l'ordre des PORTRAITS, cadre et liste plate confondus. Calculé ICI, avant toute mise en page
     // (plutôt que dans un `match fight` qui pourrait s'arrêter avant), pour que la ligne leader
@@ -675,11 +777,16 @@ pub fn show(
     // même frame. Les marques s'expriment en positions dans la tranche du cadre qui les peint :
     // `framed` (gabarit exact) ou `enemy_scroll` (ennemis nombreux) — jamais les deux.
     let is_ally = *side == CombatSide::Allies;
+    // **Le combat vu par le bloc de sorts** — le même, sauf quand le suivi des sorts est coupé :
+    // `None` retire d'un coup la sélection, les deux marques sur les médaillons, l'épinglage au
+    // clic et le bloc lui-même. Tout ce qui sert la ligne de sorts passe par cette variable, et
+    // rien d'autre : les portraits, leurs infobulles et les barres continuent de lire `fight`.
+    let spell_fight = fight.filter(|_| spells_enabled);
     let mut selection =
-        fight.and_then(|fight| combat_spell_block::selection(ui.ctx(), fight, is_ally));
+        spell_fight.and_then(|fight| combat_spell_block::selection(ui.ctx(), fight, is_ally));
     let slot_of = |list: &[&FighterDamage], sel: usize| {
         list.iter().position(|f| {
-            Some(sel) == fight.and_then(|fight| combat_spell_block::fighter_index(fight, f))
+            Some(sel) == spell_fight.and_then(|fight| combat_spell_block::fighter_index(fight, f))
         })
     };
     let marks_in = |list: &[&FighterDamage], sel: Option<combat_spell_block::SpellSelection>| {
@@ -689,166 +796,558 @@ pub fn show(
         })
     };
 
-    ui.horizontal_top(|ui| {
-        // Colonne de gauche : portraits — cadre exact (alliés ou ennemis jusqu'à `MAX_FRAME_SLOTS`),
-        // cadre à défilement (ennemis au-delà), ou liste plate (alliés excédentaires) — voir doc de
-        // module.
-        ui.vertical(|ui| {
-            // Switch Alliés/Ennemis : en tête de CETTE colonne depuis le 2026-09-15 (voir doc de
-            // module) — peint inconditionnellement, avant tout test sur le contenu du cadre, pour
-            // qu'il reste atteignable sans combat comme dans un camp vide (c'était déjà la raison
-            // qui le gardait dans le bandeau leader, elle ne change pas de colonne avec lui).
-            show_side_row(ui, icons, side, shortcuts);
-            ui.add_space(SIDE_ROW_GAP - ui.spacing().item_spacing.y);
-            if !framed.is_empty() {
-                let marks = marks_in(framed, selection);
-                let clicked = frame.show(
-                    ui,
-                    portraits,
-                    icons,
-                    catalog,
-                    remote_icons,
-                    remote_icon_textures,
-                    framed,
-                    measured,
-                    total_damage,
-                    marks,
-                );
-                if let (Some(slot), Some(fight)) = (clicked, fight) {
-                    if let Some(idx) = combat_spell_block::fighter_index(fight, framed[slot]) {
-                        combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
-                        selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
-                    }
-                }
-            }
-            if !enemy_scroll.is_empty() {
-                let marks = marks_in(enemy_scroll, selection);
-                let clicked = EnemyFrameScroll::show(
-                    ui,
-                    frame,
-                    portraits,
-                    icons,
-                    catalog,
-                    remote_icons,
-                    remote_icon_textures,
-                    enemy_scroll,
-                    measured,
-                    total_damage,
-                    marks,
-                );
-                if let (Some(slot), Some(fight)) = (clicked, fight) {
-                    if let Some(idx) = combat_spell_block::fighter_index(fight, enemy_scroll[slot])
-                    {
-                        combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
-                        selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
-                    }
-                }
-            }
-            if !flat_portraits.is_empty() {
+    // **Le dernier pixel de la décoration**, dont la rangée d'actions se tient à
+    // `ACTIONS_DECORATION_GAP` (voir [`paint_actions_row`]) : le bas de la colonne de GAUCHE telle
+    // qu'elle vient d'être peinte — le cadre des portraits, ou le seul bandeau du switch dans un
+    // camp vide — moins les lignes transparentes que le gabarit garde sous sa dernière encre
+    // (`combat_frame::bottom_trim`). Mesuré sur l'allocation réelle plutôt que recalculé de
+    // constantes : les trois formes de cette colonne (cadre exact, cadre à défilement, liste
+    // plate) n'ont pas la même hauteur, et une seule d'entre elles finit sur un gabarit à rogner.
+    let decoration_bottom = ui
+        .horizontal_top(|ui| {
+            // Colonne de gauche : portraits — cadre exact (alliés ou ennemis jusqu'à `MAX_FRAME_SLOTS`),
+            // cadre à défilement (ennemis au-delà), ou liste plate (alliés excédentaires) — voir doc de
+            // module.
+            let left = ui.vertical(|ui| {
+                // Switch Alliés/Ennemis : en tête de CETTE colonne depuis le 2026-09-15 (voir doc de
+                // module) — peint inconditionnellement, avant tout test sur le contenu du cadre, pour
+                // qu'il reste atteignable sans combat comme dans un camp vide (c'était déjà la raison
+                // qui le gardait dans le bandeau leader, elle ne change pas de colonne avec lui).
+                show_side_row(ui, side, shortcuts);
+                ui.add_space(SIDE_ROW_GAP - ui.spacing().item_spacing.y);
                 if !framed.is_empty() {
-                    ui.add_space(ROW_GAP);
-                }
-                for (i, fighter) in flat_portraits.iter().enumerate() {
-                    if i > 0 {
-                        ui.add_space(ROW_GAP);
-                    }
-                    paint_flat_portrait(
+                    let marks = marks_in(framed, selection);
+                    let clicked = frame.show(
                         ui,
                         portraits,
                         icons,
                         catalog,
                         remote_icons,
                         remote_icon_textures,
-                        fighter,
+                        framed,
                         measured,
                         total_damage,
+                        marks,
                     );
+                    if let (Some(slot), Some(fight)) = (clicked, spell_fight) {
+                        if let Some(idx) = combat_spell_block::fighter_index(fight, framed[slot]) {
+                            combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
+                            selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
+                        }
+                    }
                 }
-            }
-        });
+                if !enemy_scroll.is_empty() {
+                    let marks = marks_in(enemy_scroll, selection);
+                    let clicked = EnemyFrameScroll::show(
+                        ui,
+                        frame,
+                        portraits,
+                        icons,
+                        catalog,
+                        remote_icons,
+                        remote_icon_textures,
+                        enemy_scroll,
+                        measured,
+                        total_damage,
+                        marks,
+                    );
+                    if let (Some(slot), Some(fight)) = (clicked, spell_fight) {
+                        if let Some(idx) =
+                            combat_spell_block::fighter_index(fight, enemy_scroll[slot])
+                        {
+                            combat_spell_block::on_portrait_clicked(ui.ctx(), fight, idx);
+                            selection = combat_spell_block::selection(ui.ctx(), fight, is_ally);
+                        }
+                    }
+                }
+                if !flat_portraits.is_empty() {
+                    if !framed.is_empty() {
+                        ui.add_space(ROW_GAP);
+                    }
+                    for (i, fighter) in flat_portraits.iter().enumerate() {
+                        if i > 0 {
+                            ui.add_space(ROW_GAP);
+                        }
+                        paint_flat_portrait(
+                            ui,
+                            portraits,
+                            icons,
+                            catalog,
+                            remote_icons,
+                            remote_icon_textures,
+                            fighter,
+                            measured,
+                            total_damage,
+                        );
+                    }
+                }
+                // Le gabarit ne termine la colonne que s'il est seul : une liste plate d'alliés
+                // excédentaires ou un cadre à défilement se poursuit sous lui, et c'est alors leur
+                // bas — sans rien à rogner — qui fait la décoration.
+                (!framed.is_empty() && enemy_scroll.is_empty() && flat_portraits.is_empty())
+                    .then_some(framed.len())
+            });
+            let trim = left.inner.map_or(0.0, super::combat_frame::bottom_trim);
+            let decoration_bottom = left.response.rect.max.y - 1.0 - trim;
 
-        ui.add_space(COLUMN_GAP);
+            ui.add_space(COLUMN_GAP);
 
-        // Colonne de droite : ligne leader (switch Alliés/Ennemis + total, voir `show_leader_row`)
-        // — TOUJOURS peinte, y compris sans combat ou camp vide, pour que le switch reste
-        // accessible (le déplacer ici, à la place de l'ancien bouton lien externe, ne doit pas le
-        // rendre inatteignable dans un état particulier) — puis soit un message d'état, soit un
-        // groupe nom+dégâts+barre compact par combattant ayant infligé des dégâts, trié par
-        // dégâts décroissant — indépendante du rythme vertical de la colonne des portraits
-        // (demande utilisateur explicite : « il ne faut pas que les groupes soient alignés au
-        // portrait »).
-        ui.vertical(|ui| {
-            // Sans retrancher `item_spacing.y`, contrairement aux autres `add_space` de ce
-            // fichier : cet espace-ci OUVRE la colonne (rien avant lui dans le `vertical`), egui
-            // n'y glisse donc aucun espacement propre — le retrancher coûtait 3 px et laissait les
-            // barres 3 px trop haut (mesuré sur les captures avant/après).
-            ui.add_space(BARS_COLUMN_TOP_OFFSET);
-            show_leader_row(ui, icons, metric, shortcuts, total_damage_raw);
-            ui.add_space(TOTAL_GAP - ui.spacing().item_spacing.y);
-            if fighters.is_empty() || bars.is_empty() {
-                // Camp vide (ou pas de combat) d'abord : dire « aucun soin » alors qu'il n'y a
-                // personne à soigner serait une fausse piste. Un camp peuplé mais sans rien à
-                // montrer pour la grandeur choisie, lui, le dit explicitement — sans ce message,
-                // basculer sur Armure dans un combat sans blindeur laissait la colonne vide sans
-                // qu'on sache si c'était zéro ou un bug.
-                ui.weak(match (fight, fighters.is_empty()) {
-                    (None, _) => "Aucun combat pour l'instant.",
-                    (Some(_), true) => match side {
-                        CombatSide::Allies => "Aucun allié pour l'instant.",
-                        CombatSide::Enemies => "Aucun ennemi pour l'instant.",
-                    },
-                    (Some(_), false) => measured.empty_message(),
-                });
+            // Colonne de droite : ligne leader (switch Alliés/Ennemis + total, voir `show_leader_row`)
+            // — TOUJOURS peinte, y compris sans combat ou camp vide, pour que le switch reste
+            // accessible (le déplacer ici, à la place de l'ancien bouton lien externe, ne doit pas le
+            // rendre inatteignable dans un état particulier) — puis soit un message d'état, soit un
+            // groupe nom+dégâts+barre compact par combattant ayant infligé des dégâts, trié par
+            // dégâts décroissant — indépendante du rythme vertical de la colonne des portraits
+            // (demande utilisateur explicite : « il ne faut pas que les groupes soient alignés au
+            // portrait »).
+            ui.vertical(|ui| {
+                // Sans retrancher `item_spacing.y`, contrairement aux autres `add_space` de ce
+                // fichier : cet espace-ci OUVRE la colonne (rien avant lui dans le `vertical`), egui
+                // n'y glisse donc aucun espacement propre — le retrancher coûtait 3 px et laissait les
+                // barres 3 px trop haut (mesuré sur les captures avant/après).
+                ui.add_space(BARS_COLUMN_TOP_OFFSET);
+                show_leader_row(ui, metric, shortcuts, total_damage_raw);
+                ui.add_space(TOTAL_GAP - ui.spacing().item_spacing.y);
+                if fighters.is_empty() || bars.is_empty() {
+                    // Camp vide (ou pas de combat) d'abord : dire « aucun soin » alors qu'il n'y a
+                    // personne à soigner serait une fausse piste. Un camp peuplé mais sans rien à
+                    // montrer pour la grandeur choisie, lui, le dit explicitement — sans ce message,
+                    // basculer sur Armure dans un combat sans blindeur laissait la colonne vide sans
+                    // qu'on sache si c'était zéro ou un bug.
+                    // Un bloc, comme tout ce qui se lit : la phrase change de côté, pas de sens.
+                    crate::mirror::upright(ui, |ui| {
+                        ui.weak(match (fight, fighters.is_empty()) {
+                            (None, _) => "Aucun combat pour l'instant.",
+                            (Some(_), true) => match side {
+                                CombatSide::Allies => "Aucun allié pour l'instant.",
+                                CombatSide::Enemies => "Aucun ennemi pour l'instant.",
+                            },
+                            (Some(_), false) => measured.empty_message(),
+                        });
+                    });
+                } else {
+                    // Fenêtre bornée à six groupes, défilante au-delà (`combat_bars`, 13 sept.
+                    // 2026) — même rythme vertical que l'ancienne liste en dessous de six.
+                    DamageBars::show(ui, &bars, measured, total_damage);
+                }
+                // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, pour
+                // le camp affiché, dès qu'un de ses combattants a lancé un sort (avant, rien — pas
+                // même l'espace). `BLOCK_GAP` est l'air VISIBLE voulu : egui glisse déjà
+                // `item_spacing.y` après le dernier widget, retranché ici pour ne pas le compter
+                // deux fois.
+                if let (Some(fight), Some(sel)) = (spell_fight, selection) {
+                    ui.add_space(combat_spell_block::BLOCK_GAP - ui.spacing().item_spacing.y);
+                    combat_spell_block::show(ui, fight, sel, remote_icons, remote_icon_textures);
+                }
+            });
+            decoration_bottom
+        })
+        .inner;
+
+    // La lisière ne s'encre qu'ici, quand tout le panneau est peint : sous le cadre des portraits
+    // elle serait invisible là où elle compte (voir [`paint_side_handle`]).
+    paint_side_handle(ui, &handle);
+    // La rangée d'actions en dernier : au-dessus de tout le reste, et elle doit prendre le
+    // pointeur à qui passerait dessous.
+    let actions = paint_actions_row(ui, chrome, decoration_bottom);
+    CombatOutcome {
+        toggle_lock: actions.toggle_lock,
+        restore_requested: actions.restore_requested,
+        drag: handle.drag,
+    }
+}
+
+/// **Ce que l'hôte sait de la fenêtre Combat et que le panneau ne peut pas savoir** (2026-09-17) :
+/// verrouillée ou non, et déjà déplacée ou non.
+///
+/// Les deux viennent de l'extérieur pour la même raison que `panels::recap::RecapChrome` : ce
+/// module ne garde aucun état et ne connaît pas sa position à l'écran. Le verrou vit dans la
+/// config (`config::OverlayConfig::combat_locked`), la hauteur aussi
+/// (`config::OverlayConfig::combat_position_y`).
+///
+/// Pas d'équivalent du `actions_below` de la bande Récap : la rangée d'actions du panneau Combat
+/// vit DANS sa fenêtre, dans la réserve d'infobulle du haut, et le bornage garde cette fenêtre
+/// entière dans le cadre du jeu (voir `combat_placement`) — elle ne peut donc jamais manquer de
+/// place.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CombatChrome {
+    /// **Panneau verrouillé** : sa poignée latérale n'existe plus — rien à saisir, et le curseur
+    /// reste celui du système au-dessus d'elle (voir [`side_handle`]). Le cadenas de la rangée
+    /// affiche alors [`design::DsIcon::Lock`] ; déverrouillé, `LockOpen` — jamais les deux, c'est
+    /// un seul bouton qui bascule.
+    ///
+    /// **Le défaut est `false`, déverrouillé** — demande explicite de l'utilisateur, et l'inverse
+    /// de la bande Récap : ici la poignée est une lisière dédiée de quelques pixels, pas tout le
+    /// fond du panneau. Voir `config::OverlayConfig::combat_locked`.
+    pub locked: bool,
+    /// **Le panneau a une hauteur à lui** (`config::OverlayConfig::combat_position_y` renseignée) :
+    /// c'est la seule condition d'affichage du glyphe de replacement — remettre au centre un
+    /// panneau qui y est déjà n'aurait rien à faire.
+    pub moved: bool,
+}
+
+/// Ce que [`show`] rend à l'hôte, au-delà de l'affichage : deux intentions et un geste, jamais une
+/// action — ce module ne déplace ni ne persiste rien lui-même (voir `panels::drag`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CombatOutcome {
+    /// Le cadenas vient d'être cliqué : à l'hôte d'inverser [`CombatChrome::locked`] et de
+    /// l'écrire dans la config.
+    pub toggle_lock: bool,
+    /// Le glyphe de replacement vient d'être cliqué : à l'hôte d'ouvrir la confirmation qui, sur
+    /// un « Oui », rend son centrage vertical au panneau.
+    pub restore_requested: bool,
+    /// Le geste de déplacement vertical du panneau, s'il y en a un cette frame.
+    pub drag: crate::panels::drag::PanelDrag,
+}
+
+/// **Largeur de la poignée latérale** — la lisière du bord EXTÉRIEUR du panneau par laquelle il se
+/// déplace de haut en bas (« il faudra qu'il déplace l'overlay en slidant sur la bordure
+/// latérale », demande utilisateur du 2026-09-17).
+///
+/// 8 px : assez large pour s'attraper sans viser, assez fine pour ne mordre que sur l'ornement du
+/// cadre des portraits — et pas sur les médaillons eux-mêmes, qui sont cliquables (bloc de sorts).
+/// Le cadre étant déclaré APRÈS la poignée, il lui reprend de toute façon le pointeur là où les
+/// deux se recouvrent (voir [`side_handle`]).
+pub const HANDLE_WIDTH: f32 = 8.0;
+
+/// Arrondi de la poignée et de la pastille d'actions — celui des bandeaux posés sur le jeu
+/// (`LEADER_PANEL_ROUNDING`, `panels::recap::BACKDROP_ROUNDING`) : visiblement la même matière.
+const HANDLE_ROUNDING: f32 = LEADER_PANEL_ROUNDING;
+
+/// Hauteur du motif de préhension peint au milieu de la poignée — trois traits, le vocabulaire
+/// universel du « ça se prend ». Il ne couvre pas toute la lisière : une barre pleine de 480 px
+/// sur le bord de l'écran de jeu serait un meuble, pas un indice.
+const HANDLE_GRIP_HEIGHT: f32 = 18.0;
+
+/// Côté d'un glyphe de la rangée d'actions — `panels::recap::ACTIONS_ICON_SIZE` à l'identique :
+/// mêmes commandes, même discrétion, sur deux overlays qui se déplacent de la même façon.
+const ACTIONS_ICON_SIZE: f32 = 14.0;
+
+/// Rembourrage de la pastille d'actions autour de ses glyphes, et écart entre les deux glyphes —
+/// voir `panels::recap::paint_actions_row`, dont cette rangée est la jumelle.
+const ACTIONS_PADDING: f32 = 4.0;
+const ACTIONS_GAP: f32 = 6.0;
+/// **Air entre le dernier pixel de la décoration et la pastille d'actions** (2026-09-17, demande
+/// utilisateur : « place ce groupe d'icônes à 5 px du dernier pixel de la décoration du
+/// template »). Même valeur que [`SIDE_ROW_GAP`], l'air posé le 15 sept. AU-DESSUS du cadre pour
+/// la même raison : le groupe appartient au cadre qu'il commande, il s'en tient à la même
+/// distance que sa coiffe.
+const ACTIONS_DECORATION_GAP: f32 = SIDE_ROW_GAP;
+
+/// Ce que la poignée latérale a récolté cette frame : le geste à remonter à l'hôte, et de quoi la
+/// peindre plus tard (voir [`paint_side_handle`]).
+struct Handle {
+    drag: crate::panels::drag::PanelDrag,
+    /// La lisière, et `true` si elle est survolée ou tenue — `None` quand le panneau est
+    /// verrouillé : il n'y a alors rien à peindre du tout.
+    ink: Option<(egui::Rect, bool)>,
+}
+
+/// **La poignée latérale du panneau** (2026-09-17, demande utilisateur) : une lisière de
+/// [`HANDLE_WIDTH`] px sur le bord EXTÉRIEUR, sur toute la hauteur du panneau, par laquelle il se
+/// déplace de haut en bas — et rien d'autre : jamais de gauche à droite, le côté se choisit aux
+/// Options (`config::OverlayConfig::combat_on_right`).
+///
+/// **Bord extérieur, quel que soit le côté affiché** : la poignée est déclarée à GAUCHE dans le
+/// repère de mise en page, et le miroir la porte à droite quand le panneau y est posé (voir
+/// `crate::mirror`, qui réfléchit le décor). Elle tombe donc contre le bord de la fenêtre de jeu,
+/// là où il n'y a rien d'autre à cliquer et où la souris se pose sans viser — on la pousse contre
+/// le bord de l'écran.
+///
+/// **Verrouillé, ce n'est plus un widget du tout** — pas de zone d'interaction, donc pas de
+/// curseur « attrapable », rien de peint et pas le moindre geste : exactement la règle de
+/// `panels::recap::band_drag`, et pour la même raison (promettre un déplacement qui n'arrive pas
+/// est pire que ne rien promettre).
+fn side_handle(ui: &mut egui::Ui, locked: bool) -> Handle {
+    if locked {
+        return Handle {
+            drag: crate::panels::drag::PanelDrag::None,
+            ink: None,
+        };
+    }
+    let panel = ui.max_rect();
+    let rect = egui::Rect::from_min_max(
+        panel.min,
+        egui::pos2(panel.min.x + HANDLE_WIDTH, panel.max.y),
+    );
+    let response = ui.interact(rect, ui.id().with("combat-poignee"), egui::Sense::drag());
+    let held = response.dragged() || response.hovered();
+    Handle {
+        drag: crate::panels::drag::from_response(ui, &response),
+        ink: Some((rect, held)),
+    }
+}
+
+/// **La lisière ne se voit qu'au survol** — et c'est un choix, pas une économie.
+///
+/// Un rail peint en permanence sur le bord d'un panneau volontairement transparent serait un
+/// meuble : le fond translucide de l'overlay (`tokens::OVERLAY_BACKDROP`) disparaît de toute façon
+/// sur un décor sombre, et là où il se verrait, il mordrait sur l'ornement du cadre des portraits.
+/// Ce qui annonce la fonctionnalité, c'est le CADENAS — présent dès que le pointeur est sur le
+/// panneau (voir [`paint_actions_row`]), à deux pixels de la lisière, avec son infobulle — plus le
+/// curseur `Grab` dès qu'on approche, et la ligne d'aide des Options.
+/// C'est exactement ce que fait la bande Récap, dont le fond entier se saisit sans rien peindre.
+///
+/// **Peinte ici, à la fin du panneau**, alors que la poignée est DÉCLARÉE en tête de [`show`] :
+/// l'ordre de déclaration décide qui reçoit le pointeur (le dernier gagne, donc les portraits
+/// gardent leurs clics), l'ordre de peinture décide qui recouvre qui. Peinte en tête, la lisière
+/// passait sous le cadre des portraits — invisible précisément là où la main va.
+fn paint_side_handle(ui: &mut egui::Ui, handle: &Handle) {
+    let Some((rect, held)) = handle.ink else {
+        return;
+    };
+    if !held {
+        return;
+    }
+    let painter = ui.painter();
+    painter.rect_filled(rect, HANDLE_ROUNDING, design::tokens::OVERLAY_BACKDROP);
+    // Le voile blanc du survol de tout ce panneau, posé PAR-DESSUS le fond plutôt qu'à sa place :
+    // c'est le même empilement que les boutons du jeu, et il garde la lisière lisible sur un
+    // décor clair comme sur un décor sombre.
+    painter.rect_filled(rect, HANDLE_ROUNDING, design::tokens::OVERLAY_TINT_STRONG);
+    let grip =
+        egui::Rect::from_center_size(rect.center(), egui::vec2(HANDLE_WIDTH, HANDLE_GRIP_HEIGHT));
+    for i in 0..3 {
+        let y = grip.min.y + (grip.height() - 1.0) * i as f32 / 2.0;
+        painter.hline(
+            grip.min.x + 2.0..=grip.max.x - 2.0,
+            y,
+            egui::Stroke::new(1.0, design::tokens::ICON_TINT_HOVER),
+        );
+    }
+}
+
+/// Ce que la rangée d'actions vient de récolter — deux boutons, deux intentions, remontées telles
+/// quelles par [`CombatOutcome`].
+#[derive(Debug, Clone, Copy, Default)]
+struct ActionsOutcome {
+    toggle_lock: bool,
+    restore_requested: bool,
+}
+
+/// **La rangée d'actions du panneau Combat** (2026-09-17, demande utilisateur : « le même système
+/// que l'overlay récap ») : le cadenas, et le glyphe de replacement quand il a lieu d'être —
+/// posés sur une pastille à eux, en COLONNE contre le bord extérieur, à
+/// [`ACTIONS_DECORATION_GAP`] sous le dernier pixel de la décoration du cadre des portraits.
+///
+/// ## Un seul cadenas, deux visages
+///
+/// Comme pour la bande Récap : ce n'est pas un couple de boutons mais un seul, qui porte l'état du
+/// panneau. [`design::DsIcon::Lock`] verrouillé (« clique pour libérer »), `LockOpen` sinon
+/// (« clique pour figer ») — les deux glyphes sont faits l'un pour l'autre, même corps au pixel
+/// près, seule l'anse change.
+///
+/// ## Le glyphe de replacement n'apparaît qu'une fois le panneau déplacé
+///
+/// [`CombatChrome::moved`], et rien d'autre : tant que le panneau est à son centrage d'origine, il
+/// n'y a rien à défaire. La pastille se resserre sur le seul cadenas dans ce cas.
+///
+/// ## En bas, et non en haut (2026-09-17, demande utilisateur)
+///
+/// La première version posait la pastille en HAUT, dans la réserve d'infobulle du switch
+/// Alliés/Ennemis (`render_content::COMBAT_TOP_MARGIN`) : elle y tenait sans rien décaler, mais
+/// elle s'y trouvait juste au-dessus du switch, dans la zone que l'infobulle de celui-ci occupe
+/// quand on le survole. « Place les deux icônes en bas plutôt qu'en haut par défaut » : c'est
+/// désormais le coin bas de la fenêtre, où le panneau laisse de la place (son contenu s'arrête bien
+/// avant, les barres n'atteignent le bas que dans les combats les plus peuplés).
+///
+/// La pastille est donc DANS l'espace alloué au contenu, ce qui ne demande ni réserve ajoutée ni
+/// clip élargi. Les infobulles de ses deux glyphes s'ouvrent AU-DESSUS — en dessous, elles
+/// sortiraient de la fenêtre.
+///
+/// Le bloc est déclaré `mirror::upright_in` sur sa pastille : sa PLACE part à droite avec le
+/// panneau, son contenu reste à l'endroit — un glyphe `Undo` réfléchi dirait « rétablir », soit
+/// l'inverse de ce qu'il fait.
+///
+/// ## Seulement au survol (2026-09-21, demande utilisateur)
+///
+/// La pastille n'existe que **pointeur posé sur le panneau** — la même règle que la bande Récap
+/// (`panels::recap::paint_actions_row`), et pour la même raison : deux glyphes en permanence au
+/// pied d'un panneau transparent seraient un meuble de plus sur l'écran de jeu, alors qu'ils ne
+/// servent qu'au moment où la main y est. La zone de survol est le panneau ENTIER (`ui.max_rect()`)
+/// : c'est ce que l'utilisateur appelle « l'overlay », et il est symétrique autour de l'axe du
+/// miroir — le pointeur réfléchi par `mirror::mirror_input` y tombe si et seulement si le vrai y
+/// est. En mode clic-traversant, la fenêtre ne reçoit aucun pointeur, donc la pastille n'y
+/// apparaît jamais — cohérent, on ne pourrait pas la cliquer non plus.
+fn paint_actions_row(
+    ui: &mut egui::Ui,
+    chrome: CombatChrome,
+    decoration_bottom: f32,
+) -> ActionsOutcome {
+    let panel = ui.max_rect();
+    // `latest_pos` et non `hover_pos` : la position brute du pointeur tant qu'il est dans la
+    // fenêtre (`None` dès qu'il en sort, egui_winit remonte `PointerGone`), sans la notion de
+    // couche — une infobulle ouverte au-dessus du cadenas ne doit pas faire disparaître celui-ci.
+    let hovered = ui
+        .input(|i| i.pointer.latest_pos())
+        .is_some_and(|pos| panel.contains(pos));
+    if !hovered {
+        return ActionsOutcome::default();
+    }
+    let ds = design::DesignSystem::get(ui.ctx());
+    let glyphs = 1 + usize::from(chrome.moved);
+    // Le premier pixel libre sous la décoration, plus l'air demandé.
+    let top = decoration_bottom + 1.0 + ACTIONS_DECORATION_GAP;
+    let span = |count: usize| {
+        count as f32 * ACTIONS_ICON_SIZE + (count - 1) as f32 * ACTIONS_GAP + 2.0 * ACTIONS_PADDING
+    };
+    let thickness = ACTIONS_ICON_SIZE + 2.0 * ACTIONS_PADDING;
+    // Colonne par défaut ; rangée quand la hauteur restante ne lui suffit pas (voir doc de
+    // fonction) — la rangée, elle, tient sous les six gabarits.
+    let stacked = panel.max.y - top >= span(glyphs);
+    let size = if stacked {
+        egui::vec2(thickness, span(glyphs))
+    } else {
+        egui::vec2(span(glyphs), thickness)
+    };
+    let pill = egui::Rect::from_min_size(egui::pos2(panel.min.x, top), size);
+    let mut outcome = ActionsOutcome::default();
+    crate::mirror::upright_in(ui, pill, |ui| {
+        // Un painter cloné, et non `ui.painter()` : les glyphes se peignent pendant que `ui` est
+        // emprunté par leur zone d'interaction (voir [`paint_action`]).
+        let painter = ui.painter().clone();
+        painter.rect_filled(pill, HANDLE_ROUNDING, design::tokens::OVERLAY_BACKDROP);
+        let slot = |index: usize| {
+            let offset = index as f32 * (ACTIONS_ICON_SIZE + ACTIONS_GAP);
+            let (dx, dy) = if stacked {
+                (0.0, offset)
             } else {
-                // Fenêtre bornée à six groupes, défilante au-delà (`combat_bars`, 13 sept.
-                // 2026) — même rythme vertical que l'ancienne liste en dessous de six.
-                DamageBars::show(ui, &bars, measured, total_damage);
-            }
-            // Bloc « ligne de sorts » (voir `combat_spell_block`) : après le dernier groupe, pour
-            // le camp affiché, dès qu'un de ses combattants a lancé un sort (avant, rien — pas
-            // même l'espace). `BLOCK_GAP` est l'air VISIBLE voulu : egui glisse déjà
-            // `item_spacing.y` après le dernier widget, retranché ici pour ne pas le compter
-            // deux fois.
-            if let (Some(fight), Some(sel)) = (fight, selection) {
-                ui.add_space(combat_spell_block::BLOCK_GAP - ui.spacing().item_spacing.y);
-                combat_spell_block::show(ui, fight, sel, remote_icons, remote_icon_textures);
-            }
-        });
+                (offset, 0.0)
+            };
+            egui::Rect::from_min_size(
+                egui::pos2(
+                    pill.min.x + ACTIONS_PADDING + dx,
+                    pill.min.y + ACTIONS_PADDING + dy,
+                ),
+                egui::Vec2::splat(ACTIONS_ICON_SIZE),
+            )
+        };
+        // En colonne, les glyphes s'empilent : la place libre est sur le côté. En rangée, ils se
+        // gênent latéralement et c'est le dessus qui est libre.
+        let side = if stacked {
+            design::TooltipSide::Right
+        } else {
+            design::TooltipSide::Above
+        };
+        let (icon, tooltip) = if chrome.locked {
+            (design::DsIcon::Lock, "Déverrouiller la hauteur du panneau")
+        } else {
+            (
+                design::DsIcon::LockOpen,
+                "Verrouiller la hauteur du panneau",
+            )
+        };
+        outcome.toggle_lock = paint_action(
+            ui,
+            &ds,
+            &painter,
+            slot(0),
+            "combat-verrou",
+            icon,
+            tooltip,
+            side,
+        );
+        // Court-circuit volontaire : panneau jamais déplacé, glyphe jamais peint — la pastille
+        // s'est déjà dimensionnée dessus.
+        outcome.restore_requested = chrome.moved
+            && paint_action(
+                ui,
+                &ds,
+                &painter,
+                slot(1),
+                "combat-replacer",
+                design::DsIcon::Undo,
+                "Replacer le panneau à sa hauteur d'origine",
+                side,
+            );
     });
+    outcome
+}
+
+/// Un glyphe-commande de la rangée d'actions : blanc au repos, or au survol, curseur « main »,
+/// infobulle du côté que lui passe l'appelant (voir [`paint_actions_row`]). Rend `true` la frame
+/// où il est cliqué.
+///
+/// **`click_and_drag`**, comme les glyphes de la bande Récap et pour la même raison : un bouton qui
+/// ne sentirait que le clic laisserait le glissement à ce qui est dessous, et un appui sur le
+/// cadenas ferait partir le panneau.
+#[allow(clippy::too_many_arguments)]
+fn paint_action(
+    ui: &mut egui::Ui,
+    ds: &design::DesignSystem,
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    id: &'static str,
+    icon: design::DsIcon,
+    tooltip: &'static str,
+    side: design::TooltipSide,
+) -> bool {
+    let response = ui.interact(rect, ui.id().with(id), egui::Sense::click_and_drag());
+    let tint = if response.hovered() {
+        design::tokens::ICON_TINT_HOVER
+    } else {
+        TEXT_COLOR
+    };
+    // Le glyphe inscrit dans son carré, proportions natives gardées (`design::contain_rect`) :
+    // les icônes du jeu ne sont pas toutes carrées, et un cadenas étiré se voit.
+    let icon_rect = design::contain_rect(rect, ds.icon_native_size(icon));
+    ds.paint_icon(painter, icon_rect, icon, tint);
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    design::tooltip(&response).side(side).text(tooltip);
+    response.clicked()
 }
 
 /// Bandeau du switch Alliés/Ennemis, en tête de la colonne des PORTRAITS (échange de place avec le
 /// switch de grandeur, 2026-09-15 — voir doc de module) : même fond opacifié, même arrondi et même
 /// marge intérieure que le bandeau leader de l'autre colonne (`LEADER_PANEL_FILL`/
-/// `LEADER_PANEL_ROUNDING`/`LEADER_PANEL_PADDING`), calé sur la largeur exacte du cadre
-/// (`combat_frame::FRAME_WIDTH`) avec le switch centré — le camp affiché se choisit donc au-dessus
-/// de ce qu'il commande, les portraits.
+/// `LEADER_PANEL_ROUNDING`/`LEADER_PANEL_PADDING`) — le camp affiché se choisit donc au-dessus de
+/// ce qu'il commande, les portraits.
+///
+/// **Calé à gauche sur le cadre, plus large que lui** depuis le passage à `design::switch`
+/// (2026-09-16) : le switch fait 72px, ses marges de 6px portent le bandeau à 84px, et c'est
+/// vers la gouttière des colonnes qu'il déborde — le bord gauche du panneau reste celui du
+/// cadre. La colonne, elle, n'alloue que `FRAME_WIDTH` : le débord est peint hors allocation,
+/// sans décaler la colonne des barres, dont le bandeau commence plus bas
+/// (`BARS_COLUMN_TOP_OFFSET`).
 ///
 /// Appelée par `show` dans TOUS les cas, y compris sans combat ou camp vide (donc cadre non peint)
 /// : c'est la même exigence qu'avant le déplacement, le switch ne doit jamais devenir inatteignable.
 /// Reste aussi le TOUT PREMIER widget peint du panneau, ce dont dépend la marge supérieure réservée
 /// à son infobulle (voir `render_content::COMBAT_TOOLTIP_HEADROOM`).
-fn show_side_row(
-    ui: &mut egui::Ui,
-    icons: &UiIcons,
-    side: &mut CombatSide,
-    shortcuts: &ShortcutBindings,
-) {
+fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutBindings) {
     let row_height = SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(FRAME_WIDTH, row_height), egui::Sense::hover());
-
-    ui.painter()
-        .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
-
-    // Centré plutôt qu'aligné à gauche : le switch (2 options) est presque aussi large que le
-    // cadre, un alignement à gauche laisserait un vide asymétrique de quelques pixels à droite.
-    let switch_width = SWITCH_OPTION_WIDTH * 2.0;
-    let top_left = egui::pos2(
-        row_rect.center().x - switch_width / 2.0,
-        row_rect.min.y + LEADER_PANEL_PADDING,
+    // La combinaison RÉELLE, personnalisable comme toutes les autres (voir `ShortcutBindings`),
+    // dans l'infobulle de chaque case — le libellé de la case EST son infobulle.
+    let hotkey = shortcuts.label(ShortcutAction::CombatSide);
+    let switch = design::switch(side)
+        .slot(CombatSide::Allies, format!("Alliés ({hotkey})"))
+        .icon(design::DsIcon::Allies)
+        .slot(CombatSide::Enemies, format!("Ennemis ({hotkey})"))
+        .icon(design::DsIcon::Enemies)
+        .variant(design::SwitchVariant::FirstPlan)
+        .log_name("combat.camp");
+    let switch_size = switch.desired_size();
+    let backdrop = egui::Rect::from_min_size(
+        row_rect.min,
+        egui::vec2(switch_size.x + LEADER_PANEL_PADDING * 2.0, row_height),
     );
-    paint_side_switch(ui, top_left, side, icons, shortcuts);
+    let switch_rect = egui::Rect::from_min_size(
+        backdrop.min + egui::vec2(LEADER_PANEL_PADDING, LEADER_PANEL_PADDING),
+        switch_size,
+    );
+    // Panneau posé à droite : ce bandeau change de côté SANS que ses deux cases s'inversent —
+    // Alliés reste à gauche d'Ennemis (voir `crate::mirror`, et le retour utilisateur qui a fait
+    // naître cette règle). L'ancre est le bandeau PEINT, pas le rectangle alloué : il est plus
+    // large que le cadre et déborde vers la gouttière, et c'est ce débord qui doit se retrouver
+    // de l'autre côté.
+    crate::mirror::upright_in(ui, backdrop, |ui| {
+        ui.painter()
+            .rect_filled(backdrop, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
+        switch.show(&mut child);
+    });
 }
 
 /// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir
@@ -862,98 +1361,74 @@ fn show_side_row(
 /// (parti coiffer les portraits, voir `show_side_row`) au lieu de s'ajouter sous lui, ce qui rend au
 /// bandeau la hauteur qu'il avait avant l'arrivée de la grandeur. Il reste peint dans TOUS les cas,
 /// y compris combat vide ou camp sans combattant — la grandeur se choisit alors aussi.
+///
+/// Le bandeau déborde de `LEADER_PANEL_OVERHANG` de chaque côté de la colonne, et le total passe
+/// au corps `TOTAL_FONT_SIZE_COMPACT` au-delà de `TOTAL_FULL_SIZE_MAX_DIGITS` chiffres — les deux
+/// ensemble font tenir un total à sept chiffres à côté du switch de grandeur (voir doc de module,
+/// refonte 2026-09-16). La hauteur du bandeau ne bouge pas : c'est le switch qui la fixe.
 fn show_leader_row(
     ui: &mut egui::Ui,
-    icons: &UiIcons,
     metric: &mut CombatMetric,
     shortcuts: &ShortcutBindings,
     total_damage: i64,
 ) {
-    let total_font = text::label_font(ui.ctx(), TOTAL_FONT_SIZE);
+    let total_text = format_fr_thousands(total_damage);
+    let digits = total_text.chars().filter(char::is_ascii_digit).count();
+    let total_font_size = if digits > TOTAL_FULL_SIZE_MAX_DIGITS {
+        TOTAL_FONT_SIZE_COMPACT
+    } else {
+        TOTAL_FONT_SIZE
+    };
+    let total_font = text::label_font(ui.ctx(), total_font_size);
     let inner_height = SWITCH_HEIGHT.max(total_font.size + 2.0);
     let row_height = inner_height + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(BAR_MAX_WIDTH, row_height), egui::Sense::hover());
-
-    ui.painter()
-        .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
+    let row_rect = row_rect.expand2(egui::vec2(LEADER_PANEL_OVERHANG, 0.0));
 
     // Grandeur à gauche, total à droite, sur la même ligne : la grandeur décide de ce que raconte
     // TOUT le reste du panneau (ce total, les barres, les pourcentages sur les portraits) — la
     // poser juste à côté du chiffre qu'elle qualifie se lit d'un seul coup d'œil.
     let center_y = row_rect.min.y + LEADER_PANEL_PADDING + inner_height / 2.0;
-    let metric_rect = egui::Rect::from_min_size(
+    // Même convention d'infobulle que le switch de camp : le nom de la grandeur (ce qu'elle
+    // compte VRAIMENT, voir `CombatMetric::tooltip`) et sa combinaison.
+    let hotkey = shortcuts.label(ShortcutAction::CombatMetric);
+    let mut switch = design::switch(metric);
+    for option in CombatMetric::ALL {
+        switch = switch
+            .slot(option, format!("{} ({hotkey})", option.tooltip()))
+            .icon(option.icon());
+    }
+    let switch = switch
+        .variant(design::SwitchVariant::FirstPlan)
+        .log_name("combat.grandeur");
+    let switch_size = switch.desired_size();
+    let switch_rect = egui::Rect::from_min_size(
         egui::pos2(
             row_rect.min.x + LEADER_PANEL_PADDING,
-            center_y - SWITCH_HEIGHT / 2.0,
+            center_y - switch_size.y / 2.0,
         ),
-        egui::vec2(
-            SWITCH_OPTION_WIDTH * CombatMetric::ALL.len() as f32,
-            SWITCH_HEIGHT,
-        ),
+        switch_size,
     );
-    paint_metric_switch(ui, metric_rect, metric, icons, shortcuts);
-
-    text::paint_outlined_text(
-        ui,
-        egui::pos2(row_rect.max.x - LEADER_PANEL_PADDING, center_y),
-        egui::Align2::RIGHT_CENTER,
-        &format_fr_thousands(total_damage),
-        total_font,
-        TEXT_COLOR,
-        text::OUTLINE_FULL,
-    );
-}
-
-/// Switch de grandeur (Dégâts / Armure / Soins) — même vocabulaire visuel et même gabarit
-/// d'option que `paint_side_switch` juste au-dessus (piste `TINT_MEDIUM` bordée de `TINT_STRONG`,
-/// option active remplie d'`ACCENT`, `SWITCH_OPTION_WIDTH` × `SWITCH_HEIGHT`) : les deux switches
-/// se lisent comme un seul bloc de contrôles, l'un sous l'autre, alignés à gauche du bandeau.
-///
-/// Icônes DU JEU (voir `CombatMetric::icon`), comme le sélecteur équivalent du dépôt web — le nom
-/// de la grandeur reste accessible à l'infobulle, exactement comme pour Alliés/Ennemis.
-fn paint_metric_switch(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    metric: &mut CombatMetric,
-    icons: &UiIcons,
-    shortcuts: &ShortcutBindings,
-) {
-    let painter = ui.painter();
-    painter.rect_filled(rect, 5.0, TINT_MEDIUM);
-    painter.rect_stroke(
-        rect,
-        5.0,
-        egui::Stroke::new(1.0, TINT_STRONG),
-        egui::StrokeKind::Inside,
-    );
-
-    let option_width = rect.width() / CombatMetric::ALL.len() as f32;
-    // La combinaison RÉELLE, personnalisable comme toutes les autres (voir `ShortcutBindings`) —
-    // même convention que l'infobulle du switch Alliés/Ennemis juste au-dessus.
-    let metric_hotkey = shortcuts.label(ShortcutAction::CombatMetric);
-    for (i, option) in CombatMetric::ALL.into_iter().enumerate() {
-        let option_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.min.x + option_width * i as f32, rect.min.y),
-            egui::vec2(option_width, rect.height()),
+    // Panneau posé à droite : le bandeau change de côté, sa LIGNE ne change pas — le switch de
+    // grandeur reste à gauche du total qu'il qualifie, et ses trois cases dans l'ordre Dégâts,
+    // Armure, Soins (voir `crate::mirror`). Un bloc pour le bandeau entier, ancré sur lui : fond,
+    // switch et total se déplacent ensemble.
+    crate::mirror::upright_in(ui, row_rect, |ui| {
+        ui.painter()
+            .rect_filled(row_rect, LEADER_PANEL_ROUNDING, LEADER_PANEL_FILL);
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
+        switch.show(&mut child);
+        text::paint_outlined_text(
+            ui,
+            egui::pos2(row_rect.max.x - LEADER_PANEL_PADDING, center_y),
+            egui::Align2::RIGHT_CENTER,
+            &total_text,
+            total_font,
+            TEXT_COLOR,
+            text::OUTLINE_FULL,
         );
-        if option == *metric {
-            ui.painter()
-                .rect_filled(option_rect.shrink(1.0), 4.0, ACCENT);
-        }
-        draw_centered_icon(ui, option_rect, option.icon(icons));
-        let response = ui
-            .interact(
-                option_rect,
-                ui.id().with(("combat-metric", i)),
-                egui::Sense::click(),
-            )
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
-        design::tooltip(&response).text(format!("{} ({metric_hotkey})", option.tooltip()));
-        if response.clicked() {
-            *metric = option;
-        }
-    }
+    });
 }
 
 /// Texture résolue pour un combattant — voir `resolve_fighter_texture`. Distingue les deux
@@ -980,6 +1455,15 @@ pub(crate) enum FighterPortrait {
 /// générique — un ennemi n'a jamais de `class_name` (`breed` non déterministe côté ennemi, voir
 /// `overlay_engine::class_breed`) — d'où cette extraction, plutôt que dupliquer la résolution
 /// catalogue/icône distante dans les deux modules de cadre.
+/// La texture d'un portrait **avec sa taille native** — ce que `design::portrait` demande depuis le
+/// 2026-09-17 pour peindre à son rapport : un portrait de classe est carré, mais une icône de
+/// monstre servie par `wakassets/monsterIllustrations` est une bannière rectangulaire, et elle
+/// était étirée dans le médaillon (« les images provenant de `wakassets/monsterIllustrations` sont
+/// déformées »).
+pub(crate) fn sized(texture: &egui::TextureHandle) -> egui::load::SizedTexture {
+    egui::load::SizedTexture::from_handle(texture)
+}
+
 pub(crate) fn resolve_fighter_texture(
     ui: &egui::Ui,
     portraits: &PortraitAtlas,
@@ -1030,19 +1514,23 @@ fn paint_flat_portrait(
     // qu'un portrait de classe a sa version grise précalculée dans l'atlas, et qu'une icône
     // distante ou le repli n'en ont pas.
     let (texture, dimmed) = match &portrait {
-        Some(FighterPortrait::ClassPortrait(texture)) => (texture.id(), false),
-        Some(FighterPortrait::RemoteMonster(texture)) => (texture.id(), fighter.is_ko),
-        None => (icons.unknown_entity_texture().id(), fighter.is_ko),
+        Some(FighterPortrait::ClassPortrait(texture)) => (sized(texture), false),
+        Some(FighterPortrait::RemoteMonster(texture)) => (sized(texture), fighter.is_ko),
+        None => (sized(icons.unknown_entity_texture()), fighter.is_ko),
     };
-    let response = ui.add(
-        design::portrait(texture)
-            .size(crate::portraits::PORTRAIT_SIZE)
-            .dimmed(dimmed)
-            .percent({
-                let value = metric.value_of(fighter);
-                (value > 0).then(|| design::portrait_percent(value, total_damage))
-            }),
-    );
+    // Panneau posé à droite : un portrait et son pourcentage changent de place, jamais de sens —
+    // une image retournée n'est pas ce qui a été demandé (voir `crate::mirror`).
+    let response = crate::mirror::upright(ui, |ui| {
+        ui.add(
+            design::portrait(texture)
+                .size(crate::portraits::PORTRAIT_SIZE)
+                .dimmed(dimmed)
+                .percent({
+                    let value = metric.value_of(fighter);
+                    (value > 0).then(|| design::portrait_percent(value, total_damage))
+                }),
+        )
+    });
     design::tooltip(&response).text(fighter.name.as_str());
 }
 
@@ -1079,6 +1567,23 @@ pub(super) fn damage_group_height(ui: &egui::Ui) -> f32 {
 /// entre la barre et la ligne du dessus », déjà réduit une 1re fois via `GROUP_NAME_BAR_GAP` —
 /// le reste venait de cette marge, retirée).
 pub(super) fn paint_damage_bar_group(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    name: &str,
+    damage: i64,
+    total_damage: i64,
+    opacity: &dyn Fn(egui::Rect) -> f32,
+) {
+    // Panneau posé à droite : le groupe change de côté, sa LIGNE ne change pas — le nom reste à
+    // gauche, le chiffre qui le qualifie à droite, et la barre se remplit toujours depuis la
+    // gauche (voir `crate::mirror`). Ancré sur `rect`, l'emplacement du groupe, pour que tous
+    // s'alignent entre eux quelle que soit la longueur du nom.
+    crate::mirror::upright_in(ui, rect, |ui| {
+        paint_damage_bar_group_inner(ui, rect, name, damage, total_damage, opacity);
+    });
+}
+
+fn paint_damage_bar_group_inner(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     name: &str,
@@ -1156,7 +1661,7 @@ fn damage_bar(ui: &mut egui::Ui, rect: egui::Rect, damage: i64, total_damage: i6
 /// de retour à la ligne malvenu ici : ce texte est TOUJOURS peint directement via `Painter::text`
 /// (voir `design::text::paint_outlined_text`), jamais mis en page par un widget qui pourrait
 /// le scinder.
-fn format_fr_thousands(n: i64) -> String {
+pub(crate) fn format_fr_thousands(n: i64) -> String {
     let sign = if n < 0 { "-" } else { "" };
     let digits = n.unsigned_abs().to_string();
     let grouped: String = digits
@@ -1171,81 +1676,11 @@ fn format_fr_thousands(n: i64) -> String {
 
 // La doc de `show_tooltip_above` tenait ici : quatre retours utilisateur sur le placement d'une
 // infobulle et l'ordre de ses replis. Elle est partie avec la fonction le 2026-09-11, dans
-// `design::tooltip`, qui la porte intégralement — y compris le cas du switch ci-dessous, seul
-// widget de l'interface à n'avoir RÉELLEMENT aucune place au-dessus de lui, et dont la réponse
-// n'est pas un repli mais `render_content::COMBAT_TOP_MARGIN`.
-
-/// Switch à deux icônes (alliés/ennemis) avec fond glissant — même mécanique que `.icon-switch` du
-/// dépôt web (`styles.css`), portée en dessin egui direct (peintre + zones cliquables) puisqu'il
-/// n'y a pas de CSS ici pour l'obtenir gratuitement. Peint à un `top_left` donné, SANS allocation
-/// via `ui.allocate_exact_size` (même logique que `paint_icon_button`) — depuis la refonte 11e
-/// retour, ce switch est logé dans la ligne leader (`show_leader_row`) à la place de l'ancien
-/// bouton lien externe, retour utilisateur explicite (« meilleur emplacement que là où est le
-/// switch actuellement ») ; l'ancienne rangée pleine largeur en tête de panneau (qui s'allouait
-/// elle-même son espace) a disparu.
-fn paint_side_switch(
-    ui: &mut egui::Ui,
-    top_left: egui::Pos2,
-    side: &mut CombatSide,
-    icons: &UiIcons,
-    shortcuts: &ShortcutBindings,
-) {
-    let option_size = egui::vec2(SWITCH_OPTION_WIDTH, SWITCH_HEIGHT);
-    let allies_rect = egui::Rect::from_min_size(top_left, option_size);
-    let enemies_rect =
-        egui::Rect::from_min_size(top_left + egui::vec2(option_size.x, 0.0), option_size);
-    let rect = allies_rect.union(enemies_rect);
-
-    let painter = ui.painter();
-    painter.rect_filled(rect, 5.0, TINT_MEDIUM);
-    painter.rect_stroke(
-        rect,
-        5.0,
-        egui::Stroke::new(1.0, TINT_STRONG),
-        egui::StrokeKind::Inside,
-    );
-    let highlight_rect = if *side == CombatSide::Allies {
-        allies_rect
-    } else {
-        enemies_rect
-    };
-    painter.rect_filled(highlight_rect.shrink(1.0), 4.0, ACCENT);
-
-    draw_centered_icon(ui, allies_rect, icons.allies());
-    draw_centered_icon(ui, enemies_rect, icons.enemies());
-
-    let allies_response = ui
-        .interact(
-            allies_rect,
-            ui.id().with("combat-side-allies"),
-            egui::Sense::click(),
-        )
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    let side_hotkey = shortcuts.label(ShortcutAction::CombatSide);
-    design::tooltip(&allies_response).text(format!("Alliés ({side_hotkey})"));
-    let enemies_response = ui
-        .interact(
-            enemies_rect,
-            ui.id().with("combat-side-enemies"),
-            egui::Sense::click(),
-        )
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    design::tooltip(&enemies_response).text(format!("Ennemis ({side_hotkey})"));
-    if allies_response.clicked() {
-        *side = CombatSide::Allies;
-    }
-    if enemies_response.clicked() {
-        *side = CombatSide::Enemies;
-    }
-}
-
-fn draw_centered_icon(ui: &egui::Ui, rect: egui::Rect, texture: &egui::TextureHandle) {
-    let icon_rect = egui::Rect::from_center_size(
-        rect.center(),
-        egui::vec2(SWITCH_ICON_SIZE, SWITCH_ICON_SIZE),
-    );
-    egui::Image::new(texture).paint_at(ui, icon_rect);
-}
+// `design::tooltip`, qui la porte intégralement — y compris le cas du switch de camp, seul widget
+// de l'interface à n'avoir RÉELLEMENT aucune place au-dessus de lui, et dont la réponse n'est pas
+// un repli mais `render_content::COMBAT_TOP_MARGIN`. Les deux switches eux-mêmes
+// (`paint_side_switch`, `paint_metric_switch`, ex-`.icon-switch` du dépôt web porté en dessin
+// egui direct) sont partis le 2026-09-16 dans `design::switch` — voir doc de module.
 
 /// Le panneau Combat doit-il être affiché pour ce personnage ? — demande du 2026-09-13.
 ///
@@ -1259,14 +1694,26 @@ fn draw_centered_icon(ui: &egui::Ui, rect: egui::Rect, texture: &egui::TextureHa
 /// affiché après la victoire) : se contenter de `is_some()` laisserait donc le panneau ouvert
 /// jusqu'au combat suivant, exactement ce que ce réglage doit éviter.
 ///
-/// Vit ici, et pas dans les deux hôtes qui l'appliquent (`main.rs`/`bin/overlay-ui-x11.rs`, où le
-/// fenêtrage OS est délibérément dupliqué — voir la doc de `lib.rs`) : c'est une règle du panneau
-/// Combat, la même sous Windows et sous X11, et elle se teste sans fenêtre.
-pub fn should_show(snapshot: &SessionSnapshot, character_name: &str, always_visible: bool) -> bool {
-    always_visible
-        || snapshot
-            .fight_for_character(character_name)
-            .is_some_and(|fight| fight.ongoing)
+/// **`enabled == false` masque en toute circonstance** — case « Activer le détail des combats »
+/// décochée (2026-09-15, `panels::feature_switch::FeatureToggles::combat`) : la fonctionnalité
+/// entière est coupée, et une case d'encombrement (`always_visible`) ne peut pas rallumer un
+/// panneau que son interrupteur éteint. C'est la raison de l'ordre des deux tests ci-dessous.
+///
+/// Vit ici, et pas dans les deux hôtes qui l'appliquent
+/// (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`, où le fenêtrage OS est délibérément dupliqué —
+/// voir la doc de `lib.rs`) : c'est une règle du panneau Combat, la même sous Windows et sous X11,
+/// et elle se teste sans fenêtre.
+pub fn should_show(
+    snapshot: &SessionSnapshot,
+    character_name: &str,
+    always_visible: bool,
+    enabled: bool,
+) -> bool {
+    enabled
+        && (always_visible
+            || snapshot
+                .fight_for_character(character_name)
+                .is_some_and(|fight| fight.ongoing))
 }
 
 #[cfg(test)]
@@ -1312,13 +1759,13 @@ mod tests {
 
     #[test]
     fn masque_hors_combat_quand_l_option_est_decochee() {
-        assert!(!should_show(&session(Vec::new()), "Oumbra", false));
+        assert!(!should_show(&session(Vec::new()), "Oumbra", false, true));
     }
 
     #[test]
     fn affiche_pendant_un_combat_en_cours() {
         let snapshot = session(vec![combat_de("Oumbra", true)]);
-        assert!(should_show(&snapshot, "Oumbra", false));
+        assert!(should_show(&snapshot, "Oumbra", false, true));
     }
 
     #[test]
@@ -1326,21 +1773,33 @@ mod tests {
         // Le combat reste dans le snapshot une fois fini (c'est lui que `fight_for_character` rend
         // alors) : c'est exactement le cas que `is_some()` aurait raté.
         let snapshot = session(vec![combat_de("Oumbra", false)]);
-        assert!(!should_show(&snapshot, "Oumbra", false));
+        assert!(!should_show(&snapshot, "Oumbra", false, true));
     }
 
     #[test]
     fn ignore_le_combat_d_un_autre_personnage() {
         // Multi-compte : chaque fenêtre suit SON personnage, jamais le combat du voisin.
         let snapshot = session(vec![combat_de("Oumbra", true)]);
-        assert!(!should_show(&snapshot, "Kaelis", false));
+        assert!(!should_show(&snapshot, "Kaelis", false, true));
     }
 
     #[test]
     fn l_option_cochee_affiche_en_toute_circonstance() {
-        assert!(should_show(&session(Vec::new()), "Oumbra", true));
+        assert!(should_show(&session(Vec::new()), "Oumbra", true, true));
         let termine = session(vec![combat_de("Oumbra", false)]);
-        assert!(should_show(&termine, "Oumbra", true));
+        assert!(should_show(&termine, "Oumbra", true, true));
+    }
+
+    /// « Activer le détail des combats » décoché : rien ne s'affiche, pas même pendant un combat
+    /// en cours — et l'affichage permanent, qui coche pourtant « en toute circonstance » ci-dessus,
+    /// ne le rattrape pas. C'est l'interrupteur de la fonctionnalité, pas un réglage
+    /// d'encombrement.
+    #[test]
+    fn le_detail_des_combats_coupe_masque_meme_en_combat() {
+        let en_cours = session(vec![combat_de("Oumbra", true)]);
+        assert!(!should_show(&en_cours, "Oumbra", false, false));
+        assert!(!should_show(&en_cours, "Oumbra", true, false));
+        assert!(!should_show(&session(Vec::new()), "Oumbra", true, false));
     }
 
     #[test]

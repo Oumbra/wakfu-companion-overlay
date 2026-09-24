@@ -8,23 +8,34 @@ pub mod icon_cache;
 pub mod pairing;
 pub mod queue;
 pub mod reference_data_cache;
+pub mod session;
 pub mod token_store;
 pub mod update;
 
 pub use client::{
     fetch_account_id, fetch_catalog_index, fetch_catalog_version, fetch_dungeons,
-    fetch_item_detail, fetch_monster_families, fetch_settings, patch_chat_filters,
-    patch_json_authenticated, patch_watchlist, post_json, post_json_authenticated, AccountSettings,
+    fetch_game_servers, fetch_item_detail, fetch_monster_families, fetch_settings,
+    patch_chat_filters, patch_json_authenticated, patch_roster, patch_watchlist, post_json,
+    post_json_authenticated, AccountSettings,
 };
 pub use pairing::{pair_and_wait, PairingHandle};
-pub use queue::{client_key, FlushOutcome, SyncQueue};
+pub use queue::{client_key, FlushOutcome, SyncQueue, MAX_PENDING_AGE};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {
     #[error("erreur réseau : {0}")]
     Network(String),
-    #[error("réponse HTTP {status} inattendue pour {path}")]
-    Http { status: u16, path: String },
+    /// Réponse non 2xx. `code` est le champ `code` du corps JSON d'erreur quand le serveur en pose
+    /// un (`history_quota_exceeded`, `browser_session_required`, `rate_limited`…) ; `retry_after`
+    /// l'en-tête `Retry-After` interprété (secondes ou date HTTP, plafonné — voir
+    /// `client::parse_retry_after`). Les deux pilotent la file d'envoi (`queue::flush_once`).
+    #[error("réponse HTTP {status} inattendue pour {path}{}", code.as_deref().map(|c| format!(" ({c})")).unwrap_or_default())]
+    Http {
+        status: u16,
+        path: String,
+        code: Option<String>,
+        retry_after: Option<std::time::Duration>,
+    },
     #[error("réponse JSON invalide : {0}")]
     Json(String),
     #[error("l'appairage a expiré avant confirmation")]
@@ -35,4 +46,8 @@ pub enum SyncError {
     PairingCancelled,
     #[error("erreur d'accès au trousseau/fichier de jeton : {0}")]
     TokenStore(String),
+    /// Route réservée à l'overlay appelée sans session publiée (voir `session`) — l'appelant
+    /// garde son cache ou son repli ; ce n'est ni une panne réseau ni un refus du serveur.
+    #[error("aucune session : jeton non encore disponible")]
+    NoSession,
 }

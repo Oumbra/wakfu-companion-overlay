@@ -12,6 +12,11 @@
 //! - `capture` / `notify` (Windows seulement) — `PrintWindow` de la bande basse d'une fenêtre, et
 //!   le toast système. Le binaire X11 compile sans eux : l'option y est sans effet, et le dit.
 
+/// Nom du journal du process de reprise de focus, dans le dossier de
+/// [`templates::data_dir`] — écrit par `notify::focus_window` (Windows seulement : ce process n'a
+/// pas de `tracing`, voir sa doc), et effacé par `crate::local_data` avec les autres journaux.
+pub const FOCUS_LOG: &str = "focus.log";
+
 pub mod templates;
 pub mod vision;
 pub mod watcher;

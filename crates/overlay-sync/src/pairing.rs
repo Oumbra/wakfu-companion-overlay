@@ -49,7 +49,49 @@ pub struct PairingHandle {
 
 fn start_pairing() -> Result<PairResponse, SyncError> {
     let value = post_json("/api/v1/auth/native/pair", &json!({}))?;
-    serde_json::from_value(value).map_err(|err| SyncError::Json(err.to_string()))
+    let mut started: PairResponse =
+        serde_json::from_value(value).map_err(|err| SyncError::Json(err.to_string()))?;
+    if !is_valid_pairing_code(&started.pairing_code) {
+        return Err(SyncError::Json(format!(
+            "code d'appairage inattendu : {:?}",
+            started.pairing_code
+        )));
+    }
+    started.verification_url = trusted_verification_url(
+        &crate::client::base_url(),
+        &started.verification_url,
+        &started.pairing_code,
+    );
+    Ok(started)
+}
+
+/// Code court affiché à l'utilisateur : quelques caractères alphanumériques ASCII, rien d'autre.
+fn is_valid_pairing_code(code: &str) -> bool {
+    (4..=16).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// URL que l'overlay acceptera d'ouvrir dans le navigateur (`open::that`) : celle du serveur
+/// seulement si elle est sur l'origine de l'API, sinon reconstruite à partir du code.
+///
+/// Sous Windows, `open::that` passe par `ShellExecuteW`, qui ouvre ou EXÉCUTE n'importe quelle
+/// cible (`\\hôte\partage\x.exe`, `file:///…`). Faire confiance à `verificationUrl` aurait
+/// transformé une API compromise (ou une réponse interceptée) en exécution de code chez chaque
+/// client en cours d'appairage — exactement ce que la signature des mises à jour cherche à
+/// empêcher par ailleurs (audit de sécurité du 2026-09-23).
+fn trusted_verification_url(base_url: &str, served: &str, pairing_code: &str) -> String {
+    let base = base_url.trim_end_matches('/');
+    let prefix = format!("{base}/");
+    let safe_chars = served
+        .bytes()
+        .all(|b| b.is_ascii_graphic() && !matches!(b, b'\\' | b'"' | b'<' | b'>' | b'`'));
+    if served.starts_with(&prefix) && safe_chars {
+        return served.to_string();
+    }
+    tracing::warn!(
+        served,
+        "URL de vérification hors de l'origine de l'API : reconstruite"
+    );
+    format!("{base}/pair?code={pairing_code}")
 }
 
 fn poll_once(poll_token: &str) -> Result<PollResponse, SyncError> {
@@ -108,5 +150,48 @@ pub fn pair_and_wait(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+
+    const BASE: &str = "https://wakfu-companion.com";
+
+    #[test]
+    fn garde_l_url_du_serveur_sur_la_meme_origine() {
+        assert_eq!(
+            trusted_verification_url(
+                BASE,
+                "https://wakfu-companion.com/pair?code=ABCD2345",
+                "ABCD2345"
+            ),
+            "https://wakfu-companion.com/pair?code=ABCD2345"
+        );
+    }
+
+    #[test]
+    fn reconstruit_toute_url_hors_origine_ou_suspecte() {
+        for served in [
+            "\\\\attaquant\\partage\\x.exe",
+            "file:///C:/Windows/System32/calc.exe",
+            "https://wakfu-companion.com.evil.example/pair",
+            "https://evil.example/?https://wakfu-companion.com/",
+            "https://wakfu-companion.com/pair?code=A B",
+        ] {
+            assert_eq!(
+                trusted_verification_url(BASE, served, "ABCD2345"),
+                "https://wakfu-companion.com/pair?code=ABCD2345",
+                "{served}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuse_un_code_d_appairage_exotique() {
+        assert!(is_valid_pairing_code("ABCD2345"));
+        assert!(!is_valid_pairing_code("AB"));
+        assert!(!is_valid_pairing_code("ABCD&calc"));
     }
 }

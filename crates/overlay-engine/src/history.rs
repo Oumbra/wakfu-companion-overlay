@@ -40,6 +40,7 @@ pub enum HistoryEventKind {
     Fight,
     Purchase,
     Trade,
+    Pact,
 }
 
 impl HistoryEventKind {
@@ -48,6 +49,7 @@ impl HistoryEventKind {
             HistoryEventKind::Fight => "fight",
             HistoryEventKind::Purchase => "purchase",
             HistoryEventKind::Trade => "trade",
+            HistoryEventKind::Pact => "pact",
         }
     }
 
@@ -57,6 +59,7 @@ impl HistoryEventKind {
             HistoryEventKind::Fight => "/api/v1/history/fights",
             HistoryEventKind::Purchase => "/api/v1/history/purchases",
             HistoryEventKind::Trade => "/api/v1/history/trades",
+            HistoryEventKind::Pact => "/api/v1/history/pacts",
         }
     }
 
@@ -65,6 +68,7 @@ impl HistoryEventKind {
             "fight" => Some(HistoryEventKind::Fight),
             "purchase" => Some(HistoryEventKind::Purchase),
             "trade" => Some(HistoryEventKind::Trade),
+            "pact" => Some(HistoryEventKind::Pact),
             _ => None,
         }
     }
@@ -217,12 +221,34 @@ pub struct TradePayload {
     pub items: Vec<TradeItemPayload>,
 }
 
+/// `item_id`/`item_name` mutuellement exclusifs — voir `FightLootPayload`. Pas de coût
+/// contrairement à `PurchasePayload` : une extraction de pacte n'a pas de prix. Miroir de
+/// `PactExtractionItemPayload` (`history-event.model.ts`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PactExtractionItemPayload {
+    pub item_id: Option<i64>,
+    pub item_name: Option<String>,
+    pub quantity: i64,
+}
+
+/// Miroir de `PactExtractionPayload` (`history-event.model.ts`) : ni prix, ni combat d'origine —
+/// juste un horodatage et une liste d'objets/quantités.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PactExtractionPayload {
+    pub occurred_at: String,
+    pub game_server: Option<String>,
+    pub items: Vec<PactExtractionItemPayload>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum HistoryPayload {
     Fight(FightPayload),
     Purchase(PurchasePayload),
     Trade(TradePayload),
+    PactExtraction(PactExtractionPayload),
 }
 
 /// Un événement prêt à mettre en file — voir `overlay_sync::queue::SyncQueue::enqueue`.
@@ -263,6 +289,17 @@ pub fn fight_signature(
 /// Miroir de `purchaseSignature`.
 pub fn purchase_signature(time: &str, item: &str, quantity: i64, total_cost: i64) -> String {
     format!("{time}|{}|{quantity}|{total_cost}", normalize(item))
+}
+
+/// Miroir de `pactExtractionSignature` : les objets/quantités normalisés puis triés, sans coût
+/// (voir `PactExtractionPayload`) contrairement à `purchase_signature`.
+pub fn pact_extraction_signature(time: &str, items: &[(String, i64)]) -> String {
+    let mut parts: Vec<String> = items
+        .iter()
+        .map(|(name, quantity)| format!("{}x{quantity}", normalize(name)))
+        .collect();
+    parts.sort();
+    format!("{time}|{}", parts.join(","))
 }
 
 /// Miroir de `tradeSignature`.
@@ -320,6 +357,32 @@ mod tests {
     fn purchase_signature_matches_ts_formula() {
         let sig = purchase_signature("10:00:00,000", "  Eclat de Wakfu ", 3, 1500);
         assert_eq!(sig, "10:00:00,000|eclat de wakfu|3|1500");
+    }
+
+    /// Vecteur recalculé à la main depuis `pactExtractionSignature` (`history-event.model.ts`) :
+    /// objets normalisés (`trim`+minuscules), formatés `nomxquantité`, puis triés — l'ordre de
+    /// ramassage ne doit jamais changer la signature, sans quoi la même extraction réenvoyée par
+    /// le web et par l'overlay produirait deux `clientKey` distincts (donc un doublon en base).
+    #[test]
+    fn pact_extraction_signature_matches_ts_formula() {
+        let sig = pact_extraction_signature(
+            "10:00:00,000",
+            &[
+                ("  Pierre de Vitesse ".to_string(), 2),
+                ("Eclat de Wakfu".to_string(), 48),
+            ],
+        );
+        assert_eq!(sig, "10:00:00,000|eclat de wakfux48,pierre de vitessex2");
+
+        // Même lot, ordre de ramassage inverse : signature identique.
+        let reversed = pact_extraction_signature(
+            "10:00:00,000",
+            &[
+                ("Eclat de Wakfu".to_string(), 48),
+                ("Pierre de Vitesse".to_string(), 2),
+            ],
+        );
+        assert_eq!(sig, reversed);
     }
 
     #[test]

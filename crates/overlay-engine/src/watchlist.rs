@@ -37,18 +37,43 @@ pub enum WatchlistKind {
     Item,
 }
 
-/// Miroir de `WatchlistCounterMode` — 'up' compte vers le haut depuis 0, 'down' décompte depuis
-/// `countdown_target` vers 0 (borné, jamais négatif — voir `WatchlistState::increment`).
+/// Miroir de `WatchlistCounterMode` — 'up' compte vers le haut depuis 0 sans borne, 'down'
+/// décompte depuis `countdown_target` vers 0 (borné, jamais négatif), 'goal' (objectif,
+/// 2026-09-17) monte depuis 0 vers `countdown_target` (borné, jamais au-delà) — voir
+/// `WatchlistState::increment`. Les deux modes à cible partagent le champ `countdown_target`
+/// (nom historique du JSON du compte, commun avec le web) : seule la LECTURE du compteur change,
+/// « ce qu'il reste » en décompte, « ce qui est fait » en objectif.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WatchlistMode {
     Up,
     Down,
+    Goal,
 }
 
-/// Émis par `WatchlistState::apply` quand un décompte (mode `down`) vient d'atteindre 0 — §9 du
-/// plan, « Alertes de drop » : « toast + son quand un objet suivi tombe ». Miroir minimal de
-/// `LootAlertEvent` (`loot-alert.service.ts`), réduit au seul cas `reason: 'countdown'` : le cas
+impl WatchlistMode {
+    /// Vrai pour les deux modes qui visent une cible (`Down` et `Goal`) — c'est ce test, et non
+    /// `== Down`, qu'un affichage « courant/cible » ou un bornage à la cible doit faire.
+    pub fn has_target(self) -> bool {
+        matches!(self, WatchlistMode::Down | WatchlistMode::Goal)
+    }
+}
+
+/// Ce qu'un [`WatchlistAlert`] annonce — le compteur est arrivé au bout de son échelle, dans un
+/// sens ou dans l'autre. Même son dans les deux cas (`alert_sound::play_countdown_alert`), seul
+/// le titre de la carte change (`panels::watchlist::WatchlistToastReason`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchlistAlertReason {
+    /// Un décompte (mode `down`) vient d'atteindre 0.
+    Countdown,
+    /// Un objectif (mode `goal`) vient d'atteindre sa cible.
+    Goal,
+}
+
+/// Émis par `WatchlistState::apply` quand un décompte (mode `down`) vient d'atteindre 0 ou qu'un
+/// objectif (mode `goal`) vient d'atteindre sa cible — §9 du plan, « Alertes de drop » :
+/// « toast + son quand un objet suivi tombe ». Miroir minimal de `LootAlertEvent`
+/// (`loot-alert.service.ts`), réduit aux cas `reason: 'countdown' | 'goal'` : le cas
 /// `reason: 'loot'` (son configurable par objet ramassé, indépendant de la watchlist — voir
 /// `ProfileService.findEnabledSoundItem`) est couvert séparément par `overlay_engine::profile::
 /// LootAlert`.
@@ -56,6 +81,7 @@ pub enum WatchlistMode {
 pub struct WatchlistAlert {
     pub name: String,
     pub kind: WatchlistKind,
+    pub reason: WatchlistAlertReason,
     /// Repris de `WatchlistEntry::catalog_id` de l'entrée qui vient de déclencher l'alerte —
     /// résolution non ambiguë de l'icône affichée par le toast (`panels::watchlist`) en cas
     /// d'homonymes, même principe que `LootAlert::catalog_id`.
@@ -91,7 +117,7 @@ const APP_NAME: &str = "wakfu-companion-overlay-test";
 /// construction ; les tests de ce module passent un chemin de fichier temporaire explicite à
 /// `load_from`/`save_to` plutôt que de dépendre de celui-ci.
 pub fn default_store_path() -> PathBuf {
-    directories::ProjectDirs::from("", "", APP_NAME)
+    crate::app_dirs::project_dirs(APP_NAME)
         .map(|dirs| dirs.data_dir().join("watchlist-counts.json"))
         .unwrap_or_else(|| PathBuf::from("watchlist-counts.json"))
 }
@@ -123,12 +149,12 @@ fn save_to(path: &Path, counts: &PersistedCounts) {
     };
     if let Some(parent) = path.parent() {
         if std::fs::create_dir_all(parent).is_err() {
-            tracing::warn!(path = %path.display(), "impossible de créer le dossier des compteurs de suivi");
+            tracing::warn!(path = %overlay_ingest::privacy::redact_path(path), "impossible de créer le dossier des compteurs de suivi");
             return;
         }
     }
     if let Err(err) = std::fs::write(path, json) {
-        tracing::warn!(path = %path.display(), %err, "impossible d'écrire les compteurs de suivi (perdus au redémarrage)");
+        tracing::warn!(path = %overlay_ingest::privacy::redact_path(path), %err, "impossible d'écrire les compteurs de suivi (perdus au redémarrage)");
     }
 }
 
@@ -177,18 +203,37 @@ impl WatchlistState {
     pub fn merge_config(&mut self, incoming: Vec<WatchlistEntry>) {
         let persisted = load_from(&self.store_path);
         let mut needs_catchup = false;
+        // Voir plus bas : au moins un compteur local périmé, fichier à réécrire.
+        let mut stale = false;
         self.entries = incoming
             .into_iter()
             .map(|mut entry| {
                 if let Some(&count) = persisted.by_key.get(&counter_key(&entry.name, entry.kind)) {
-                    if count != entry.count {
-                        needs_catchup = true;
+                    // **Un compteur local au-delà de la cible est PÉRIMÉ, pas en avance**
+                    // (2026-09-15). En décompte comme en objectif, `count` est une position sur
+                    // l'échelle `[0, countdown_target]` : le voir dépasser la cible que le compte annonce ne
+                    // veut dire qu'une chose — la cible a été redéfinie ailleurs (sur le site,
+                    // typiquement 50 → 10) et ce nombre-là se lisait sur l'ancienne. Le reprendre
+                    // afficherait un « 50/10 » qui ne veut rien dire, la même incohérence que celle
+                    // fermée dans `apply_definitions`, par l'autre bout. C'est alors le compte qui
+                    // fait foi, et le fichier est réécrit pour ne pas y retomber au prochain
+                    // démarrage (`stale`).
+                    let perime = entry.mode.has_target() && count > entry.countdown_target;
+                    if perime {
+                        stale = true;
+                    } else {
+                        if count != entry.count {
+                            needs_catchup = true;
+                        }
+                        entry.count = count;
                     }
-                    entry.count = count;
                 }
                 entry
             })
             .collect();
+        if stale {
+            self.persist();
+        }
         if needs_catchup {
             self.dirty = true;
         }
@@ -214,7 +259,8 @@ impl WatchlistState {
     }
 
     /// **Remplace les DÉFINITIONS suivies par celles d'un brouillon, en gardant les compteurs
-    /// vivants** — ce que « Valider » de l'onglet « Suivi » produit (2026-09-13).
+    /// vivants dont la définition n'a pas bougé** — ce que « Valider » de l'onglet « Suivi »
+    /// produit (2026-09-13).
     ///
     /// Une définition est tout ce qui se règle dans la fenêtre : nom, genre, mode, cible et
     /// `catalog_id`. Le `count` des entrées passées est **ignoré**, et c'est le cœur de cette
@@ -223,27 +269,47 @@ impl WatchlistState {
     /// ramassage — le compteur qui fait foi est celui d'ici, pas celui du brouillon.
     ///
     /// Une entrée que le brouillon **ajoute** part de la valeur que son mode impose : `countdown_
-    /// target` en décompte (il décroît vers 0), 0 en incrémental. Une entrée que le brouillon
-    /// **retire** disparaît, compteur compris. Une entrée **conservée** garde le sien, même si son
-    /// mode ou sa cible ont changé — c'est ce que fait déjà `merge_config` quand le compte répond.
+    /// target` en décompte (il décroît vers 0), 0 en incrémental et en objectif (il monte). Une
+    /// entrée que le brouillon **retire** disparaît, compteur compris.
+    ///
+    /// ## Ce qui fait qu'une entrée est « la même », et donc garde son compteur
+    ///
+    /// Corrigé le 2026-09-15 sur retour utilisateur — « je crée un décompte sur l'Amulette du
+    /// Bouftou à 50, je le supprime, je le recrée à 10, et il affiche 50/10 ». Deux trous, les deux
+    /// fermés ici :
+    ///
+    /// 1. **Le comptage lui-même redéfini** (`compteur_reporte`). `count` n'est pas une quantité
+    ///    libre : c'est une position sur l'échelle que le mode et la cible décrivent. Changer de
+    ///    mode la détruit — le compteur repart de ce que le nouveau mode impose. Changer la cible
+    ///    d'un décompte la remplace : ce qui se reporte alors est ce qui a déjà été RAMASSÉ, pas ce
+    ///    qu'il restait, et un décompte neuf à 50 recréé à 10 donne donc bien 10/10 et non 50/10.
+    ///    L'invariant `count <= countdown_target`, que ce 50/10 violait, tient désormais par
+    ///    construction.
+    /// 2. **L'entrée retirée puis recréée dans le MÊME brouillon** (`retirees`). Rien ne la
+    ///    distingue autrement d'une entrée conservée — même nom, même genre — alors que
+    ///    l'utilisateur, lui, a bien supprimé la précédente : son compteur est parti avec elle, et
+    ///    celle qui revient est neuve, même à cible identique. Une suppression que « Annuler »
+    ///    rattrape n'arrive jamais jusqu'ici, la fenêtre étant transactionnelle.
     ///
     /// Marque l'état `dirty` : le prochain `drain_pending_sync` enverra la liste au compte.
-    pub fn apply_definitions(&mut self, definitions: Vec<WatchlistEntry>) {
+    pub fn apply_definitions(
+        &mut self,
+        definitions: Vec<WatchlistEntry>,
+        retirees: &[WatchlistEntry],
+    ) {
         self.entries = definitions
             .into_iter()
             .map(|mut definition| {
+                let retiree_pendant_l_edition = retirees
+                    .iter()
+                    .any(|retiree| meme_entree(retiree, &definition));
                 definition.count = self
                     .entries
                     .iter()
-                    .find(|existante| {
-                        existante.kind == definition.kind
-                            && existante.name.eq_ignore_ascii_case(&definition.name)
-                    })
-                    .map(|existante| existante.count)
-                    .unwrap_or(match definition.mode {
-                        WatchlistMode::Down => definition.countdown_target,
-                        WatchlistMode::Up => 0,
-                    });
+                    .find(|existante| meme_entree(existante, &definition))
+                    .filter(|_| !retiree_pendant_l_edition)
+                    .and_then(|existante| compteur_reporte(existante, &definition))
+                    .unwrap_or_else(|| compteur_de_depart(&definition));
                 definition
             })
             .collect();
@@ -257,7 +323,7 @@ impl WatchlistState {
     /// notion de rattrapage en cours, exactement comme `roster` sur `Engine`. Renvoie les alertes
     /// (voir `WatchlistAlert`) déclenchées par CET événement, à faire remonter à l'hôte (toast +
     /// son) — vide dans l'immense majorité des cas (mode `up`, ou aucune entrée qui vient
-    /// d'atteindre 0).
+    /// d'atteindre 0 ou sa cible).
     pub fn apply(&mut self, entry: &LogEntry) -> Vec<WatchlistAlert> {
         let (changed, alerts) = match entry {
             LogEntry::Loot { item, quantity, .. } => self.increment(item, *quantity),
@@ -271,13 +337,15 @@ impl WatchlistState {
         alerts
     }
 
-    /// Incrémente (mode `up`) ou décompte vers 0 (mode `down`) TOUTE entrée dont le nom matche —
-    /// miroir exact d'`incrementWatched` : le matching se fait sur le nom SEUL, pas sur `kind`
-    /// (un objet et un ennemi de même nom incrémenteraient tous les deux, comme côté web).
-    /// Renvoie `true` si au moins une entrée a été modifiée (sert à ne persister sur disque que
-    /// quand c'est utile), et la liste des entrées qui viennent de FRANCHIR le seuil de 0 (compte
-    /// strictement positif avant, nul après) — un compte déjà à 0 qui reste à 0 n'alerte pas une
-    /// deuxième fois, miroir du `if (entry.count > 0 && next === 0)` d'`incrementWatched`.
+    /// Incrémente (mode `up`), décompte vers 0 (mode `down`) ou monte vers la cible (mode `goal`)
+    /// TOUTE entrée dont le nom matche — miroir exact d'`incrementWatched` : le matching se fait
+    /// sur le nom SEUL, pas sur `kind` (un objet et un ennemi de même nom incrémenteraient tous
+    /// les deux, comme côté web). Renvoie `true` si au moins une entrée a été modifiée (sert à ne
+    /// persister sur disque que quand c'est utile), et la liste des entrées qui viennent de
+    /// FRANCHIR le bout de leur échelle (0 en décompte : compte strictement positif avant, nul
+    /// après ; la cible en objectif : strictement en dessous avant, dessus après) — un compte
+    /// déjà au bout qui y reste n'alerte pas une deuxième fois, miroir du
+    /// `if (entry.count > 0 && next === 0)` d'`incrementWatched`.
     fn increment(&mut self, raw_name: &str, by: i64) -> (bool, Vec<WatchlistAlert>) {
         let normalized = raw_name.trim().to_lowercase();
         let mut changed = false;
@@ -295,6 +363,19 @@ impl WatchlistState {
                         alerts.push(WatchlistAlert {
                             name: entry.name.clone(),
                             kind: entry.kind,
+                            reason: WatchlistAlertReason::Countdown,
+                            catalog_id: entry.catalog_id,
+                        });
+                    }
+                }
+                WatchlistMode::Goal => {
+                    let was_below = entry.count < entry.countdown_target;
+                    entry.count = (entry.count + by).min(entry.countdown_target);
+                    if was_below && entry.count == entry.countdown_target {
+                        alerts.push(WatchlistAlert {
+                            name: entry.name.clone(),
+                            kind: entry.kind,
+                            reason: WatchlistAlertReason::Goal,
                             catalog_id: entry.catalog_id,
                         });
                     }
@@ -305,6 +386,40 @@ impl WatchlistState {
         (changed, alerts)
     }
 
+    /// **Remet le compteur d'une entrée à sa valeur de départ** — le bouton de réinitialisation
+    /// d'une tuile du bandeau in-game (2026-09-18) : zéro en incrémental et en objectif, la cible
+    /// en décompte, exactement ce dont part une entrée neuve ([`compteur_de_depart`]).
+    ///
+    /// L'entrée est désignée par ce qui fait son identité ([`meme_entree`] : nom insensible à la
+    /// casse et genre), pas par un rang — entre le clic et la confirmation, la liste a pu bouger
+    /// (retrait depuis le site, réordonnancement). Renvoie `true` si une entrée a été remise ;
+    /// `false` si aucune ne correspond plus, auquel cas rien n'est écrit ni répliqué.
+    ///
+    /// Persiste et marque `dirty` comme un ramassage : le compte doit voir le compteur repartir, sans
+    /// quoi le prochain `merge_config` le rattraperait à son ancienne valeur.
+    pub fn reset_counter(&mut self, name: &str, kind: WatchlistKind) -> bool {
+        let cible = WatchlistEntry {
+            name: name.to_string(),
+            kind,
+            mode: WatchlistMode::Up,
+            count: 0,
+            countdown_target: 0,
+            catalog_id: None,
+        };
+        let mut changed = false;
+        for entry in &mut self.entries {
+            if meme_entree(entry, &cible) {
+                entry.count = compteur_de_depart(entry);
+                changed = true;
+            }
+        }
+        if changed {
+            self.persist();
+            self.dirty = true;
+        }
+        changed
+    }
+
     fn persist(&self) {
         let by_key = self
             .entries
@@ -312,6 +427,62 @@ impl WatchlistState {
             .map(|e| (counter_key(&e.name, e.kind), e.count))
             .collect();
         save_to(&self.store_path, &PersistedCounts { by_key });
+    }
+}
+
+/// Deux entrées désignent la même chose suivie — nom (insensible à la casse) et genre, la clé du
+/// compteur local (`counter_key`). Ni le mode ni la cible n'en font partie : ce sont des réglages
+/// DE cette entrée, pas son identité (voir `compteur_reporte`).
+fn meme_entree(a: &WatchlistEntry, b: &WatchlistEntry) -> bool {
+    a.kind == b.kind && a.name.to_lowercase() == b.name.to_lowercase()
+}
+
+/// Ce que devient le compteur vivant d'`existante` quand sa définition devient `definition` —
+/// `None` quand rien de ce qu'il mesurait ne survit à la redéfinition, l'appelant repart alors de
+/// `compteur_de_depart`.
+///
+/// Quatre cas, et un seul demande à réfléchir :
+///
+/// - **Le mode change** : `None`. En décompte, `count` dit ce qu'il RESTE à ramasser ; en
+///   incrémental ou en objectif, ce qui l'a été — le même nombre y raconte l'inverse, le reporter
+///   mentirait. (Incrémental → objectif reporterait un nombre de même sens, mais un incrémental
+///   n'est borné par rien et peut déjà dépasser la nouvelle cible : repartir de zéro reste le
+///   choix simple, et celui du web — `setWatchlistMode` repart toujours de la valeur de départ.)
+/// - **Le mode tient, la cible aussi** — et toujours en incrémental, où la cible ne sert à rien
+///   (une valeur résiduelle héritée du compte n'a donc pas à remettre un compteur à zéro) : le
+///   compteur passe tel quel. C'est le cas courant, celui d'un réordonnancement ou d'une autre
+///   entrée ajoutée à côté.
+/// - **La cible d'un décompte change** : ce qui se reporte est le RAMASSÉ (`cible - count`), pas le
+///   restant. « Il m'en fallait 50, j'en ai 45, finalement il m'en faut 80 » laisse bien 35 à
+///   trouver — c'est exactement ce que produit la fenêtre de recette en relevant une cible
+///   (`suivi_tab::track_recipe_lines`). Une cible qui passe SOUS ce qui est déjà ramassé donne 0 :
+///   l'objectif est atteint, sans alerte pour autant (seul un ramassage en déclenche une, voir
+///   `increment`).
+/// - **La cible d'un objectif change** : le compteur EST déjà le ramassé, il passe tel quel — borné
+///   à la nouvelle cible, pour la même raison (une cible qui passe sous le fait : objectif atteint,
+///   sans alerte).
+fn compteur_reporte(existante: &WatchlistEntry, definition: &WatchlistEntry) -> Option<i64> {
+    if existante.mode != definition.mode {
+        return None;
+    }
+    if definition.mode == WatchlistMode::Up
+        || existante.countdown_target == definition.countdown_target
+    {
+        return Some(existante.count);
+    }
+    if definition.mode == WatchlistMode::Goal {
+        return Some(existante.count.min(definition.countdown_target));
+    }
+    let ramassees = (existante.countdown_target - existante.count).max(0);
+    Some((definition.countdown_target - ramassees).max(0))
+}
+
+/// La valeur dont part une entrée neuve, ou une entrée dont le comptage vient d'être redéfini :
+/// sa cible en décompte (il descend vers 0), 0 en incrémental et en objectif (ils montent).
+fn compteur_de_depart(entry: &WatchlistEntry) -> i64 {
+    match entry.mode {
+        WatchlistMode::Down => entry.countdown_target,
+        WatchlistMode::Up | WatchlistMode::Goal => 0,
     }
 }
 
@@ -444,6 +615,7 @@ mod tests {
             vec![WatchlistAlert {
                 name: "Ortie Sauvage".to_string(),
                 kind: WatchlistKind::Item,
+                reason: WatchlistAlertReason::Countdown,
                 catalog_id: None,
             }]
         );
@@ -454,6 +626,65 @@ mod tests {
         let mut state = state_with(vec![item("Ortie Sauvage", WatchlistMode::Down, 1)]);
         assert!(!state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // 1 -> 0, alerte
         assert!(state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // déjà à 0, silence
+    }
+
+    #[test]
+    fn mode_goal_monte_vers_la_cible_sans_jamais_la_depasser() {
+        let mut state = state_with(vec![item("Ortie Sauvage", WatchlistMode::Goal, 5)]);
+        assert_eq!(state.entries()[0].count, 0);
+        state.apply(&loot("Ortie Sauvage", 2));
+        assert_eq!(state.entries()[0].count, 2);
+        state.apply(&loot("Ortie Sauvage", 10));
+        assert_eq!(state.entries()[0].count, 5);
+    }
+
+    #[test]
+    fn mode_goal_declenche_une_alerte_en_atteignant_la_cible_pour_la_premiere_fois() {
+        let mut state = state_with(vec![item("Ortie Sauvage", WatchlistMode::Goal, 2)]);
+        assert!(state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // 0 -> 1, pas encore 2
+        let alerts = state.apply(&loot("Ortie Sauvage", 1)); // 1 -> 2
+        assert_eq!(
+            alerts,
+            vec![WatchlistAlert {
+                name: "Ortie Sauvage".to_string(),
+                kind: WatchlistKind::Item,
+                reason: WatchlistAlertReason::Goal,
+                catalog_id: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn mode_goal_ne_realerte_pas_une_fois_la_cible_atteinte() {
+        let mut state = state_with(vec![item("Ortie Sauvage", WatchlistMode::Goal, 1)]);
+        assert!(!state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // 0 -> 1, alerte
+        assert!(state.apply(&loot("Ortie Sauvage", 1)).is_empty()); // déjà à 1, silence
+        assert_eq!(state.entries()[0].count, 1);
+    }
+
+    #[test]
+    fn mode_goal_un_compteur_local_au_dela_de_la_cible_est_perime() {
+        let dir = std::env::temp_dir().join(format!(
+            "wakfu-overlay-watchlist-test-goal-{}",
+            std::process::id()
+        ));
+        let path = dir.join("counts.json");
+        let mut state = WatchlistState::new(path.clone());
+        state.merge_config(vec![item("Amulette du Bouftou", WatchlistMode::Goal, 50)]);
+        state.entries[0].count = 30;
+        state.persist(); // 30 sur disque, sur l'échelle 0..50
+
+        // La cible redéfinie à 10 sur le site : les 30 du fichier se lisaient sur l'ancienne
+        // échelle, le compte fait foi — même règle qu'en décompte.
+        let mut restarted = WatchlistState::new(path.clone());
+        let redefini = WatchlistEntry {
+            count: 4,
+            ..item("Amulette du Bouftou", WatchlistMode::Goal, 10)
+        };
+        restarted.merge_config(vec![redefini]);
+        assert_eq!(restarted.entries()[0].count, 4);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -519,7 +750,12 @@ mod tests {
 
         assert_eq!(state.entries().len(), 1);
         assert_eq!(state.entries()[0].name, "Bwork");
-        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+        // `dir`, et surtout PAS `dir.parent()` : le parent est `std::env::temp_dir()` lui-même,
+        // et ce nettoyage effaçait donc tout `/tmp`. Il emportait au passage le `counts.json` de
+        // `merge_config_abandonne_un_compteur_local_au_dela_de_la_cible`, qui tourne en parallèle
+        // dans le même binaire — d'où son échec intermittent au CI (`left: 10, right: 4` : privé
+        // de son fichier, il repart de la cible au lieu du compteur qui y était écrit).
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -600,6 +836,39 @@ mod tests {
     }
 
     #[test]
+    fn merge_config_abandonne_un_compteur_local_au_dela_de_la_cible() {
+        // La cible a été baissée depuis le SITE (50 → 10) pendant que le fichier local en gardait
+        // 50 : l'autre chemin vers le « 50/10 » du 2026-09-15. Ce 50 se lisait sur une échelle qui
+        // n'existe plus — c'est le compte qui fait foi.
+        let dir = std::env::temp_dir().join(format!(
+            "wakfu-overlay-watchlist-test-borne-{}",
+            std::process::id()
+        ));
+        let path = dir.join("counts.json");
+        let mut state = WatchlistState::new(path.clone());
+        state.merge_config(vec![item("Amulette du Bouftou", WatchlistMode::Down, 50)]);
+        state.persist(); // 50 sur disque
+
+        // Le compte annonce le décompte redéfini, déjà entamé : 4 restantes sur 10. Les 50 du
+        // fichier se lisaient sur l'ancienne échelle — ils sont abandonnés, pas bornés à 10.
+        let mut restarted = WatchlistState::new(path.clone());
+        let redefini = WatchlistEntry {
+            count: 4,
+            ..item("Amulette du Bouftou", WatchlistMode::Down, 10)
+        };
+        restarted.merge_config(vec![redefini]);
+        assert_eq!(restarted.entries()[0].count, 4);
+        // Rien à rattraper : c'est le compte qui fait foi ici, il a déjà cette valeur.
+        assert!(restarted.drain_pending_sync().is_none());
+        // Et le fichier ne porte plus la valeur périmée.
+        let mut encore = WatchlistState::new(path.clone());
+        encore.merge_config(vec![item("Amulette du Bouftou", WatchlistMode::Down, 10)]);
+        assert_eq!(encore.entries()[0].count, 4);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn watchlist_from_settings_json_absente_renvoie_liste_vide() {
         let entries = watchlist_from_settings_json(&serde_json::json!({}));
         assert!(entries.is_empty());
@@ -649,11 +918,11 @@ mod definitions_tests {
         // `count` du brouillon annulerait ce ramassage à la validation.
         let dir = std::env::temp_dir().join("wco-defs-1.json");
         let mut state = WatchlistState::new(dir);
-        state.apply_definitions(vec![entry("Bois de Frêne", WatchlistMode::Up, 0, 0)]);
+        state.apply_definitions(vec![entry("Bois de Frêne", WatchlistMode::Up, 0, 0)], &[]);
         // Le moteur compte pendant que la fenêtre est ouverte.
         state.entries[0].count = 42;
         // Le brouillon, lui, ne sait rien de ces 42.
-        state.apply_definitions(vec![entry("Bois de Frêne", WatchlistMode::Up, 0, 0)]);
+        state.apply_definitions(vec![entry("Bois de Frêne", WatchlistMode::Up, 0, 0)], &[]);
         assert_eq!(state.entries()[0].count, 42);
     }
 
@@ -661,34 +930,206 @@ mod definitions_tests {
     fn une_entree_ajoutee_part_de_ce_que_son_mode_impose() {
         let dir = std::env::temp_dir().join("wco-defs-2.json");
         let mut state = WatchlistState::new(dir);
-        state.apply_definitions(vec![
-            entry("Plume", WatchlistMode::Down, 50, 0),
-            entry("Bouftou", WatchlistMode::Up, 0, 0),
-        ]);
+        state.apply_definitions(
+            vec![
+                entry("Plume", WatchlistMode::Down, 50, 0),
+                entry("Bouftou", WatchlistMode::Up, 0, 0),
+            ],
+            &[],
+        );
         // Un décompte part de sa cible et descend ; un incrémental part de zéro et monte.
         assert_eq!(state.entries()[0].count, 50);
         assert_eq!(state.entries()[1].count, 0);
     }
 
     #[test]
+    fn un_objectif_ajoute_part_de_zero_et_garde_son_fait_quand_sa_cible_change() {
+        let dir = std::env::temp_dir().join("wco-defs-goal.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Goal, 50, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 0);
+        // Le moteur compte pendant que la fenêtre est ouverte.
+        state.entries[0].count = 45;
+        // Cible relevée à 80 : les 45 déjà ramassées restent 45 (35 à trouver).
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Goal, 80, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 45);
+        // Cible abaissée sous le fait : borné, objectif atteint.
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Goal, 10, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 10);
+        // Changer de mode repart de la valeur de départ du nouveau mode.
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Down, 10, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 10);
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Goal, 10, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 0);
+    }
+
+    #[test]
     fn une_entree_retiree_disparait_avec_son_compteur() {
         let dir = std::env::temp_dir().join("wco-defs-3.json");
         let mut state = WatchlistState::new(dir);
-        state.apply_definitions(vec![
-            entry("Plume", WatchlistMode::Up, 0, 0),
-            entry("Sel", WatchlistMode::Up, 0, 0),
-        ]);
+        state.apply_definitions(
+            vec![
+                entry("Plume", WatchlistMode::Up, 0, 0),
+                entry("Sel", WatchlistMode::Up, 0, 0),
+            ],
+            &[],
+        );
         state.entries[0].count = 7;
-        state.apply_definitions(vec![entry("Sel", WatchlistMode::Up, 0, 0)]);
+        state.apply_definitions(vec![entry("Sel", WatchlistMode::Up, 0, 0)], &[]);
         assert_eq!(state.entries().len(), 1);
         assert_eq!(state.entries()[0].name, "Sel");
+    }
+
+    #[test]
+    fn reinitialiser_un_compteur_le_ramene_a_sa_valeur_de_depart() {
+        let dir = std::env::temp_dir().join("wco-defs-reset.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(
+            vec![
+                entry("Plume", WatchlistMode::Up, 0, 0),
+                entry("Bouftou", WatchlistMode::Down, 50, 0),
+                entry("Sel", WatchlistMode::Goal, 20, 0),
+            ],
+            &[],
+        );
+        state.entries[0].count = 7;
+        state.entries[1].count = 12;
+        state.entries[2].count = 15;
+        let _ = state.drain_pending_sync();
+
+        // Incrémental : zéro. Décompte : la cible. Objectif : zéro.
+        assert!(state.reset_counter("plume", WatchlistKind::Item));
+        assert!(state.reset_counter("Bouftou", WatchlistKind::Item));
+        assert!(state.reset_counter("Sel", WatchlistKind::Item));
+        assert_eq!(state.entries()[0].count, 0);
+        assert_eq!(state.entries()[1].count, 50);
+        assert_eq!(state.entries()[2].count, 0);
+        // Le compte doit voir les compteurs repartir.
+        assert!(state.drain_pending_sync().is_some());
+
+        // Une entrée qui n'existe plus (ou pas sous ce genre) : rien, et rien à répliquer.
+        assert!(!state.reset_counter("Plume", WatchlistKind::Enemy));
+        assert!(!state.reset_counter("Inconnu", WatchlistKind::Item));
+        assert!(state.drain_pending_sync().is_none());
+    }
+
+    #[test]
+    fn changer_la_cible_d_un_decompte_neuf_le_relance() {
+        // **Le bug du 2026-09-15**, dans sa forme la plus simple : la cible passe de 50 à 10, et le
+        // compteur de 50 restait sur une échelle qui n'existe plus — « 50/10 ».
+        let dir = std::env::temp_dir().join("wco-defs-5.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(
+            vec![entry("Amulette du Bouftou", WatchlistMode::Down, 50, 0)],
+            &[],
+        );
+        assert_eq!(state.entries()[0].count, 50);
+        state.apply_definitions(
+            vec![entry("Amulette du Bouftou", WatchlistMode::Down, 10, 0)],
+            &[],
+        );
+        assert_eq!(state.entries()[0].count, 10);
+        assert_eq!(state.entries()[0].countdown_target, 10);
+    }
+
+    #[test]
+    fn changer_la_cible_reporte_ce_qui_est_deja_ramasse() {
+        // Ce que la fenêtre de recette produit en relevant une cible
+        // (`suivi_tab::track_recipe_lines`) : « il m'en fallait 50, j'en ai 45, finalement il m'en
+        // faut 80 » laisse 35 à trouver — le décompte ne repart pas de 80.
+        let dir = std::env::temp_dir().join("wco-defs-10.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(vec![entry("Peau", WatchlistMode::Down, 50, 0)], &[]);
+        state.entries[0].count = 5; // 45 ramassées
+        state.apply_definitions(vec![entry("Peau", WatchlistMode::Down, 80, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 35);
+
+        // Et une cible qui passe SOUS ce qui est déjà ramassé s'arrête à 0, jamais en négatif.
+        state.apply_definitions(vec![entry("Peau", WatchlistMode::Down, 10, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 0);
+    }
+
+    #[test]
+    fn un_decompte_entame_garde_son_compteur_tant_que_sa_cible_ne_bouge_pas() {
+        // L'autre moitié de la règle : sans changement de cible, un décompte en cours n'est pas
+        // relancé par une validation (un réordonnancement, une autre entrée ajoutée…).
+        let dir = std::env::temp_dir().join("wco-defs-6.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Down, 50, 0)], &[]);
+        state.entries[0].count = 12; // 38 ramassées depuis
+        state.apply_definitions(
+            vec![
+                entry("Plume", WatchlistMode::Down, 50, 0),
+                entry("Sel", WatchlistMode::Up, 0, 0),
+            ],
+            &[],
+        );
+        assert_eq!(state.entries()[0].count, 12);
+    }
+
+    #[test]
+    fn changer_de_mode_repart_de_ce_que_le_nouveau_mode_impose() {
+        let dir = std::env::temp_dir().join("wco-defs-7.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Down, 50, 0)], &[]);
+        state.entries[0].count = 30;
+        // Décompte → incrémental : « 30 » y voudrait dire 30 ramassées, alors qu'il en reste 30 à
+        // ramasser. Le compteur repart de 0.
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Up, 0, 0)], &[]);
+        assert_eq!(state.entries()[0].count, 0);
+    }
+
+    #[test]
+    fn supprimer_puis_recreer_dans_le_meme_brouillon_donne_une_entree_neuve() {
+        // **Le scénario exact du retour utilisateur (2026-09-15)** : un décompte créé à 50,
+        // supprimé, puis recréé à 10 dans la même édition — indiscernable d'une entrée conservée
+        // sans la liste des retirées, d'où le « 50/10 » à la validation.
+        let dir = std::env::temp_dir().join("wco-defs-8.json");
+        let mut state = WatchlistState::new(dir);
+        let amulette_50 = entry("Amulette du Bouftou", WatchlistMode::Down, 50, 0);
+        state.apply_definitions(vec![amulette_50.clone()], &[]);
+        state.entries[0].count = 43;
+
+        let amulette_10 = entry("Amulette du Bouftou", WatchlistMode::Down, 10, 0);
+        state.apply_definitions(vec![amulette_10], std::slice::from_ref(&amulette_50));
+        assert_eq!(state.entries()[0].count, 10);
+
+        // Et même à cible IDENTIQUE : ce que l'utilisateur a supprimé est supprimé, le compteur ne
+        // se rattrape pas à l'entrée qui porte le même nom.
+        state.entries[0].count = 4;
+        state.apply_definitions(
+            vec![entry("Amulette du Bouftou", WatchlistMode::Down, 10, 0)],
+            &[entry("Amulette du Bouftou", WatchlistMode::Down, 10, 0)],
+        );
+        assert_eq!(state.entries()[0].count, 10);
+    }
+
+    #[test]
+    fn une_entree_retiree_ailleurs_ne_touche_pas_les_autres() {
+        // La liste des retirées est ciblée : retirer « Sel » ne relance pas « Plume ».
+        let dir = std::env::temp_dir().join("wco-defs-9.json");
+        let mut state = WatchlistState::new(dir);
+        state.apply_definitions(
+            vec![
+                entry("Plume", WatchlistMode::Up, 0, 0),
+                entry("Sel", WatchlistMode::Up, 0, 0),
+            ],
+            &[],
+        );
+        state.entries[0].count = 9;
+        state.apply_definitions(
+            vec![entry("Plume", WatchlistMode::Up, 0, 0)],
+            &[entry("Sel", WatchlistMode::Up, 0, 0)],
+        );
+        assert_eq!(state.entries().len(), 1);
+        assert_eq!(state.entries()[0].count, 9);
     }
 
     #[test]
     fn valider_marque_la_liste_a_repliquer() {
         let dir = std::env::temp_dir().join("wco-defs-4.json");
         let mut state = WatchlistState::new(dir);
-        state.apply_definitions(vec![entry("Plume", WatchlistMode::Up, 0, 0)]);
+        state.apply_definitions(vec![entry("Plume", WatchlistMode::Up, 0, 0)], &[]);
         assert!(state.drain_pending_sync().is_some());
         // Et une seule fois : le drain vide le drapeau.
         assert!(state.drain_pending_sync().is_none());

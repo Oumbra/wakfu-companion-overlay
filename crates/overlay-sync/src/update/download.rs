@@ -79,9 +79,22 @@ pub fn fetch_to_file(
         if n == 0 {
             break;
         }
+        received += n as u64;
+        // Jamais plus que la taille annoncée par le manifeste signé : un serveur (ou un
+        // intermédiaire) qui enverrait un flux sans fin remplirait le disque avant que
+        // l'empreinte, vérifiée à la fin seulement, ne le rejette.
+        if received > expected_size {
+            drop(file);
+            let _ = fs::remove_file(&part);
+            return Err(UpdateError::HashMismatch {
+                what: dest
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            });
+        }
         file.write_all(&buf[..n])?;
         hasher.update(&buf[..n]);
-        received += n as u64;
         on_progress(received, total.max(received));
     }
     file.flush()?;
@@ -147,7 +160,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("overlay-update-dl-{}", std::process::id()));
         let dest = dir.join("asset.gz");
         let mut steps = Vec::new();
-        let received = fetch_to_file(&url, &dest, 0, &sha, &mut |r, t| steps.push((r, t))).unwrap();
+        let received = fetch_to_file(&url, &dest, body.len() as u64, &sha, &mut |r, t| {
+            steps.push((r, t))
+        })
+        .unwrap();
         assert_eq!(received, body.len() as u64);
         assert_eq!(fs::read(&dest).unwrap(), body);
         assert!(!dir.join("asset.gz.part").exists());
@@ -164,6 +180,22 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("overlay-update-bad-{}", std::process::id()));
         let dest = dir.join("asset.gz");
         let err = fetch_to_file(&url, &dest, 7, "00", &mut |_, _| {}).unwrap_err();
+        assert!(matches!(err, UpdateError::HashMismatch { .. }), "{err}");
+        assert!(!dest.exists());
+        assert!(!dir.join("asset.gz.part").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Un flux plus long que la taille annoncée par le manifeste signé est coupé sans attendre la
+    /// fin : rien ne s'accumule sur le disque.
+    #[test]
+    fn un_flux_plus_long_que_prevu_est_coupe() {
+        let body = b"contenu bien plus long que prevu".to_vec();
+        let sha = hex(&Sha256::digest(&body));
+        let url = serve_once(body, false);
+        let dir = std::env::temp_dir().join(format!("overlay-update-long-{}", std::process::id()));
+        let dest = dir.join("asset.gz");
+        let err = fetch_to_file(&url, &dest, 7, &sha, &mut |_, _| {}).unwrap_err();
         assert!(matches!(err, UpdateError::HashMismatch { .. }), "{err}");
         assert!(!dest.exists());
         assert!(!dir.join("asset.gz.part").exists());

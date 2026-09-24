@@ -93,10 +93,11 @@ et elle est explicitement « à ne faire que sur demande ».
 
 ### État actuel
 
-`crates/overlay-ui/src/main.rs:1354` et `crates/overlay-ui/src/bin/overlay-ui-x11.rs:710` traitent
-`Échap` par `event_loop.exit()` — **l'overlay entier se ferme**. Le commentaire qui accompagne ce
-filet dit qu'il ne se déclenche jamais, « ces fenêtres portent `WS_EX_NOACTIVATE`, donc ne reçoivent
-jamais le focus clavier ». C'était vrai quand il a été écrit.
+`crates/overlay-ui/src/main.rs:1354` et
+`crates/overlay-ui/src/bin/wakfu-companion-overlay-x11.rs:710` traitent `Échap` par
+`event_loop.exit()` — **l'overlay entier se ferme**. Le commentaire qui accompagne ce filet dit
+qu'il ne se déclenche jamais, « ces fenêtres portent `WS_EX_NOACTIVATE`, donc ne reçoivent jamais le
+focus clavier ». C'était vrai quand il a été écrit.
 
 Ça ne l'est plus : la modale Options est **la seule fenêtre overlay focalisable**, et délibérément
 (§9.1 du plan : « `WS_EX_NOACTIVATE` omis côté Windows : il faut pouvoir taper dans le champ de

@@ -17,7 +17,7 @@
 //! **Pourquoi des `allow(dead_code)` ici** : ce fichier est compilé dans TROIS cibles — les deux
 //! exemples de maquette et le test de galerie — et chacune n'en emploie qu'une partie. Les
 //! exemples peignent eux-mêmes (`paint`, `label`, `ITEM_CATEGORIES`), la galerie passe les images
-//! à `design::autocomplete` (`texture_id`) et n'a besoin ni de l'une ni de l'autre. Un membre
+//! à `design::autocomplete` (`sized_texture`) et n'a besoin ni de l'une ni de l'autre. Un membre
 //! signalé mort dans une cible est donc vivant dans une autre : le supprimer casserait la cible
 //! d'en face.
 
@@ -80,19 +80,23 @@ impl RarityGems {
         Self { par_numero }
     }
 
-    /// L'identifiant de texture d'une gemme — ce que `design::autocomplete` attend, puisque ces
-    /// images sont du CONTENU et non du décor (voir la doc du composant).
+    /// La texture d'une gemme **avec sa taille native** — ce que `design::autocomplete` attend,
+    /// puisque ces images sont du CONTENU et non du décor (voir la doc du composant), et qu'elles y
+    /// sont peintes à leur rapport (13 × 20, jamais un carré).
     ///
-    /// Rend l'identifiant de la gemme « Commun » plutôt que de paniquer si la rareté est absente :
-    /// une fixture manquante est un défaut de planche, pas une raison de faire échouer un rendu.
+    /// Rend la gemme « Commun » plutôt que de paniquer si la rareté est absente : une fixture
+    /// manquante est un défaut de planche, pas une raison de faire échouer un rendu.
     ///
     /// `allow(dead_code)` : employé par la galerie, pas par les exemples (voir la doc du module).
     #[allow(dead_code)]
-    pub fn texture_id(&self, rarity: WakfuRarity) -> egui::TextureId {
+    pub fn sized_texture(&self, rarity: WakfuRarity) -> egui::load::SizedTexture {
         self.par_numero
             .get(&IconRef::for_rarity(rarity).gfx_id)
             .or_else(|| self.par_numero.get("1"))
-            .map_or(egui::TextureId::default(), |texture| texture.id())
+            .map_or(
+                egui::load::SizedTexture::new(egui::TextureId::default(), GEM_NATIVE),
+                egui::load::SizedTexture::from_handle,
+            )
     }
 
     /// Peint la gemme d'une rareté, centrée dans `box_rect` et **à son rapport natif**.
@@ -257,15 +261,16 @@ impl CategoryIcons {
         Self { par_numero }
     }
 
-    /// L'identifiant de texture d'une icône de filtre — même raison que
-    /// [`RarityGems::texture_id`].
+    /// La texture d'une icône de filtre, taille native comprise — même raison que
+    /// [`RarityGems::sized_texture`].
     ///
     /// `allow(dead_code)` : employé par la galerie, pas par les exemples (voir la doc du module).
     #[allow(dead_code)]
-    pub fn texture_id(&self, filtre: CategoryFilter) -> egui::TextureId {
-        self.par_numero
-            .get(&filtre.icon_ref().gfx_id)
-            .map_or(egui::TextureId::default(), |texture| texture.id())
+    pub fn sized_texture(&self, filtre: CategoryFilter) -> egui::load::SizedTexture {
+        self.par_numero.get(&filtre.icon_ref().gfx_id).map_or(
+            egui::load::SizedTexture::new(egui::TextureId::default(), Vec2::splat(1.0)),
+            egui::load::SizedTexture::from_handle,
+        )
     }
 
     /// Peint l'icône d'un filtre dans `rect`, avec l'opacité que le web donne à son état.
@@ -330,11 +335,11 @@ impl ItemIcons {
         Self { textures }
     }
 
-    /// L'identifiant de texture de la `rang`-ième fixture, en boucle.
+    /// La `rang`-ième fixture, en boucle, avec sa taille native.
     ///
     /// `allow(dead_code)` : employé par la galerie, pas par les exemples (voir la doc du module).
     #[allow(dead_code)]
-    pub fn texture_id(&self, rang: usize) -> egui::TextureId {
-        self.textures[rang % self.textures.len()].id()
+    pub fn sized_texture(&self, rang: usize) -> egui::load::SizedTexture {
+        egui::load::SizedTexture::from_handle(&self.textures[rang % self.textures.len()])
     }
 }

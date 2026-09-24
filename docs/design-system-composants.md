@@ -457,14 +457,23 @@ gouttières de 2px, qui n'appartiennent à aucun onglet : sans peinture explicit
 traverse la barre de part en part, et le cerne se retrouve entaillé de deux encoches au droit de
 chaque séparateur.
 
-**Largeur : parts égales sur toute la largeur disponible, et c'est un choix, pas un relevé.** Le jeu
-dimensionne chaque onglet sur son libellé — ses six onglets font 77, 83, 103, 83, 133 et 106px pour
-des encres de 26, 44, 73, 28, 100 et 35 : ni un padding constant, ni le nombre de caractères, ni une
-largeur minimale unique n'en rendent compte. Sa barre ne remplit d'ailleurs pas la fenêtre (elle
-s'arrête à x=636 sur 705) parce que le **bouton de réinitialisation** occupe la droite. Appliquer une
-règle qu'on n'a pas mesurée à trois onglets qui n'ont pas ce bouton laissait la barre à 337px sur les
-743 du panneau, calée à gauche. `fit_content()` rend l'autre comportement, pour comparer à une
-capture du jeu ou pour une barre qui ne doit pas s'étirer.
+**Largeur : toute la largeur disponible, l'encre de chaque libellé plus une marge égale pour tous —
+et c'est un choix, pas un relevé.** Le jeu dimensionne chaque onglet sur son libellé — ses six
+onglets font 77, 83, 103, 83, 133 et 106px pour des encres de 26, 44, 73, 28, 100 et 35 : ni un
+padding constant, ni le nombre de caractères, ni une largeur minimale unique n'en rendent compte. Sa
+barre ne remplit d'ailleurs pas la fenêtre (elle s'arrête à x=636 sur 705) parce que le **bouton de
+réinitialisation** occupe la droite. Appliquer une règle qu'on n'a pas mesurée à des onglets qui
+n'ont pas ce bouton laissait la barre à 337px sur les 743 du panneau, calée à gauche.
+`fit_content()` rend l'autre comportement, pour comparer à une capture du jeu ou pour une barre qui
+ne doit pas s'étirer.
+
+**Ce fut des parts égales jusqu'au 2026-09-18** : chaque onglet recevait le même sixième de la barre
+quel que soit son mot. À sept onglets sur les 700px de la fenêtre Options, chaque part tombait à
+98px et « Personnages » (encre 100) débordait de sa case pendant que « Chat » nageait dans la
+sienne. La marge égale (`fill_widths`) donne à chaque mot la place qu'il demande et partage le
+reste : un long libellé élargit son onglet, jamais celui du voisin. Barre plus étroite que la somme
+des encres : marge nulle, onglets au prorata de leur encre — les mots s'écrêtent, mais
+uniformément. Les arrondis restent cumulés, la barre tombe pile sur le bord du panneau.
 
 **Inventé, faute de référence** :
 
@@ -507,8 +516,9 @@ C'est aussi pourquoi cette variante attendait le lot 2 : elle a besoin de `DsIco
 | Encre du pictogramme | **dérivée**, `TAB_ICON_RATIO` = 18/36 → 22 px sur 44 |
 
 Un onglet à pictogramme est donc **plus étroit** qu'un onglet texte (77 px de plancher) : il n'a pas
-de mot à contenir. En mode étiré (le défaut), il suit la même règle de parts égales que la variante
-texte ; `fit_content` lui donne les 66 px du jeu.
+de mot à contenir. En mode étiré (le défaut), il suit la même règle de marge égale que la variante
+texte, son encre étant celle du glyphe (`TAB_HEIGHT × TAB_ICON_RATIO`) — entre pictogrammes, les
+onglets restent donc égaux ; `fit_content` lui donne les 66 px du jeu.
 
 **Le ratio d'encre est dérivé, pas mesuré**, et c'est dit dans le jeton : `icon-tabs.png` est un
 gabarit **vide** — le jeu n'y a laissé aucun pictogramme. La valeur reprend le rapport du bouton
@@ -581,9 +591,10 @@ taille est valide » : en pratique une case est toujours peinte à sa taille nat
 l'état **désactivé** teinte la case et le libellé de `TEXT_DISABLED`, par cohérence avec le bouton
 désactivé.
 
-**Usages** : la section « Combat » de l'onglet « Paramètres » (trois lignes, dont la dernière en
-retrait sous celle dont elle dépend) et la case « Fermeture automatique » des onglets « Alertes » et
-« Chat », seule sur sa ligne de réglage.
+**Usages** : les quatre sections de l'onglet « Paramètres » — « Combat » (trois lignes, dont la
+dernière en retrait sous celle dont elle dépend) puis « Suivi », « Alertes » et « Chat », où les
+cases « Couper le son des notifications » et « Fermeture automatique des notifications » sont
+seules sur leur ligne (`panels::notifications`, 2026-09-15).
 
 ---
 
@@ -1623,10 +1634,32 @@ if let Some(index) = issue.selected {
 | `min_query_len` | seuil de déclenchement | `AUTOCOMPLETE_MIN_QUERY_LEN` = 3 |
 | `max_visible_rows` | au-delà, la liste défile | `AUTOCOMPLETE_MAX_VISIBLE_ROWS` = 5 |
 | `enabled` | `bool` | `true` |
+| `search_icon` | la loupe en tête de champ | `true` |
+| `fill_on_select` | la sélection **remplit** le champ au lieu de le vider | `false` |
 | `preview_open` / `preview_active` / `preview_filter` | aperçu de galerie | fermé / 0 / aucun |
 
 Rend un **`AutocompleteOutcome`** : la `Response` du champ **et** `selected: Option<usize>`, l'indice
 dans `entries` de l'entrée choisie.
+
+### Deux usages, deux réglages (2026-09-16)
+
+Le composant sert deux choses qui n'ont ni le même décor ni la même fin de geste :
+
+| | Champ d'**ajout** (Suivi, Alertes) | **Saisie assistée** (nom d'un personnage) |
+| --- | --- | --- |
+| Décor | loupe — c'est une recherche | `search_icon(false)` : le nom s'écrit, il ne se cherche pas |
+| Après une sélection | le champ se vide, il a fini | `fill_on_select(true)` : le libellé reste dans le champ, qui garde son focus |
+| Ce qui compte | `selected`, l'entrée passée à la liste | `query`, la valeur du formulaire |
+
+**Dans les deux cas le texte libre est accepté** : le composant ne valide rien, n'efface jamais ce
+qui ne correspond à aucune entrée, et `selected` vaut simplement `None`. Les suggestions sont une
+aide à la saisie, pas une liste fermée — pour une liste fermée, c'est `design::select`. Deux champs
+à loupe sur un même écran, dont un qui n'en est pas une, ne se distinguent plus que par leur invite
+(retour utilisateur du 2026-09-16, modale « Personnage »).
+
+Planche dédiée : `design_gallery_autocomplete_saisie.png` (`galerie_de_la_saisie_assistee`) — la
+grande galerie est pleine, son contenu dépasse déjà le plafond de 8192 px de wgpu et sa section
+« Autocomplétion » y est tronquée en bas.
 
 Décor résolu en interne (socle et loupe d'`InputSize::Standard`) ; **panneau déplié entièrement
 repris de `design::select`** — fond, bord, filet de tête, surbrillance, cadence de rangée de 28 px.
@@ -1939,6 +1972,54 @@ ui.add(
 | `size` | côté du carré | `ITEM_SLOT_SIZE` = 64 |
 
 Textures : les sept `DsTexture::ItemBorder*`, entrées au manifeste avec ce composant.
+
+### `completion` — la célébration d'un suivi accompli (2026-09-17)
+
+```rust
+design::item_slot()
+    .frame(SlotFrame::Rarity(ItemRarity::Legendary))
+    .completion(Some(elapsed_seconds))   // None = emplacement ordinaire
+```
+
+Un décompte arrivé à 0 ou un objectif atteint ne disparaît pas sans rien dire : l'emplacement se
+soulève, sa bordure devient une couronne arc-en-ciel qui tourne **en accélérant**, la couronne se
+**condense sur la couleur de rareté de l'objet**, éclate, et l'emplacement se dissout en
+particules. Variante « Rareté scellée », choisie par l'utilisateur parmi quatre maquettes animées.
+
+| Jusqu'à | Ce qui se passe |
+| --- | --- |
+| 0,30 s | soulèvement — on regarde CETTE tuile |
+| 1,80 s | la couronne tourne, trois tours, accélérés |
+| 2,15 s | condensation sur la rareté, éclat, onde |
+| 3,35 s | dissolution en particules |
+| 3,50 s | plus rien — l'hôte retire l'entrée du Suivi et du compte |
+
+**L'appelant passe un temps, pas une phase.** Le panneau connaît l'instant du franchissement, pas
+le découpage de l'animation, qui est une décision du design system (`completion_phase`, fonction
+libre testée comme `paint_order`). C'est aussi ce qui rend la capture de référence possible : un
+temps figé rend toujours la même image, et les particules sont **hachées sur leur index** plutôt
+que tirées d'une horloge.
+
+**La couleur du sceau vient du cadre, jamais de l'appelant** (« une intention, pas une couleur ») :
+`ItemRarity::seal_color()`, sept teintes **mesurées** sur les `Border-*.webp` eux-mêmes — la partie
+la plus saturée du liseré, moyennée sur son vingtième le plus vif. Un ennemi (`SlotFrame::Plain`)
+n'a pas de rareté et se scelle sur l'**or** que cette interface emploie déjà pour dire « accompli ».
+
+**`egui` n'a pas de dégradé conique** : l'arc-en-ciel est une suite de 48 traits posés le long du
+contour arrondi (`ring_point`), chacun de la teinte de sa position. La couronne tourne parce que la
+teinte glisse — aucune géométrie ne bouge, ce qui la garde exactement sur le liseré qu'elle
+recouvre. Le contour part du **milieu du bord haut** : la couture rouge → violet s'y remarque
+moins que sur un coin.
+
+Ce que le composant ne fait PAS : la **gerbe de confettis**. Elle sort largement du carré, et un
+emplacement ne peint pas hors de lui-même — c'est au panneau de la poser (`panels::watchlist`).
+
+Un défaut rattrapé par la première planche de galerie : l'éclat se peignait **à pleine puissance
+dès la première image**, `1 - progress(...)` valant 1 pendant toute la rotation faute de garde. Un
+test le fige désormais.
+
+Capture : `design_gallery_completion.png` — les sept instants de la séquence, puis les sept sceaux
+côte à côte au même instant, qui est là qu'une teinte mesurée de travers se verrait.
 
 ### L'ordre de peinture EST le composant
 
@@ -2384,7 +2465,7 @@ main, soit environ 250 lignes qui ne font que placer des rectangles.
 
 **`DsIcon` est un type distinct de `DsTexture`** (décision utilisateur, 2026-09-10).
 
-**Motif révisé le même jour**, après les commits `0923a45`, `a372320` et `4762cee` d'une session
+**Motif révisé le même jour**, après les commits `7a86c38`, `37979c3` et `bff39e2` d'une session
 parallèle. L'argument d'origine — « chaque glyphe a une taille d'encre propre, un fond 9-slice n'en
 a pas, et peindre `icon-minus` (14×2) dans un carré l'étirerait » — **ne tient plus** :
 `icon_button::glyph_fit(native, box_side)` met désormais tout glyphe à l'échelle **en préservant son
@@ -2415,7 +2496,7 @@ Exécution, le jour venu :
    ne décrit plus que des fonds 9-slice.
 3. `design::icon` — une **feuille** au sens du contrat, qui réutilise `glyph_fit` tel quel.
 4. `icon_button` et `Input::leading_icon` prennent un `DsIcon`.
-5. La galerie des glyphes (`a372320`) suit le nouveau type ; snapshots régénérés.
+5. La galerie des glyphes (`37979c3`) suit le nouveau type ; snapshots régénérés.
 
 Coût mémoire, mesuré avant de décider : les 34 icônes décodées en RGBA pèsent **31 Ko** au total —
 sans effet sur le budget de 300 Mo (§8 du plan).
@@ -2484,14 +2565,14 @@ Ni urgent ni structurant, mais chacun retire du code d'un panneau.
 | **`design::toolbar`** | Le carré de contrôle du Suivi : fond translucide, gouttière, groupement de boutons icône. | `watchlist::PANEL_BACKDROP_FILL`, `menu-button-icon-first-plan.png` |
 | **`design::segmented`** | Le bascule « Objets mis en vente / Offres d'achat » ; le switch Alliés/Ennemis du panneau Combat en est une variante maison. | `tabs-with-first-tab-active.png` |
 | **`design::toast`** | `watchlist::toast_card` et ses confettis — ~300 lignes, avec son générateur pseudo-aléatoire maison. | Portage du web ; aucun asset de jeu correspondant. |
-| **`design::dialog`** | Rien — la boîte de confirmation qui manquera à la première action destructrice de l'overlay. | `interfaces/interface-confirm-box.png` |
+| ~~**`design::dialog`**~~ | **Résolu** — `design::confirm_dialog` existe depuis le 2026-09-12 et peint ses textures détourées depuis le 2026-09-15. | `confirm-box-{body,crest,foot}.png` |
 
 ### Écarts restants
 
 Trois écarts avaient été constatés le 2026-09-10. Revérifiés le 2026-09-11, il en reste **un et
 demi** :
 
-- ~~**`modal-header.png` dupliqué octet pour octet**~~ — **résolu** par `5ccf0d2` (« refactor :
+- ~~**`modal-header.png` dupliqué octet pour octet**~~ — **résolu** par `a576055` (« refactor :
   bannière de modale au manifeste »). La copie `crates/overlay-ui/assets/ui/options/` n'existe plus,
   `options_modal` passe par `DsTexture::ModalHeader`, et le manifeste documente la résorption.
 - **Deux barres de défilement**, mais ce n'est **pas un doublon accidentel** :
@@ -2549,6 +2630,10 @@ Composant feuille, mais il rend un `ConfirmChoice` et non une `Response`&nbsp;: 
 saurait pas dire *laquelle* des deux réponses a été cliquée, et ressortir le choix par un `&mut` en
 paramètre est la maladresse que §6 reproche ailleurs.
 
+**Son voile est `design::scrim` depuis le 2026-09-17** (voir sa fiche) : la boîte en est le
+premier appelant, et la couche `Foreground`, le clip, le clic avalé et le centrage de l'ensemble
+crête + corps + filet vivent là-bas.
+
 ### Le voile n'est pas une teinte, c'est une information
 
 Tant que la boîte est ouverte, ce qu'elle couvre est **inerte** — et c'est pourquoi `over` demande
@@ -2563,6 +2648,56 @@ Le dépôt web a `ConfirmDeleteService`, collé au bouton déclencheur. Le jeu a
 elle est dans les captures de référence&nbsp;: `interface-confirm-box.png` (449 × 209) pose
 exactement la même forme de question. Boîte autonome et centrée, fond gris **clair** (`#585955`
 mesuré), médaillon en crête débordant le corps.
+
+### Trois textures, et pourquoi pas une (2026-09-15)
+
+Le châssis n'est plus peint à la main. Il vient de la capture, détourée (`design-asset`) puis
+relevée au pixel (`ui-blueprint`, spec dans
+[`design-reference/confirm-box.spec.json`](design-reference/confirm-box.spec.json))&nbsp;:
+
+| Texture | Taille | Rendu |
+| --- | --- | --- |
+| `ConfirmBody` | 420 × 148 | 9-slice, marges **6 px**, `Stretch` sur les deux axes |
+| `ConfirmCrest` | 250 × 57 | **taille native**, centrée en haut, peinte après le corps |
+| `ConfirmFoot` | 98 × 9 | **taille native**, centré sous le corps |
+
+**Un seul 9-slice ne pouvait pas les réunir.** Les deux ornements sont centrés et de largeur fixe
+quand le corps s'étire&nbsp;: sur la capture, le bandeau doré de la crête s'arrête à 250 px alors que
+le corps en fait 420, et au-delà le corps n'a qu'un biseau clair comme sur ses trois autres côtés.
+Des marges assez larges pour contenir la crête — 250 px de chaque côté — ne laissent aucune bande
+médiane&nbsp;; la laisser dans la bande médiane l'étire. C'est la règle des embouts de bouton (§ du
+bouton texte), poussée jusqu'à la texture séparée parce que l'ornement **déborde** ici du rectangle
+du composant. Le figer plutôt que l'étirer est une décision utilisateur du 2026-09-15&nbsp;: une
+seule capture ne dit pas si le jeu l'allongerait sur une boîte plus large.
+
+**Six pixels de marge, pas cinquante.** Contrairement aux boutons, ce corps n'a pas d'embout
+décoratif&nbsp;: le filigrane en arcs de ses coins est mesuré à un écart de 2 niveaux au fond contre
+1 au centre, pour un bruit de 8 — sous le seuil du visible, et `component.py insets` rend un
+`decor_span` de 2 px. Les marges ne couvrent donc que le rayon (2 px) et le biseau (2 px), plus deux
+de sécurité.
+
+**La crête descend 21 px dans le corps** (pointe basse du losange et son cerne sombre). Le corps a
+donc été reconstruit sous elle&nbsp;: sans ce nettoyage il porterait une empreinte dorée en pleine
+bande supérieure, étirée avec lui.
+
+**C'est l'ensemble qui se centre, pas le corps** — la crête déborde de 36 px au-dessus et le filet
+de 9 px en dessous&nbsp;; centrer le seul corps ferait porter tout ce débordement d'un côté.
+
+### Ce que le relevé a corrigé
+
+| Valeur | Avant (estimée) | Après (mesurée) |
+| --- | --- | --- |
+| Hauteur du corps | 120 | **148** |
+| Largeur d'un bouton | 150 | **168** |
+| Gouttière entre boutons | 14 | **8** |
+| Marge latérale de la rangée | 26 | **38** (centrage strict) |
+| Rangée de boutons, depuis le haut | 68 | **82** |
+| Centre du bloc de la question | 46 | **42** |
+
+Le corps de police (15 px) et la largeur (420 px) étaient déjà justes. Deux relevés corrigent au
+passage l'exemple de référence du skill `ui-blueprint` : les boutons y étaient donnés à 166 et
+159 px (mesure prise sur le remplissage, liseré exclu — ils font 168 tous les deux), et le corps
+noté « sans bordure visible » alors qu'il porte un bandeau de 4 px, mais **en haut seulement**.
 
 Le centrage règle du même coup une réserve d'ergonomie&nbsp;: une popover recouvrait le bouton
 « Valider » de la fenêtre, et son bouton de confirmation tombait exactement là où « Valider »
@@ -2591,6 +2726,64 @@ Peint d'abord dans la maquette de la page Alertes, puis dans `panels::alerts_tab
 au design system le jour où la **garde de fermeture** de la fenêtre Options lui a donné un second
 appelant. L'extraction est **à pixel constant** — aucun des trois snapshots de l'onglet Alertes n'a
 bougé.
+
+Ils sont **trois** aujourd'hui, et tous dans `panels::options_modal` : installation d'une mise à
+jour, déconnexion du compte, garde de fermeture. L'onglet Alertes a retiré la sienne (elle portait
+sur un brouillon qu'« Annuler » rattrapait). Le passage aux textures du 2026-09-15 n'a demandé
+**aucune modification chez eux** — c'est ce que ce composant achète.
+
+### La question, relevée sur la lettre (2026-09-15)
+
+Retour utilisateur&nbsp;: «&nbsp;l'écriture est un peu trop grasse, peut-être un poil petite&nbsp;;
+il faudrait qu'elle soit plus light et un peu plus grande&nbsp;». Les trois réglages en cause
+(Ubuntu **Regular**, corps **15**, **blanc pur**) venaient du rendu à la main d'avant le détourage.
+
+La méthode, transposable&nbsp;: plutôt que de convertir une hauteur d'encre en corps — une
+convention qui dépend de la police et qui avait déjà produit un libellé 45&nbsp;% trop gros — on
+rejoue **les chaînes du jeu** dans chaque candidat, sur le même fond et dans la même couleur d'encre,
+puis on mesure des deux côtés avec le même seuillage
+(`cargo run -p overlay-testkit --example police-confirmation`).
+
+| | chasse l1 | chasse l2 | fût | encre/col |
+| --- | --- | --- | --- | --- |
+| **jeu** | **325 px** | **51 px** | **2,72 px** | **5,24** |
+| Regular 15 (avant) | 270 | 43 | 2,76 | 5,20 |
+| Medium 17 | 314 | 50 | 3,93 | 6,69 |
+| Regular 18 | 324 | 51 | 2,95 | 5,54 |
+| **Light 18 (retenu)** | **317** | **50** | **2,57** | **5,00** |
+
+Le corps 15 rendait la question **17&nbsp;% trop courte** — le retour était exact et mesurable.
+
+**Le piège du classement&nbsp;: Medium 17 arrive premier en chasse et hauteur** (3,7&nbsp;% d'écart
+contre 4,2 pour Light 18) tout en étant **44&nbsp;% trop gras**. Une police grasse compense sa
+graisse par une chasse plus courte, et un critère qui ne regarde que l'encombrement la couronne. La
+graisse se juge sur le **fût**, jamais sur la boîte. D'où une troisième graisse au design system,
+`fonts::LABEL_LIGHT` — le texte courant du jeu est plus léger que ses libellés de bouton.
+
+**L'encre est grise, pas blanche.** Mesurée au cœur des lettres&nbsp;: `#d0d1d0`. Le composant
+demandait 255, ce qui rendait la question à 220 au cœur et 213 sur ses franges, contre 208 et 197
+dans le jeu.
+
+**Il n'y avait pas de jaune**, contrairement à l'impression rapportée — et c'est la mesure qui le
+dit, pas un avis&nbsp;: cœur, franges d'antialiasing, halo et fond sont neutres à ±0,5 d'écart
+rouge&nbsp;− bleu **des deux côtés**. Le seul élément chaud de la boîte est la crête dorée posée
+juste au-dessus de la question (+8,2), conforme au jeu. Ce qui était réel, c'est l'excès de clarté
+ci-dessus, qui fait accrocher l'œil sous l'or du médaillon.
+
+**Le passage au corps 18 a rendu le retour à la ligne obligatoire**&nbsp;: «&nbsp;Fermer l'overlay et
+installer la version X&nbsp;?&nbsp;» demande environ 356 px pour 344 utiles. La question est donc
+mise en page (`LayoutJob`) et non plus posée d'un bloc, à l'interligne du jeu — **23 px**, mesuré de
+centre à centre, soit 2 de plus que l'interligne naturel d'Ubuntu au corps 18. Le point de relevé
+(`CONFIRM_QUESTION_TOP`) étant le **centre** du bloc, il vaut quel que soit le nombre de lignes.
+
+### Un paramètre caché, retiré (2026-09-15)
+
+Les deux réponses étaient posées par un `ui.horizontal()` dans un `Ui` enfant. Or `item_spacing` est
+**hérité**, et il s'ajoutait à `CONFIRM_BUTTON_GAP` : la galerie, qui pose `(10, 8)`, rendait une
+gouttière de 18 px pour 8 mesurés et décalait le groupe de 5 px à droite du centre. Un même dialogue
+prenait donc deux formes selon le panneau qui l'ouvrait. Les deux boutons sont désormais posés par
+`ui.put` sur des rectangles calculés : leurs positions sont des mesures, pas le résultat d'un layout
+dont l'appelant tient une variable.
 
 
 ## `design::label` — libellé élidé (2026-09-12)
@@ -2776,3 +2969,348 @@ magenta…) : jetons `CHAT_CHANNEL_*` et `tokens::chat_channel_color(ChatChannel
 sur une capture fournie par l'utilisateur puis corrigés par lui pour cinq canaux (Commerce reste
 le relevé). La carte d'alerte du Suivi (`panels::watchlist::chat_toast_card`) reprend le cadre via
 `paint_frame`, canal en haut à droite, plus grand, sur fond. « Tous les canaux » n'est pas un canal : la légende garde son gris.
+
+---
+
+## `design::switch` — switch à cases (2026-09-16)
+
+`crates/overlay-ui/src/design/components/switch.rs`
+
+```rust
+use overlay_ui::design::{self, DsIcon, SwitchVariant};
+
+design::switch(&mut personnage.genre)
+    .slot(Genre::Masculin, "Masculin").icon(DsIcon::Male)
+    .slot(Genre::Feminin, "Féminin").icon(DsIcon::Female)
+    .log_name("personnages.genre")
+    .show(ui);
+
+// Trois positions, une seule active — le sélecteur de grandeur du panneau Combat, tel qu'il
+// est appelé : glyphes en couleurs, sur le socle de premier plan, 112 × 36.
+design::switch(&mut metric)
+    .slot(CombatMetric::Damage, "Dégâts infligés (F3)").icon(DsIcon::MetricDamage)
+    .slot(CombatMetric::Armor, "Armure donnée (F3)").icon(DsIcon::MetricArmor)
+    .slot(CombatMetric::Heal, "Soins prodigués (F3)").icon(DsIcon::MetricHeal)
+    .variant(SwitchVariant::FirstPlan)
+    .log_name("combat.grandeur")
+    .show(ui);
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `slot(valeur, libellé)` | une case, dans l'ordre d'affichage — **deux au moins** | — |
+| `variant` | `Frame` (le cadre du jeu) ou `FirstPlan` (le socle de bouton icône de premier plan) | `Frame` |
+| `icon` | pictogramme de **la dernière case déclarée** ; remplace le libellé au rendu, qui devient l'infobulle | libellé peint |
+| `width` | largeur totale, partagée à égalité entre les cases ; le 9-slice à l'échelle étire le corps, coins gardés | `SWITCH_SLOT_SIZE` × n ± 2 × (n − 1) — **74 / 112 en `Frame`** (gouttière), **70 / 104 en `FirstPlan`** (chevauchement) |
+| `height` | hauteur imposée ; le 9-slice à l'échelle étire le corps des cases | `SWITCH_SLOT_SIZE` = 36, dans les deux variantes |
+| `scale` | **réduction homothétique** de tout le switch — cases, séparateur, liseré, biseaux, glyphes — multipliée au rapport de la variante (36/44 pour le cadre) ; dimensions arrondies au pixel | `1.0` (la case de 36) |
+| `enabled` | le switch **entier** | `true` |
+| `preview_state` | `Idle` / `Hovered` / `Active` / `Disabled`, sur la dernière case — **galerie et captures uniquement** | état réel |
+| `log_name` | nom d'instance pour le journal | `"switch"` |
+
+La valeur sélectionnée vit chez l'appelant, comme celle de `design::tabs` ; `Response::changed()`
+dit à quelle frame elle a bougé. Un switch de moins de deux cases n'est pas peint, et le dit une
+fois au journal (`warn!`, « switch incomplet »).
+
+**Ce n'est pas un `tabs`**, et la question a été posée avant d'écrire le fichier : le sélecteur de
+genre du jeu est un autre élément — cadre propre (liseré `#221f24`, rayon 6 aux quatre coins),
+séparateur plat, et des glyphes qui changent de couleur (doré sur la case active, gris sur
+l'inactive) là où l'onglet actif **blanchit** son libellé sur le même kaki. Aucune texture n'est
+partagée avec les onglets.
+
+**Deux cases relevées, *n* cases servies.** Le jeu n'a capturé qu'un switch à deux cases ; la
+demande d'un switch à trois positions (Dégâts / Armure / Soins du panneau Combat, aujourd'hui
+peint à la main dans `panels::combat::paint_metric_switch`) est venue le jour même. Une case du
+**milieu** n'a ni coin arrondi ni liseré latéral : ses deux textures sont les 40 px de
+remplissage des cases d'extrémité, coin redressé — la dérivation de `tab-active.png`. Une case
+inactive du milieu n'a pas d'ombre intérieure : sur les captures, l'ombre est toujours du côté du
+liseré extérieur, une case sans liseré n'en porte pas.
+
+**Mesures** (relevé `ui-blueprint` du 2026-09-16 sur l'asset générique 88 × 44, artefact
+« Switch à deux cases ») :
+
+| Grandeur | Valeur | Jeton |
+| --- | --- | --- |
+| Cadre | 88 × 44, liseré 2 px `#221f24`, rayon 6 — **mesures de la capture**, servies à 36/44 (voir plus bas) | `SWITCH_SLOT_WIDTH` = 43, `SWITCH_HEIGHT` = 44, `SWITCH_BORDER` |
+| Case active | 40 × 40, kaki `#635a47`, biseau clair 2 px en haut et en bas | texture |
+| Case inactive | **42** × 40, gris-brun `#514b44`, ombre intérieure 2 px côté liseré | texture |
+| Séparateur | 2 px, aplat `#312d2d`, entre les deux liserés (y 2..42) | `SWITCH_SEPARATOR_WIDTH`, `SWITCH_SEPARATOR`, `SWITCH_BORDER_Y` |
+| Glyphe actif / inactif | `#f4d89f` / `#a9a5a2` | `SWITCH_ICON_ACTIVE`, `SWITCH_ICON_INACTIVE` |
+| Glyphes | ♂ 14 × 14 et ♀ 10 × 16, **à leur taille native**, centrés | `SWITCH_ICON_SIZE` = 16 |
+| Glyphe **en couleurs** inactif | ×150/255 sur les trois canaux (estimation, voir plus bas) | `ICON_NATIVE_DIM` |
+
+**La case inactive est 2 px plus large que l'active**, et le séparateur se déplace donc de 2 px
+selon l'état — c'est ce que disent les deux captures. Le composant donne 43 px à chaque case et
+laisse le 9-slice absorber l'écart d'un pixel de chaque côté.
+
+**Un glyphe qui tient dans le carré de 16 reste à sa taille native.** Un étalon commun (comme
+`ICON_BUTTON_CONTENT`) grossirait le ♂ de 14 à 16, deux pixels de plus que dans le jeu. Seul un
+pictogramme plus grand — un `DsIcon::Cards` de 22 px emprunté à une autre famille — est ramené
+dans le carré, rapport conservé. Le glyphe est calé sur la grille de pixels : une case de 43 px
+met son centre à une demi-position, et un glyphe peint à x + 0,5 s'étale sur deux colonnes.
+
+**Textures** — six, tirées des deux captures du jeu, parce que l'arrondi du cadre est porté par
+l'alpha des cases d'extrémité (même raison que pour les onglets) :
+
+| Fichier | Origine | Taille | Découpage |
+| --- | --- | --- | --- |
+| `switch-slot-active-first.png` | `switch-first-slot-active.png` x 0..42 | 42 × 44 | `SWITCH_SLICE_FIRST` |
+| `switch-slot-inactive-last.png` | idem, x 44..88 | 44 × 44 | `SWITCH_SLICE_LAST` |
+| `switch-slot-inactive-first.png` | `switch-second-slot-active.png` x 0..44 | 44 × 44 | `SWITCH_SLICE_FIRST` |
+| `switch-slot-active-last.png` | idem, x 46..88 | 42 × 44 | `SWITCH_SLICE_LAST` |
+| `switch-slot-active.png` | `switch-slot-active-first.png` x 2..42, coin redressé | 40 × 44 | `SWITCH_SLICE` |
+| `switch-slot-inactive.png` | `switch-slot-inactive-last.png` x 0..40, coin redressé | 40 × 44 | `SWITCH_SLICE` |
+
+Aucun miroir : le jeu a capturé les deux états. Marges : 8 px côté arrondi (liseré 2 + escalier
+d'alpha 5 + 1), 4 côté séparateur, 6 en haut et en bas (liseré 2 + biseau 2 + 2) ; `decor_span`
+au niveau du bruit, `Stretch` sur les deux axes. Les deux barres génériques 88 × 44 restent dans
+`assets/design-system/` comme référence de comparaison.
+
+**Le survol — mesuré** (capture `switch-first-slot-active-and-second-slot-hover.png` du
+2026-09-16, ♂ actif et souris sur ♀, générifiée à 88 × 44 comme les deux autres) : la case
+inactive survolée prend **tout** l'aspect de la case active — fond `#635a47`, biseau clair de 2 px
+en haut et en bas, glyphe doré, plus d'ombre intérieure côté liseré. Écart moyen entre la case
+survolée et la case active de la référence : 1,0/255 (11,5 contre la case inactive). `Hovered`
+peint donc les textures actives, aucune texture de plus. La première version du composant dorait
+le glyphe seul sans toucher au fond — inventé faute de capture, et faux.
+
+**Inventé, faute de référence** — à remplacer par une mesure dès qu'une capture existera :
+
+- **L'état désactivé.** Fonds atténués comme un bouton désactivé (alpha 190/255), glyphes
+  `TEXT_DISABLED`, gouttières atténuées de même ; la case sélectionnée garde son fond actif pour
+  rester reconnaissable.
+- **Le repli sans pictogramme.** Le libellé est peint dans la case au corps des libellés du jeu
+  (`SWITCH_FONT_SIZE` = `TAB_FONT_SIZE`, 17 px) : le jeu n'a pas de switch texte dans les
+  interfaces relevées.
+- **Les cases du milieu.** Dérivées des bouts, voir plus haut.
+- **Une autre taille que 88 × 44.** Le composant ne se peint jamais à la taille de sa capture —
+  voir « 36 × 36 dans les deux variantes » ci-dessous. `scale` multiplie ce rapport, `width` et
+  `height` imposent une dimension ; dans tous les cas, c'est le 9-slice à l'échelle qui peint.
+- **Des glyphes en couleurs.** Un `DsIcon` de catégorie `couleur` (`native_color()`) est peint
+  tel quel sur la case active ou survolée, et multiplié par `ICON_NATIVE_DIM` (150/255) ailleurs
+  — le rapport de luminance gris/or du jeu, arrondi vers le bas pour se lire sur un glyphe déjà
+  sombre. Les cinq glyphes du panneau Combat sont dans ce cas, parce que leur couleur porte le
+  sens (vert = alliés, orange = ennemis, deux cœurs) : passés au blanc par transfert de
+  luminance, les silhouettes ne se distinguaient plus que par les bras et les cœurs devenaient
+  des taches (planche d'essai du 2026-09-16).
+
+### 36 × 36 dans les deux variantes (2026-09-16, le soir)
+
+**Demande utilisateur** : « passer les boutons du composant switch en 36 par 36 de manière
+générique ». Une case est un carré de `SWITCH_SLOT_SIZE` (36, `ICON_BUTTON_SIZE`) **quelle que soit
+sa matière**, et c'est le composant qui le fait — aucun appelant n'a d'échelle à régler, le
+sélecteur de genre de l'onglet Personnages y passe sans être touché. Un switch à deux cases fait
+74 px en `Frame` (gouttière de 2) et 70 en `FirstPlan` (chevauchement de 2) ; 112 et 104 à trois.
+
+La variante premier plan y était déjà (son socle EST un bouton icône de 36). La variante cadre se
+peignait aux 43 × 44 de sa capture, et les deux contrôles ne tombaient pas sur la même grille.
+Elle y est ramenée par un **9-slice à l'échelle** — `nine_slice::shape_scaled`,
+`DesignSystem::paint_scaled`, nouveau ce jour et le switch en est le premier appelant : les marges
+figées de la texture (coins, liseré, biseaux) sont peintes à `36 / 44` de leur taille, comme le jeu
+les réduit quand on baisse l'échelle de son interface, et le corps s'étire sur ce qui reste.
+Séparateur et liseré de gouttière suivent le même rapport (2 px restent 2 une fois arrondis).
+**Les glyphes, eux, ne bougent pas** : plafond commun de 16 aux deux variantes — la taille de
+glyphe commune arrêtée par le lot premier plan (ci-dessous) — et ♂ 14, ♀ 16 restent ce qu'ils
+sont, sur la même grille de 36 que ceux du panneau Combat.
+
+Les deux voies essayées la veille sur le panneau Combat sont écartées par construction : le 9-slice
+ordinaire (`height` seul) gardait ses 6 px hauts et bas à 1:1 et ne comprimait que le dégradé
+(« on a l'impression d'avoir compressé le switch »), et la texture entière en un quad réduisait
+tout mais ne savait plus s'étirer en largeur sans déformer ses coins. Le 9-slice à l'échelle vaut
+le quad à la largeur native et le 9-slice une fois étiré. `SWITCH_HEIGHT` et `SWITCH_SLOT_WIDTH`
+restent au fichier de jetons comme **mesures de la capture** : le rapport de réduction en
+découle.
+
+### `SwitchVariant::FirstPlan` — le socle de bouton icône du jeu (2026-09-16, plus tard le même jour)
+
+Demande utilisateur, une fois la variante `Frame` en place sur les deux switches du panneau
+Combat : **« permettre au composant switch la texture `button-icon-first-plan[-hover].png` »**, puis
+l'appliquer aux switches Alliés/Ennemis et Dégâts/Armure/Soins.
+
+Un paramètre du composant existant, **pas un second composant** : c'est la réponse que le contrat
+impose à « il me faut ce contrôle, mais dans une autre matière ». Et ce n'est pas un habillage de
+plus par goût — ces deux switches sont les seuls de l'overlay à flotter **par-dessus le jeu**, à
+côté des boutons icône du carré de contrôle du Suivi, et non dans une fenêtre du design system. Le
+cadre kaki du sélecteur de genre y est un meuble d'interface posé sur la scène ; le socle de
+premier plan est la matière que le jeu emploie à cet endroit.
+
+| | `Frame` | `FirstPlan` |
+| --- | --- | --- |
+| Fond d'une case | six textures de cadre, selon sa position | **un socle carré**, le même pour toutes |
+| Gouttière | liseré `SWITCH_BORDER` + séparateur `SWITCH_SEPARATOR` peints dedans | **chevauchement de 2 px**, plus un trait de 1 px `SWITCH_FIRST_PLAN_SEAM` |
+| Case native | 36 × 36 (`SWITCH_SLOT_SIZE`), cadre du jeu à l'échelle 36/44 | **36 × 36** (`SWITCH_FIRST_PLAN_SIZE` = `ICON_BUTTON_SIZE`), socle tel quel |
+| Case choisie | fond kaki | **liseré `#126068` de 2 px + halo d'1 px**, sur la bordure |
+| Survol | fond actif, glyphe doré | fond actif **et glyphe allumé** |
+| Glyphe actif / survolé / repos | doré / doré / gris chaud | blanc / **blanc** / gris froid `ICON_TINT` |
+
+**Aucune texture nouvelle** : `button-icon-first-plan.png` et son `-hover` sont au manifeste depuis
+`design::icon_button` (36 × 36, `ICON_BUTTON_SLICE`, marges figées de 6).
+
+#### La règle d'étanchéité — exigence utilisateur, vérifiée
+
+**Rien de ce lot ne doit toucher la variante `Frame`.** Énoncé tel quel par l'utilisateur
+(2026-09-16) : « le switch de sexe dans la modale de création de personnage ne doit pas du tout
+changer ». Le chevauchement, le trait de jointure, le liseré, son halo et le survol qui allume le
+glyphe appartiennent **strictement** à `FirstPlan`, et chaque différence passe par un `match` sur
+la variante — jamais par une valeur partagée qu'on « ajusterait ».
+
+Trois garde-fous, et ils sont de nature différente :
+
+1. **Deux tests unitaires** (`la_variante_cadre_ignore_tout_ce_qui_appartient_au_premier_plan`,
+   `la_teinte_du_glyphe_du_cadre_reste_celle_mesuree_sur_le_jeu`) : la gouttière du cadre reste
+   positive quand celle du premier plan devient négative, les tailles natives diffèrent, et les
+   teintes de glyphe du cadre restent celles mesurées sur les captures du jeu, état par état.
+2. **Les captures** : sur les 108 du harnais, **19 ont bougé, toutes `combat_*` ou la planche du
+   switch**. `options_personnages_modale.png`, celle qui porte le sélecteur ♂/♀, n'a pas bougé
+   d'un pixel — c'est la preuve visuelle que la variante `Frame` est intacte.
+3. **La taille du glyphe est volontairement commune** (plafond `SWITCH_ICON_SIZE`, 16) : c'est ce
+   qu'elle a toujours été pour `Frame`. `FirstPlan` avait d'abord suivi la grille du bouton icône
+   (18 sur 36), qui grossissait de 68 % les cinq glyphes du panneau Combat — ils sont de catégorie
+   `couleur` et n'ont donc pas d'étalon d'encre. Le retour au plafond commun ne change rien à
+   `Frame`.
+
+#### Le liseré de la case choisie, et son halo
+
+Quatre allers-retours sur rendu (artefact « Réglages du switch premier plan ») ont fixé, dans cet
+ordre : la position, la couleur, l'épaisseur, l'opacité.
+
+| Réglage | Valeur | D'où elle vient |
+| --- | --- | --- |
+| Couleur | `#126068` | **une couleur de la texture** — la teinte la plus vive de `button-icon-first-plan-hover.png` |
+| Épaisseur | 2 px | celle de la bordure de la texture (colonnes x 0–1 à `#141519`, corps en 2) |
+| Arrondi | 2 | celui de ses coins (alpha 24/255 en (0,0), 32 et 42 sur ses voisins, 236 en (0,2)) |
+| Opacité | 85 % | choisie sur rendu comparatif 100 / 85 / 70 % |
+| Halo | 1 px, 35 % | même couleur, juste à l'intérieur ; au-delà de 50 % il se lit comme un liseré de 3 px |
+| Position | retrait nul | **sur** la bordure, pas dedans |
+| Ordre | après toutes les cases | pour recouvrir les bordures des voisines qui la chevauchent |
+
+**Pourquoi une couleur de la texture, et pas un accent.** L'or du design system a été essayé et
+rejeté (« pas bon pour la couleur de la texture »), un gris aussi. Le socle sélectionné est un
+**dégradé** — `#428087` en haut, `#18383e` en bas : une teinte prise dans sa moitié basse
+(`#164047`, essayée) se détache en bas de la case et se dissout dans le haut. `#126068` tient sur
+toute la hauteur.
+
+**Pourquoi il est devenu nécessaire.** Le survol allume désormais le glyphe en même temps que le
+socle (retour utilisateur : n'éclaircir que le fond laissait une icône éteinte dessus, « un effet
+de décalage perturbant »). Conséquence directe : une case survolée et la case choisie sont
+devenues identiques. Le liseré est ce qui les sépare.
+
+#### Ce que le panneau Combat y gagne
+
+Plus d'échelle à régler : `SWITCH_SCALE` (36/44, la réduction homothétique du cadre) a disparu — la
+variante est native à 36. Les switches passent de 72 et 109 px à **74 et 112** (chevauchement
+compris), la hauteur ne bouge pas d'un pixel, et les deux bandeaux comme `BARS_COLUMN_TOP_OFFSET`
+en dérivent sans être touchés.
+
+### Vérification
+
+Planche dédiée `design_gallery_switch.png` (la galerie principale est au plafond des 8192 px) :
+les deux états du jeu à la case de 36 (74 × 36), le survol (comparé à sa capture, ci-dessus) et le
+désactivé, un switch de 160 px à pictogrammes de 22 px, le repli à libellés, deux switches à trois
+cases (libellés à 260 px ; pictogrammes à la largeur native de 112 px, milieu actif, dernière
+survolée), puis une rangée **aux 88 × 44 de la capture** (`scale(44/36)`, `width(88)` — la rangée
+à comparer aux deux captures du jeu) suivie des glyphes en couleurs sur le cadre à 36 (dernière
+case survolée, puis désactivé). Deux rangées de plus pour
+`SwitchVariant::FirstPlan` : les deux switches du panneau Combat tels qu'ils sont appelés (74 et
+112 px, une case survolée, un switch désactivé), et les **quatre états côte à côte** sur un switch
+portant un glyphe monochrome et un glyphe en couleurs — la seule disposition qui permette de juger
+le couple actif / survolé, puisqu'ils partagent leur socle.
+
+Et pour la variante, une preuve en creux : `options_personnages_modale.png` (le sélecteur ♂/♀)
+**ne doit jamais bouger** quand on touche au premier plan. Elle n'a pas bougé au lot du
+2026-09-16. Comparaison au jeu à la même
+taille : écart moyen 4,4 et 3,4/255 sur les deux états — le cerne sombre des glyphes du jeu,
+absorbé par la teinte comme sur toutes les icônes, fait l'essentiel des pixels en écart. Boîtes
+d'encre : ♂ au pixel près, ♀ décalé de 1 px (le jeu le pose lui-même 1 px à droite du centre de
+sa case de 42).
+
+### Appelants
+
+- **`panels::combat`** (2026-09-16) — les deux switches du panneau, camp Alliés/Ennemis
+  (`show_side_row`) et grandeur Dégâts/Armure/Soins (`show_leader_row`), à la place de
+  `paint_side_switch`/`paint_metric_switch` (piste `TINT_MEDIUM`, option `ACCENT`, peintes à la
+  main). Choix faits sur rendu du harnais, avant / après en artefact, quatre variantes présentées :
+  bandeaux opacifiés conservés — celui du camp calé à gauche sur le cadre et débordant vers la
+  gouttière (retour utilisateur : garder les marges latérales du design), icônes en couleurs.
+  Taille arrêtée en trois temps le même jour : 26 px par `height` (« compressé »), 44 natif
+  (« imposant »), puis **`scale(36/44)`** — cases de 35 × 36, switches de 72 et 109 px, bandeaux
+  de 48 px, bandeau de camp à 84 px, bandeau leader à 202 px (débord permanent de 6 px de chaque
+  côté de la colonne, pour loger un total à sept chiffres au corps 16 à côté du switch de
+  grandeur — voir `combat::show_leader_row`).
+  Les cinq glyphes sont entrés au registre `DsIcon` (`Allies`, `Enemies`, `MetricDamage`,
+  `MetricArmor`, `MetricHeal`, catégorie `couleur`), et les fichiers d'`assets/ui/` qu'`UiIcons`
+  chargeait ont été supprimés.
+  **Puis, le même jour** : `variant(SwitchVariant::FirstPlan)` sur les deux (demande utilisateur,
+  voir la section de la variante ci-dessus). `SWITCH_SCALE` disparaît — la variante est native à
+  36 px —, les switches passent à 74 et 112 px, tout le reste de la mise en page est dérivé et ne
+  bouge pas. Quatre allers-retours sur rendu ont ensuite réglé le détail : taille du glyphe ramenée
+  au plafond commun (elle avait grossi de 68 %), socles collés, survol qui allume le glyphe, et le
+  liseré `#126068` de la case choisie avec son halo.
+
+## `design::scrim` — voile modal (2026-09-17)
+
+`crates/overlay-ui/src/design/components/scrim.rs`
+
+```rust
+use overlay_ui::design::{self, ScrimLayer};
+
+let chrome = design::scrim(fenetre)              // la FENÊTRE entière, pas le panneau appelant
+    .centered(Vec2::new(500.0, 580.0))           // le contenu, centré ; sinon il reçoit tout `fenetre`
+    .layer(ScrimLayer::Foreground)               // le défaut ; `Middle` sous les popups ; `Current` = fond
+    .log_name("suivi.recette")
+    .show(ui, |ui| design::window("Objets de la recette").show(ui))
+    .inner;
+```
+
+| Paramètre | Valeurs | Défaut |
+| --- | --- | --- |
+| `scrim(over)` | ce que le voile couvre et sur quoi le contenu se centre | — |
+| `centered` | taille du rectangle de contenu, centré sur `over` | tout `over` |
+| `layer` | `Foreground` / `Middle` / `Current` (voir ci-dessous) | `Foreground` |
+| `log_name` | nom d'instance — journal ET identifiants egui de la couche | `scrim` |
+
+Composant **conteneur**, forme closure (§1 bis) : il peint le voile, avale les clics, puis appelle
+le contenu dans un `Ui` enfant au rectangle voulu, clip à `Rect::EVERYTHING` (un ornement qui
+déborde du contenu, comme la crête de la boîte de confirmation, n'a pas à être rogné). Il rend un
+`InnerResponse` : `inner` est ce que le contenu a rendu, `response` celle du voile — `clicked()` y
+veut dire « à côté du contenu », journalisé en `debug`, et laissé à l'appelant (un vrai dialogue
+modal ne se ferme pas sur un clic à côté ; aucun appelant ne le fait).
+
+### D'où il vient : quatre copies du même voile
+
+Le voile est né dans `design::confirm_dialog` (2026-09-12) et a été **recopié trois fois** en cinq
+jours : `panels::recipe_dialog` (avec un `id_salt` que la copie d'origine n'avait pas — leçon
+apprise à la dure, une assertion de debug d'egui), `panels::personnages_tab::couche_modale` (en
+`Order::Middle`, pour une raison que seule cette copie documentait) et une maquette
+d'`overlay-testkit`. Le jour où la fenêtre Options a eu besoin du même voile sur la fenêtre de jeu
+entière, la cinquième copie n'a pas été écrite : le comportement est remonté ici et **les trois
+appelants de production sont passés dessus** — la boîte de confirmation en est le premier, sans
+que sa capture de galerie ne bouge d'un pixel. La maquette, figée, garde la sienne.
+
+Jeton : `SCRIM_ALPHA` (ex-`CONFIRM_SCRIM_ALPHA`, 0x88) — un seul préfixe par composant (§1 ter).
+
+### Trois couches, parce que trois cas
+
+| `ScrimLayer` | Où | Qui |
+| --- | --- | --- |
+| `Foreground` | par-dessus tout, popups compris | `confirm_dialog`, `recipe_dialog` |
+| `Middle` | au-dessus du contenu de base, **sous** les popups (`autocomplete`, `select`, en `Foreground`) | modales de `personnages_tab`, qui portent un champ à suggestions |
+| `Current` | la couche de l'appelant, sans en ouvrir : le voile **est** le fond de la fenêtre | la fenêtre Options rattachée au jeu (`RenderContent::veiled`) |
+
+Le mauvais choix ne se voit pas sur le voile lui-même mais sur ce qui flotte au-dessus : un
+sélecteur dont le popup disparaît, une modale qui passe derrière ses suggestions. `Current` existe
+pour la fenêtre Options : dans une couche `Foreground` non-`Area`, ses sélecteurs (des `Area` en
+`Foreground`, peintes AVANT les couches libres du même ordre) seraient passés sous la modale.
+
+### Le voile de la fenêtre Options
+
+Décision utilisateur du 2026-09-17 : « un voile qui recouvre toute la fenêtre du jeu et les
+overlays lorsque l'utilisateur ouvre la modale d'options alors que la fenêtre de jeu est ouverte.
+Si l'utilisateur ouvre la modale d'options sans le jeu, aucun voile ne doit être appliqué. »
+Rattachée à un client, la fenêtre OS de la modale est désormais **celle du jeu** (taille et
+position, en pixels physiques comme la confirmation de remise à zéro) : `paint_content` voile tout
+et centre la modale dedans à `WINDOW_SIZE`. Détachée (aucun client à l'écran), rien ne change :
+fenêtre à la taille de la modale, pas de voile. Capture : `options_modale_voilee` (`panels.rs`).
+
+Galerie : `design_gallery_scrim` — du contenu factice dessous, une fenêtre du design system
+centrée dessus.

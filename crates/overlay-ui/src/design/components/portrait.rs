@@ -6,7 +6,7 @@
 //! use overlay_ui::design::{self, PortraitShape};
 //!
 //! let r = ui.add(
-//!     design::portrait(texture_id)
+//!     design::portrait(egui::load::SizedTexture::from_handle(&handle))
 //!         .shape(PortraitShape::Round)
 //!         .size(48.0)
 //!         .dimmed(fighter.is_ko)
@@ -14,9 +14,21 @@
 //! );
 //!
 //! // Pour un appelant qui pose déjà sa géométrie — le gabarit à six emplacements :
-//! design::paint_portrait(ui, rect, texture_id, PortraitShape::Round, false);
+//! design::paint_portrait(ui, rect, sized_texture, PortraitShape::Round, false);
 //! design::paint_portrait_percent(ui, rect, 42);
 //! ```
+//!
+//! ## La texture arrive avec sa taille, et ce n'est pas un détail
+//!
+//! [`portrait`] prend une [`egui::load::SizedTexture`] et non un `TextureId` nu : le médaillon
+//! peint l'image **à son rapport natif**, inscrite dans le carré ([`crate::design::fit`]). Les
+//! portraits de classe sont carrés et ne voient pas la différence ; une icône de monstre
+//! téléchargée, elle, peut être la **bannière rectangulaire** de `wakassets/monsterIllustrations`
+//! — étirée dans le carré jusqu'au 2026-09-17, retour utilisateur « les images provenant de
+//! `wakassets/monsterIllustrations` sont déformées ».
+//!
+//! Le type porteur de la taille est ce qui empêche la rechute : un appelant ne peut plus
+//! « oublier » la taille native, puisqu'il n'a plus de moyen de ne pas la donner.
 //!
 //! ## Deux formes, parce que le jeu en a deux
 //!
@@ -48,9 +60,9 @@
 //! les deux ont été alignées un temps, puis re-séparées (« je préfère la couleur accent qu'il y
 //! avait avant »). Barre et pourcentage n'ont donc pas la même couleur, et c'est voulu.
 
-use egui::{Response, Sense, Ui, Vec2, Widget};
+use egui::{load::SizedTexture, Response, Sense, Ui, Vec2, Widget};
 
-use crate::design::{text, tokens};
+use crate::design::{fit, text, tokens};
 
 /// Forme du médaillon.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -68,6 +80,10 @@ impl PortraitShape {
     /// Fonction plutôt que constante : le rayon d'un rond **dépend de la taille**, et l'écrire à la
     /// main à chaque appel est le meilleur moyen d'obtenir deux portraits ronds qui ne le sont pas
     /// tout à fait.
+    ///
+    /// `size` est le **petit côté de l'image réellement peinte**, pas celui de la boîte : une
+    /// bannière inscrite dans un médaillon rond s'arrondit alors en pastille plutôt que de se voir
+    /// rogner ses deux extrémités par un rayon calculé sur un carré qu'elle ne remplit pas.
     pub fn corner_radius(self, size: f32) -> u8 {
         match self {
             PortraitShape::Square => 0,
@@ -78,10 +94,12 @@ impl PortraitShape {
 
 /// Construit un portrait sur une texture déjà résolue.
 ///
-/// La texture arrive en [`egui::TextureId`] pour la même raison que dans
+/// La texture arrive en [`egui::load::SizedTexture`] pour la même raison que dans
 /// [`design::item_slot`](super::item_slot) : un portrait de combattant est du **contenu** — atlas de
-/// classes, icône téléchargée ou repli — que le design system ne saurait pas nommer.
-pub fn portrait(texture: egui::TextureId) -> Portrait {
+/// classes, icône téléchargée ou repli — que le design system ne saurait pas nommer. Avec sa
+/// **taille native**, sans laquelle il ne peut pas être peint à son rapport (voir la doc de module) ;
+/// `SizedTexture::from_handle(&handle)` la lit sur n'importe quelle poignée egui.
+pub fn portrait(texture: SizedTexture) -> Portrait {
     Portrait {
         texture,
         shape: PortraitShape::default(),
@@ -93,7 +111,7 @@ pub fn portrait(texture: egui::TextureId) -> Portrait {
 
 /// Voir [`portrait`].
 pub struct Portrait {
-    texture: egui::TextureId,
+    texture: SizedTexture,
     shape: PortraitShape,
     size: f32,
     dimmed: bool,
@@ -144,26 +162,22 @@ impl Widget for Portrait {
 ///
 /// Séparée du `Widget` pour le gabarit de combat, qui pose ses six emplacements à des centres
 /// relevés sur le template et n'a donc rien à faire de la mise en page d'egui.
-pub fn paint(
-    ui: &Ui,
-    rect: egui::Rect,
-    texture: egui::TextureId,
-    shape: PortraitShape,
-    dimmed: bool,
-) {
+pub fn paint(ui: &Ui, rect: egui::Rect, texture: SizedTexture, shape: PortraitShape, dimmed: bool) {
     let tint = if dimmed {
         tokens::PORTRAIT_KO_TINT
     } else {
         egui::Color32::WHITE
     };
-    egui::Image::new(egui::load::SizedTexture::new(texture, rect.size()))
-        .corner_radius(shape.corner_radius(rect.width()))
-        // `maintain_aspect_ratio(false)` : le rect donné fait foi. Les portraits de classe sont
-        // carrés, mais une icône de monstre téléchargée ne l'est pas toujours — la laisser garder
-        // ses proportions la ferait déborder du médaillon ou flotter dedans.
-        .maintain_aspect_ratio(false)
+    // L'image est **inscrite** dans le médaillon, à son rapport natif (voir `design::fit`) : le
+    // rect reçu est la boîte, pas la surface peinte. Le carré d'un portrait de classe le remplit
+    // tout entier ; une bannière de `monsterIllustrations` s'y pose centrée, entière, et non plus
+    // étirée en carré.
+    let peint = fit::contain_rect(rect, texture.size);
+    let arrondi = shape.corner_radius(peint.width().min(peint.height()));
+    egui::Image::new(SizedTexture::new(texture.id, peint.size()))
+        .corner_radius(arrondi)
         .tint(tint)
-        .paint_at(ui, rect);
+        .paint_at(ui, peint);
 }
 
 /// Peint le pourcentage au coin bas-droit du carré englobant `rect`.

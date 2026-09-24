@@ -211,16 +211,22 @@ impl Watcher {
 
         if !state.engaged && fight.engaged_by_log {
             state.engaged = true;
-            tracing::info!("[tour] {} : combat engagé, placement terminé", input.window);
+            tracing::info!("[tour] combat engagé, placement terminé");
+            tracing::debug!(window = %input.window, "[tour] combat engagé, placement terminé");
         }
 
         // Le titre vient de basculer sur un combattant du combat engagé : c'est son tour, sans
         // rien lire à l'écran.
         if switched && fight.current_in_fight {
             if state.engaged {
-                tracing::info!(
-                    "[tour] {} : la fenêtre passe aux commandes de {current}",
-                    input.window
+                // Le titre de la fenêtre de jeu porte le nom du personnage, et `current` EST ce
+                // nom (constat C6 de `docs/analyse-rgpd.md`) : la bascule se journalise, le
+                // personnage part en `debug` (« Journal détaillé »).
+                tracing::info!("[tour] la fenêtre passe aux commandes d'un autre personnage");
+                tracing::debug!(
+                    window = %input.window,
+                    character = %current,
+                    "[tour] la fenêtre passe aux commandes de ce personnage"
                 );
                 Self::activate(state, current, input.foreground, input.now, &mut events);
             } else {
@@ -239,7 +245,8 @@ impl Watcher {
         let panel = vision::find_gold_panel(band);
         if !state.engaged && panel.is_some_and(|p| vision::panel_shows_end_turn(band, p)) {
             state.engaged = true;
-            tracing::info!("[tour] {} : combat engagé, placement terminé", input.window);
+            tracing::info!("[tour] combat engagé, placement terminé");
+            tracing::debug!(window = %input.window, "[tour] combat engagé, placement terminé");
         }
         let area = match self.geometry_by_size.get(&size) {
             Some(area) => *area,
@@ -247,12 +254,12 @@ impl Watcher {
                 Some(p) => {
                     let area = vision::name_area_above(p, band);
                     tracing::info!(
-                        "[tour] {} : bande du nom localisée ({}x{} → {:?})",
-                        input.window,
+                        "[tour] bande du nom localisée ({}x{} → {:?})",
                         size.0,
                         size.1,
                         area
                     );
+                    tracing::debug!(window = %input.window, "[tour] bande du nom localisée");
                     self.geometry_by_size.insert(size, area);
                     area
                 }
@@ -284,15 +291,19 @@ impl Watcher {
                             Some((first, seq)) if *seq != learning.event_seq => {
                                 if vision::similarity(first, &glyph) >= LEARN_THRESHOLD {
                                     tracing::info!(
-                                        "[tour] {current} : gabarit du nom {} ({}x{}, fenêtre {})",
+                                        "[tour] gabarit du nom {} ({}x{})",
                                         if disagrees {
                                             "remplacé — l'ancien ne reconnaissait plus"
                                         } else {
                                             "acquis"
                                         },
                                         glyph.w,
-                                        glyph.h,
-                                        input.window
+                                        glyph.h
+                                    );
+                                    tracing::debug!(
+                                        character = %current,
+                                        window = %input.window,
+                                        "[tour] gabarit du nom appris"
                                     );
                                     self.templates.insert(current.to_string(), glyph.clone());
                                     events.push(Event::TemplateLearned {
@@ -627,6 +638,64 @@ mod tests {
             ev,
             vec![Event::Notify {
                 character: "Oumbra".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn le_tour_est_notifie_sous_le_voile_des_bonus_de_tour() {
+        // Vraies captures du 2026-09-17 : le tour de « Canis Furiosus » commence derrière la
+        // sélection des bonus de tour — écran voilé, panneau plus doré. Le gabarit appris au
+        // repos doit le reconnaître, sinon un joueur qui n'a pas la fenêtre sous les yeux n'est
+        // jamais prévenu.
+        let mut w = Watcher::default();
+        let t0 = Instant::now();
+        let canis = "Canis Furiosus";
+        let repos = fixture("repos-canis");
+        let voile = fixture("voile-canis");
+        let autre = fixture("repos-pugio-t18");
+        // Apprentissage : deux sorts, la bande au repos.
+        let f1 = facts(true, 1);
+        tick(&mut w, canis, canis, Some(&repos), &f1, true, t0);
+        let f2 = facts(true, 2);
+        let ev = tick(
+            &mut w,
+            canis,
+            canis,
+            Some(&repos),
+            &f2,
+            true,
+            t0 + Duration::from_secs(3),
+        );
+        assert!(
+            matches!(ev.as_slice(), [Event::TemplateLearned { character, .. }] if character == canis),
+            "{ev:?}"
+        );
+        // Le tour passe à un autre, puis revient sous le voile, fenêtre en arrière-plan.
+        for i in 0..2 {
+            tick(
+                &mut w,
+                canis,
+                canis,
+                Some(&autre),
+                &f2,
+                false,
+                t0 + Duration::from_secs(10 + i),
+            );
+        }
+        let ev = tick(
+            &mut w,
+            canis,
+            canis,
+            Some(&voile),
+            &f2,
+            false,
+            t0 + Duration::from_secs(40),
+        );
+        assert_eq!(
+            ev,
+            vec![Event::Notify {
+                character: canis.to_string()
             }]
         );
     }

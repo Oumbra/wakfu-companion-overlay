@@ -47,6 +47,9 @@ appliquée en fin de pipeline (défaut).
 | `icon-kamas` | *sans* `--from-button` | 14 × 12 |
 | `icon-xp` | *sans* `--from-button` | 16 × 11 |
 | `icon-info` | *sans* `--from-button` | 27 × 28 |
+| `icon-male` | *sans* `--from-button` | 14 × 14 |
+| `icon-female` | *sans* `--from-button` | 10 × 16 |
+| `icon-allies`, `icon-enemies`, `icon-metric-*` | **aucun traitement** — en couleurs, voir plus bas | 18 × 22 … 22 × 20 |
 
 ## Ce que ce jeu d'essai a appris
 
@@ -135,3 +138,74 @@ même pastille cerclée, extraite d'une capture plus petite (12 × 12).
 **`--size 24` testé et écarté.** La capture fait déjà 27 px : normaliser à 24 la
 rééchantillonne pour rien et écrase la barre du « i », dont l'épaisseur ne fait que 4 px.
 Taille native conservée, comme sur le reste du lot.
+
+## `icon-male` / `icon-female` (2026-09-16) — deux glyphes sans socle, cas nominal
+
+Les signes ♂ et ♀ du sélecteur de genre, capturés chacun à même le décor sombre (16 × 18 et
+18 × 18). `analyze` rend un « composant » de la taille du glyphe et `border: null` — le signe
+distinctif d'`icon-pin`. Réglages par défaut, `luma-light` en polarité automatique, aucun halo sur
+la bande sombre de la planche (`band_rejected` 72 et 78 : la frange antialiasée est correctement
+rejetée). Rien à consigner de plus : c'est le cas nominal du second lot.
+
+## `icon-allies` / `icon-enemies` / `icon-metric-*` (2026-09-16) — cinq glyphes gardés en couleurs
+
+Les icônes des deux switches du panneau Combat : silhouettes verte et orange du dépôt web,
+dague, cœur vert à flèche et cœur rouge à croix du jeu (`Vertylo/wakassets`). Elles n'ont **pas**
+été passées par `icon` ni `tint` : la couleur y porte le sens, et l'essai en monochrome l'a
+montré — `tint --mode luma` donne deux silhouettes qui ne se distinguent plus que par la position
+des bras, et deux cœurs qui deviennent des taches (`flat` est pire, le cœur n'est plus qu'une
+forme pleine). Elles sont donc entrées au registre `DsIcon` en catégorie **`couleur`**, simplement
+rognées à leur boîte d'encre (`Image.getbbox()`), et c'est le composant qui les atténue hors
+sélection (`tokens::ICON_NATIVE_DIM`) au lieu de les teinter.
+
+C'est la première exception à « l'icône sort blanche ». La règle reste : un glyphe monochrome se
+teinte au rendu. L'exception se justifie par une raison lisible sur la planche — un glyphe dont la
+couleur distingue deux valeurs — pas par la commodité de ne pas traiter.
+
+## `icon-edit` (2026-09-16) — glyphe d'un seul ton sur décor uni : démélange direct
+
+Le crayon aux trois points (édition/renommage), capturé à même le décor sombre en 26 × 24 px,
+glyphe de 14 × 14 natifs, or (244,216,159) sur fond (26,28,33). Pas de bouton porteur : même
+diagnostic qu'`icon-pin` (`analyze` rend un « composant » de la taille du glyphe, `border: null`).
+
+**`icon` écarté, dans tous ses réglages.** Par défaut comme avec `--floor 35/45/50`, `--grow`,
+`--rim-gain` ou `--residual`, la rangée haute des trois points et la pointe du crayon disparaissent.
+Ces pixels de frange (luminance ≈ 70, α réel ≈ 0,23) entrent dans le masque plein **avec leur
+couleur d'origine**, puis la teinte `luma-light` les normalise sur le 2ᵉ percentile de luminance
+du glyphe : ils tombent à α ≈ 0. Un seuil haut (`--floor 130`) les renvoie dans la bande de
+démélange, mais il faut alors `--tint-mode flat`, qui gonfle à 255 les bords intérieurs (160–183)
+restés dans le masque plein. Le transfert de luminance est pensé pour un modelé porté par la
+couleur ; sur un glyphe d'un seul ton, la seule nuance est l'antialiasing, et il joue contre elle.
+
+**Retenu : `scripts/demix_flat.py`**, démélange direct fond → glyphe sur toute la boîte :
+
+```bash
+python .claude/skills/design-asset/scripts/demix_flat.py CAPTURE OUT x0,y0,x1,y1 [alpha_floor=0.08]
+```
+
+Fond = médiane du décor hors boîte, glyphe = médiane des pixels francs (≥ 90ᵉ percentile), alpha =
+position de chaque pixel sur le segment ; l'ombre portée projette en négatif et tombe à 0. La boîte
+se lit dans le `glyph_bbox` d'`icon`. Le JSON rend le **résidu** de projection : ici 2,9 au maximum
+sur 87 pixels, preuve que tout tombe sur le segment — c'est la mesure qui autorise cette voie. Un
+résidu qui monte (texture de bouton, second ton dans le glyphe) renvoie vers `icon`.
+
+Ne pas en faire la voie par défaut des glyphes sans socle : ♂/♀ et le second lot sortent
+correctement par `icon`. Comparer sur la planche ; le symptôme qui déclenche `demix_flat` est un
+trait fin ou une rangée de pixels **manquants** par rapport à la source, pas un halo.
+
+## `icon-sword` (2026-09-16) — même cas qu'`icon-edit`
+
+Épée blanche (255,255,255) capturée à même le décor uni (27,52,58) en 38 × 39 px, glyphe de
+24 × 25 natifs, pas de bouton porteur (`analyze` : composant de la taille du glyphe). La voie
+`icon` par défaut écrase la frange d'antialiasing (pointe de la lame 47 → 1, garde 58 → 15, pommeau
+28 → 0) : mêmes pixels manquants qu'`icon-edit`. Retenu `demix_flat` sur la boîte `9,9,33,34` du
+`glyph_bbox` — `residual_max` 1,7 sur 238 pixels, la frange est conservée à l'unité près.
+
+## `icon-clock` (2026-09-16) — même cas qu'`icon-edit`
+
+Horloge grise (187,187,187) capturée à même le décor uni (24,24,24) en 37 × 36 px, glyphe de
+19 × 19 natifs, sans bouton porteur (`analyze` : composant de la taille du glyphe, rayon 9 — le
+cercle lui-même). Cercle d'un pixel d'épaisseur et deux aiguilles, donc entièrement porté par
+l'antialiasing : `icon` par défaut sort correct mais amincit la frange (ligne haute 21 contre 51).
+Retenu `demix_flat` sur la boîte `11,9,30,28` du `glyph_bbox` — `residual_max` 0,0 sur
+156 pixels, 44 opaques et 112 partiels.

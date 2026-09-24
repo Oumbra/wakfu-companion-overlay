@@ -5,15 +5,15 @@
 //! quand un message y correspond, un son et une carte par-dessus le jeu (`panels::watchlist::
 //! toast_card`, variante `WatchlistToastReason::Chat`), dont le clic prépare une réponse en privé.
 //!
-//! Construit sur le modèle de `panels::alerts_tab` — même squelette (titre, phrase, « Tester le
-//! son », ligne de fermeture, formulaire, grille défilable), mêmes jetons, même contrat
-//! transactionnel : l'onglet travaille sur un brouillon ([`ChatDraft`]) que « Valider » commit
-//! avec tous les autres onglets (voir `main.rs::commit_chat`).
+//! Construit sur le modèle de `panels::alerts_tab` — même squelette (titre, phrase, formulaire,
+//! grille défilable), mêmes jetons, même contrat transactionnel : l'onglet travaille sur un
+//! brouillon ([`ChatDraft`]) que « Valider » commit avec tous les autres onglets (voir
+//! `main.rs::commit_chat`).
 //!
-//! La ligne d'essai vit dans [`crate::panels::sound_row`], partagée par les trois onglets, et
-//! porte ici la case **« Couper le son des notifications »** (2026-09-15) : cochée, un message
-//! trouvé affiche toujours sa carte par-dessus le jeu, il ne fait plus sonner l'overlay. La case
-//! « Activer la recherche » du haut, elle, coupe les deux.
+//! **Le son et la fermeture de la carte ne se règlent plus ici** (2026-09-15) : l'essai du son, sa
+//! sourdine et la fermeture automatique sont partis dans la section « Chat » de l'onglet
+//! « Paramètres », avec celles du Suivi et des Alertes — voir [`crate::panels::notifications`].
+//! Cet onglet ne garde que ce qu'il liste : les recherches.
 //!
 //! ## Ce qui vient du compte, et ce qui reste local
 //!
@@ -31,6 +31,14 @@
 //! l'utilisateur contre la liste en lignes) : canal d'abord, mot ensuite, « Ajouter » enfin, ancré
 //! au bord droit ; tuiles à légende ([`design::legend_tile`]) quatre par rangée, croix révélée au
 //! survol comme les tuiles d'Alertes ; aucune couleur de canal (les thèmes du jeu).
+//!
+//! ## La suppression multiple, 2026-09-16
+//!
+//! Demande utilisateur : « ajouter le système de la suppression multiple, comme dans l'onglet
+//! Suivi ». La mécanique est **partagée** — elle vit dans [`crate::panels::bulk_select`], avec les
+//! onglets « Suivi » et « Alertes ». Ici toutes les recherches se retirent (aucune n'est
+//! « par défaut », contrairement aux Alertes), et la case à cocher se pose au coin **haut-droit**
+//! de la tuile, celui de la croix qu'elle remplace : le haut-gauche porte la légende.
 
 use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{
@@ -39,7 +47,7 @@ use overlay_engine::{
 };
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, InputSize};
-use crate::panels::{feature_switch, sound_row};
+use crate::panels::{bulk_select, feature_switch, notifications};
 
 // -------------------------------------------------------------------------------------------
 // Jetons — repris TELS QUELS de `panels::alerts_tab`, pour que les deux onglets se ressemblent
@@ -47,10 +55,6 @@ use crate::panels::{feature_switch, sound_row};
 // -------------------------------------------------------------------------------------------
 
 const TEXT: Color32 = Color32::WHITE;
-const SUBDUED: Color32 = Color32::from_rgb(0xB8, 0xB9, 0xBA);
-const SETTING_ROW_FILL: Color32 = Color32::from_rgb(0x26, 0x28, 0x2B);
-const SETTING_ROW_RADIUS: u8 = 4;
-const SETTING_ROW_HEIGHT: f32 = 40.0;
 const BODY_FONT_SIZE: f32 = 15.0;
 const SECTION_GAP: f32 = 18.0;
 /// Gouttière entre deux tuiles — `panels::alerts_tab::TILE_GAP`, le pas de la grille d'Alertes.
@@ -99,6 +103,24 @@ impl ChatToastSettings {
     }
 }
 
+/// Ce qu'il faut à la section « Chat » de l'onglet « Paramètres » pour régler la fermeture de
+/// cette carte — voir `panels::notifications::ToastClose` : le bornage reste ici, le peintre n'en
+/// refait pas un à lui.
+impl notifications::ToastClose for ChatToastSettings {
+    fn manual_close(&self) -> bool {
+        self.manual_close
+    }
+    fn set_manual_close(&mut self, manual: bool) {
+        self.manual_close = manual;
+    }
+    fn duration_seconds(&self) -> f32 {
+        self.duration_seconds
+    }
+    fn set_duration(&mut self, seconds: f32) {
+        ChatToastSettings::set_duration(self, seconds);
+    }
+}
+
 /// Le brouillon de l'onglet — ce que « Valider » commit.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChatDraft {
@@ -123,6 +145,24 @@ impl ChatDraft {
             self.filters.remove(index);
         }
     }
+
+    /// Retire les recherches dont la clé ([`filter_key`]) est cochée. Rend combien sont parties.
+    pub fn remove_keys(&mut self, keys: &[String]) -> usize {
+        let cochees: std::collections::HashSet<&String> = keys.iter().collect();
+        let avant = self.filters.len();
+        self.filters
+            .retain(|filter| !cochees.contains(&filter_key(filter)));
+        avant - self.filters.len()
+    }
+}
+
+/// Identifie une recherche — la clé de coche du mode sélection, jumelle de
+/// `panels::suivi_tab::entry_key` et `panels::alerts_tab::entry_key`.
+///
+/// Le couple (canal, mot) est déjà ce qui rend une recherche unique : `ChatDraft::add` refuse le
+/// doublon sur ce couple exact, et rien d'autre ne distingue deux entrées.
+pub(crate) fn filter_key(filter: &ChatFilter) -> String {
+    format!("{}::{}", filter.scope.label(), filter.text)
 }
 
 /// Pourquoi une recherche n'a pas été ajoutée — chaque cas a sa phrase, aucun n'est une erreur
@@ -150,11 +190,17 @@ pub struct ChatTabState {
     pub scope: ChatFilterScope,
     /// Le mot en cours de saisie.
     pub input: String,
-    /// La durée telle que tapée — voir `AlertsTabState::duration_input` pour pourquoi une chaîne.
+    /// La durée telle que tapée — voir `panels::notifications::AutoClose::input` pour pourquoi
+    /// une chaîne. **Le champ qu'elle alimente est peint dans l'onglet « Paramètres »** depuis le
+    /// 2026-09-15 ; elle reste ici, avec le brouillon dont elle règle la carte.
     pub duration_input: String,
     /// La dernière raison pour laquelle « Ajouter » n'a rien ajouté, effacée à la prochaine
     /// frappe ou au prochain ajout réussi.
     pub notice: Option<AddError>,
+    /// Mode « sélection multiple » ouvert — voir [`crate::panels::bulk_select`].
+    pub select_mode: bool,
+    /// Clés des tuiles cochées — voir [`filter_key`].
+    pub selected: Vec<String>,
 }
 
 impl Default for ChatTabState {
@@ -164,6 +210,8 @@ impl Default for ChatTabState {
             input: String::new(),
             duration_input: String::new(),
             notice: None,
+            select_mode: false,
+            selected: Vec::new(),
         }
     }
 }
@@ -176,15 +224,6 @@ pub struct ChatTabContext<'a> {
     /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
     /// contenu sous la case est grisé et inerte.
     pub enabled: &'a mut bool,
-    /// **Le son de l'alerte de recherche est-il coupé ?** — brouillon de la case « Couper le son
-    /// des notifications » (voir `panels::sound_row`), posée juste sous la ligne d'essai. Coupé,
-    /// un message trouvé affiche toujours sa carte : c'est le SON qui se tait, pas la recherche
-    /// (celle-ci a sa propre case, [`Self::enabled`]). « Valider » l'emporte, comme le reste.
-    ///
-    /// **Hors de [`ChatDraft`]**, et hors de [`ChatToastSettings`] : le brouillon porte ce qui
-    /// monte au compte, et les réglages de carte parlent de la CARTE. Une sourdine n'est ni l'un
-    /// ni l'autre — elle voyage avec celle du Suivi (`panels::sound_row::AlertMutes`).
-    pub muted: &'a mut bool,
     pub availability: ChatAvailability,
 }
 
@@ -198,22 +237,15 @@ pub enum ChatAvailability {
     NoAccount,
 }
 
-/// Ce que l'onglet demande à l'hôte — jamais exécuté ici (§17.3 bis du plan).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum ChatTabAction {
-    #[default]
-    None,
-    /// « Tester le son » : jouer le son de recherche.
-    TestSound,
-}
-
+/// **Cet onglet ne demande plus rien à l'hôte** : « Tester le son » est parti dans l'onglet
+/// « Paramètres » avec le reste des réglages de notification (2026-09-15, voir
+/// `panels::notifications`), et il était la seule intention que cet écran produisait.
 pub fn show(
     ui: &mut egui::Ui,
     panel: &design::PanelZones,
     state: &mut ChatTabState,
     ctx: &mut ChatTabContext<'_>,
-) -> ChatTabAction {
-    let mut action = ChatTabAction::None;
+) {
     let width = panel.inner.width();
 
     ui.add(design::heading("Chat"));
@@ -230,15 +262,10 @@ pub fn show(
         "chat.activer",
     );
 
-    if sound_row::show(ui, width, "chat", Some(ctx.muted)) {
-        action = ChatTabAction::TestSound;
-    }
-    ui.add_space(SECTION_GAP);
-
     match ctx.availability {
         ChatAvailability::Loading => {
             loading_row(ui, panel.inner);
-            return action;
+            return;
         }
         ChatAvailability::NoAccount => {
             ui.add(
@@ -249,15 +276,14 @@ pub fn show(
                 .width(width)
                 .log_name("chat.sans-compte"),
             );
-            return action;
+            return;
         }
         ChatAvailability::Ready => {}
     }
 
-    close_settings_row(ui, state, &mut ctx.draft.toast, width);
-    ui.add_space(SECTION_GAP);
-
-    ui.add(design::heading("Recherches"));
+    // **La ligne de création AVANT le titre de la liste** (demande du 2026-09-16, la même que
+    // pour le champ d'ajout des Alertes) : on ajoute, puis on voit ce qu'on a — le titre coiffe la
+    // grille qu'il nomme, pas le formulaire qui l'alimente.
     add_row(ui, state, ctx.draft, width);
     if let Some(notice) = state.notice {
         ui.add_space(6.0);
@@ -268,9 +294,43 @@ pub fn show(
                 .log_name("chat.ajout-refuse"),
         );
     }
-    ui.add_space(SECTION_GAP * 0.75);
+    ui.add_space(SECTION_GAP);
+
+    // **Les commandes de suppression multiple sont dans cette ligne** depuis le 2026-09-16 —
+    // mécanique partagée, voir `panels::bulk_select`. Toutes les recherches se retirent : le
+    // nombre de tuiles EST le nombre de retirables, et une liste vide ne montre aucun bouton.
+    let demande = bulk_select::show(
+        ui,
+        width,
+        bulk_select::BulkHeader {
+            title: "Recherches",
+            removable: ctx.draft.filters.len(),
+            bulk_tooltip:
+                "Retire les recherches cochées — annulable tant que la fenêtre n'est pas \
+                           validée",
+            log_prefix: "chat",
+            enabled: true,
+        },
+        bulk_select::BulkSelection {
+            mode: &mut state.select_mode,
+            keys: &mut state.selected,
+        },
+    );
+    match demande {
+        bulk_select::BulkRequest::None => {}
+        bulk_select::BulkRequest::All => {
+            let retirees = ctx.draft.filters.len();
+            ctx.draft.filters.clear();
+            tracing::info!(retirees, "[options] recherches de chat retirées en bloc");
+        }
+        bulk_select::BulkRequest::Keys(cles) => {
+            let retirees = ctx.draft.remove_keys(&cles);
+            tracing::info!(retirees, "[options] recherches de chat retirées en bloc");
+        }
+    }
 
     if ctx.draft.filters.is_empty() {
+        ui.add_space(bulk_select::HEADER_TO_PARAGRAPH);
         ui.add(
             design::info_text(
                 "Aucune recherche. Choisissez un canal, saisissez un mot, puis cliquez sur Ajouter.",
@@ -278,11 +338,11 @@ pub fn show(
             .width(width)
             .log_name("chat.vide"),
         );
-        return action;
+        return;
     }
+    ui.add_space(bulk_select::HEADER_GAP);
 
-    tile_grid(ui, panel, ctx.draft);
-    action
+    tile_grid(ui, panel, state, ctx.draft);
 }
 
 /// Un paragraphe, pas un bloc d'information — même règle que `panels::alerts_tab::paragraph`.
@@ -295,63 +355,6 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
         )
         .wrap_mode(egui::TextWrapMode::Wrap),
     );
-}
-
-/// Le bloc « Fermeture automatique » — copie conforme de `panels::alerts_tab::close_settings_row`,
-/// sur les réglages de la carte de chat.
-fn close_settings_row(
-    ui: &mut egui::Ui,
-    state: &mut ChatTabState,
-    toast: &mut ChatToastSettings,
-    width: f32,
-) {
-    let row = ui.allocate_space(Vec2::new(width, SETTING_ROW_HEIGHT)).1;
-    ui.painter()
-        .rect_filled(row, SETTING_ROW_RADIUS, SETTING_ROW_FILL);
-    let mut auto = !toast.manual_close;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(Vec2::new(12.0, 0.0))));
-    cell.horizontal_centered(|ui| {
-        if ui
-            .add(design::checkbox(&mut auto, "Fermeture automatique").log_name("chat.auto"))
-            .clicked()
-        {
-            toast.manual_close = !auto;
-        }
-        ui.add_space(12.0);
-        let response = ui.add(
-            design::input(&mut state.duration_input)
-                .size(InputSize::Standard)
-                .width(52.0)
-                .enabled(auto)
-                .log_name("chat.duree"),
-        );
-        if response.lost_focus() {
-            toast.set_duration(parse_duration(
-                &state.duration_input,
-                toast.duration_seconds,
-            ));
-            state.duration_input = format_duration(toast.duration_seconds);
-        }
-        ui.label(RichText::new("sec.").color(SUBDUED).size(BODY_FONT_SIZE));
-    });
-}
-
-/// Lit une durée tapée — virgule décimale comprise ; une saisie illisible garde la valeur en
-/// place (voir `panels::alerts_tab::parse_duration`).
-pub fn parse_duration(raw: &str, actuelle: f32) -> f32 {
-    raw.trim()
-        .replace(',', ".")
-        .parse::<f32>()
-        .unwrap_or(actuelle)
-}
-
-/// Écrit une durée dans le champ — sans décimale inutile, avec la virgule française.
-pub fn format_duration(seconds: f32) -> String {
-    if seconds.fract().abs() < f32::EPSILON {
-        format!("{}", seconds as i64)
-    } else {
-        format!("{seconds:.1}").replace('.', ",")
-    }
 }
 
 /// Canal, mot, « Ajouter » — **dans cet ordre** (demande explicite) : on dit d'abord OÙ chercher,
@@ -438,11 +441,16 @@ fn add_row(ui: &mut egui::Ui, state: &mut ChatTabState, draft: &mut ChatDraft, w
 
 /// La grille de recherches : des tuiles à légende, quatre par rangée, la croix de retrait révélée
 /// au survol — l'idiome des tuiles d'Alertes (`panels::alerts_tab::alert_item`).
-fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, draft: &mut ChatDraft) {
+fn tile_grid(
+    ui: &mut egui::Ui,
+    panel: &design::PanelZones,
+    state: &mut ChatTabState,
+    draft: &mut ChatDraft,
+) {
     // Collecter avant de muter : le rendu lit le brouillon, le geste le modifie.
     // La légende prend la couleur du canal (celle du client, `tokens::chat_channel_color`) ;
     // « Tous les canaux » garde le gris des légendes.
-    let items: Vec<(String, Option<Color32>, String)> = draft
+    let items: Vec<TileData> = draft
         .filters
         .iter()
         .map(|f| {
@@ -452,49 +460,113 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, draft: &mut ChatDraf
                     Some(design::tokens::chat_channel_color(channel))
                 }
             };
-            (f.scope.label().to_owned(), color, f.text.clone())
+            TileData {
+                key: filter_key(f),
+                legend: f.scope.label().to_owned(),
+                legend_color: color,
+                text: f.text.clone(),
+            }
         })
         .collect();
     let mut removed: Option<usize> = None;
+    let mut coche: Option<String> = None;
+    let select_mode = state.select_mode;
+    let cochees: std::collections::HashSet<&String> = state.selected.iter().collect();
     panel.scroll_area(ui, "chat.recherches", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
         let tile_width =
             (content_width - TILE_GAP * (TILES_PER_ROW as f32 - 1.0)) / TILES_PER_ROW as f32;
         for (row_index, chunk) in items.chunks(TILES_PER_ROW).enumerate() {
             ui.horizontal(|ui| {
-                for (col, (legend, color, text)) in chunk.iter().enumerate() {
+                for (col, tuile) in chunk.iter().enumerate() {
                     let index = row_index * TILES_PER_ROW + col;
-                    if filter_tile(ui, legend, *color, text, tile_width) {
-                        removed = Some(index);
+                    match filter_tile(
+                        ui,
+                        tuile,
+                        tile_width,
+                        select_mode,
+                        cochees.contains(&tuile.key),
+                    ) {
+                        TileClick::Remove => removed = Some(index),
+                        TileClick::Check => coche = Some(tuile.key.clone()),
+                        TileClick::None => {}
                     }
                 }
             });
         }
     });
+    if let Some(cle) = coche {
+        bulk_select::toggle(&mut state.selected, &cle);
+    }
     if let Some(index) = removed {
         tracing::info!(index, "[options] recherche de chat retirée");
+        // Une clé cochée qui ne désigne plus rien ferait mentir le compteur du bouton groupé.
+        if let Some(filter) = draft.filters.get(index) {
+            let cle = filter_key(filter);
+            state.selected.retain(|k| *k != cle);
+        }
         draft.remove(index);
     }
 }
 
-/// Une tuile, et sa croix. `true` quand la croix vient d'être cliquée.
+/// Ce qu'une tuile a besoin de savoir — assemblé avant la boucle, voir [`tile_grid`].
+struct TileData {
+    key: String,
+    legend: String,
+    legend_color: Option<Color32>,
+    text: String,
+}
+
+/// Ce qu'un clic sur une tuile signifie.
+enum TileClick {
+    None,
+    /// Retirer la recherche, à la croix du survol.
+    Remove,
+    /// Cocher ou décocher — le geste de la tuile **en mode sélection**, où il remplace la croix.
+    Check,
+}
+
+/// Une tuile, et sa croix — ou, en mode sélection, sa case à cocher.
+///
+/// **La case remplace la croix** : les deux vivent au même coin, et les deux gestes s'excluent
+/// (règle reprise du Suivi). La case est peinte par le composant, pas ici — voir
+/// [`design::LegendTile::selection`].
 fn filter_tile(
     ui: &mut egui::Ui,
-    legend: &str,
-    legend_color: Option<Color32>,
-    text: &str,
+    tuile: &TileData,
     width: f32,
-) -> bool {
-    let mut tile = design::legend_tile(legend, text).width(width);
+    select_mode: bool,
+    cochee: bool,
+) -> TileClick {
+    let TileData {
+        legend,
+        legend_color,
+        text,
+        ..
+    } = tuile;
+    let mut tile = design::legend_tile(legend, text)
+        .width(width)
+        .selection(select_mode.then_some(cochee))
+        // **Le ton destructif**, comme au Suivi et aux Alertes : cocher ici ne mène qu'au bouton
+        // « Supprimer », jamais à une autre action.
+        .selection_tone(design::SelectionTone::Danger);
     if let Some(color) = legend_color {
-        tile = tile.legend_color(color);
+        tile = tile.legend_color(*color);
     }
     let response = ui.add(tile.log_name(format!("chat.recherche.{text}")));
+    if select_mode {
+        // Dans le mode, le geste de la tuile est de cocher — et la croix ne se révèle plus.
+        return if response.clicked() {
+            TileClick::Check
+        } else {
+            TileClick::None
+        };
+    }
     // **`contains_pointer` et NON `hovered`** : la croix a sa propre zone, posée par-dessus la
     // tuile — dès que le pointeur l'atteint, egui lui donne le survol. Piège déjà payé au Suivi
     // et dans Alertes.
     if !response.contains_pointer() {
-        return false;
+        return TileClick::None;
     }
     let frame_top = response.rect.top() + design::LegendTile::legend_overshoot(ui);
     let frame = Rect::from_min_max(
@@ -525,7 +597,11 @@ fn filter_tile(
         if croix.hovered() { REMOVE_HOVER } else { TEXT },
     );
     design::tooltip(&croix).text("Retirer");
-    croix.clicked()
+    if croix.clicked() {
+        TileClick::Remove
+    } else {
+        TileClick::None
+    }
 }
 
 /// Le rouage de chargement, centré dans la zone que la grille occuperait — même geste que
@@ -568,16 +644,18 @@ mod tests {
         assert_eq!(draft.filters.len(), 1);
     }
 
+    /// La lecture d'une durée tapée vit désormais dans `panels::notifications`, qui la teste ;
+    /// ce qui reste ici est le bornage, qui appartient à ces réglages-ci.
     #[test]
-    fn la_duree_est_bornee_et_survit_a_une_saisie_illisible() {
+    fn la_duree_est_bornee() {
         let mut toast = ChatToastSettings::default();
         toast.set_duration(0.0);
         assert_eq!(toast.duration_seconds, MIN_ALERT_DURATION_SECONDS);
         toast.set_duration(999.0);
         assert_eq!(toast.duration_seconds, MAX_ALERT_DURATION_SECONDS);
-        assert_eq!(parse_duration("3,5", 1.0), 3.5);
-        assert_eq!(parse_duration("abc", 1.0), 1.0);
-        assert_eq!(format_duration(4.0), "4");
-        assert_eq!(format_duration(3.5), "3,5");
+        assert_eq!(
+            notifications::ToastClose::duration_seconds(&toast),
+            MAX_ALERT_DURATION_SECONDS
+        );
     }
 }

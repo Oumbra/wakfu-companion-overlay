@@ -52,6 +52,8 @@ const CHAT_CONTENT_RE = /^(.+?) : (.*)$/;
 const KAMA_GAIN_RE = new RegExp(`^Vous avez gagné (${NUM}) kamas\\.?$`);
 const KAMA_LOSS_RE = new RegExp(`^Vous avez perdu (${NUM}) kamas\\.?$`);
 const RAMASSE_RE = new RegExp(`^Vous avez ramassé (${NUM})x (.+?)\\s*\\.?$`);
+/** Distinct de KAMA_LOSS_RE (pas de suffixe "x", jamais de "kamas" ici) — voir ItemLossEntry. */
+const ITEM_LOSS_RE = new RegExp(`^Vous avez perdu (${NUM})x (.+?)\\s*\\.?$`);
 const CHALLENGE_SUCCESS_RE = /^Le challenge "(.+?)" est réussi\.?$/;
 const CHALLENGE_FAIL_RE = /^Le challenge "(.+?)" a échoué\.?$/;
 const XP_RE = new RegExp(`^(.+?) : \\+(${NUM}) points d'XP\\.`);
@@ -155,13 +157,31 @@ const OCCUPATION_RE = /^Lancement de l'occupation pour le joueur (.+)$/;
 /** Marqueur technique fiable de fin de combat, émis systématiquement (y compris pour un entraînement contre un mannequin, qui n'affiche jamais l'écran de fin de combat). Capture l'id pour distinguer plusieurs combats concurrents (multi-compte). */
 const FIGHT_END_RE = /^\[FIGHT\] End fight with id (-?\d+)$/;
 const COMBAT_START_MARKER = 'CREATION DU COMBAT';
-/** Ouverture/fermeture d'une session marchand/HDV, hors de toute enveloppe `[Catégorie]` — voir MarketOccupationEntry. */
+/** Arrêt/lancement du client Wakfu lui-même (classe `cFw`, hors de toute enveloppe `[Catégorie]`)
+ * — voir ClientLifecycleEntry. */
+const CLIENT_SHUTDOWN_MARKER = 'Stopping cFC...';
+const CLIENT_STARTUP_MARKER = 'Starting cFC...';
+/** Ouverture/fermeture d'une session marchand/HDV, hors de toute enveloppe `[Catégorie]` — voir MarketOccupationEntry.
+ * Deux formes de fermeture, toutes deux terminales : "On arrête ..." (fermeture normale par le
+ * joueur) et "On annule ... (fromServer=true, sendMessage=false)" (interruption côté serveur, ex.
+ * joueur qui s'éloigne de la board ou entre en combat). La seconde n'était pas reconnue :
+ * `inMarketOccupation` restait armé jusqu'au prochain "On arrête" (1h30 plus tard) et TOUT le
+ * butin des 17 combats intermédiaires était rejeté comme achat HDV (bug réel, fichier utilisateur du
+ * 2026-09-15 — voir SessionState::in_market_occupation, StatsStoreService.inMarketOccupation). */
 const MARKET_OCCUPATION_START_RE = /^Lancement de l'occupation MARKET sur la board\b/;
-const MARKET_OCCUPATION_END_RE = /^On arrête l'occupation MARKET sur la board\b/;
+const MARKET_OCCUPATION_END_RE = /^On (?:arrête|annule) l'occupation MARKET sur la board\b/;
+/** "Action [WALKON] performed on interactive element : <id>", hors de toute enveloppe
+ * `[Catégorie]` (comme MARKET_OCCUPATION_*_RE ci-dessus) — voir InteractiveWalkonEntry. L'id
+ * n'est volontairement pas capturé (générique par nature). */
+const WALKON_RE = /^Action \[WALKON\] performed on interactive element : \d+$/;
 /** Ligne technique émise une seule fois, tout au début de chaque session client ("1.92 (build -1
  * [2026-08-20 @ 14H18min45])") — seule source fiable de la date CALENDAIRE réelle du fichier (le
- * reste du log n'expose que l'heure HH:MM:SS,mmm, voir HEADER_RE). Voir LogDateAnchorEntry. */
-const CLIENT_BUILD_DATE_RE = /\[(\d{4})-(\d{2})-(\d{2}) @ (\d{2})H(\d{2})min(\d{2})\]/;
+ * reste du log n'expose que l'heure HH:MM:SS,mmm, voir HEADER_RE). Voir LogDateAnchorEntry.
+ * Ancrée sur TOUTE la ligne technique : non ancrée, un joueur tiers qui écrivait
+ * `[2019-01-01 @ 00H00min00]` dans un canal public (Commerce, Recrutement…) redatait tout
+ * l'historique qui suivait, synchronisation serveur comprise. */
+const CLIENT_BUILD_DATE_RE =
+  /^\d+(?:\.\d+)* \(build -?\d+ \[(\d{4})-(\d{2})-(\d{2}) @ (\d{2})H(\d{2})min(\d{2})\]\)\s*$/;
 
 /**
  * Extrait uniquement l'heure d'une ligne brute (et, le cas échéant, la date calendaire si cette ligne
@@ -222,7 +242,17 @@ const IGNORED_TAG = 'Parade !';
 /** "le joueur X donne : NK ; 1xObjet (refId=I) 2xAutre (refId=J) " — répété une fois par participant dans le résumé final d'un échange. */
 const TRADE_DONNE_RE =
   /le joueur (.+?) donne\s*:\s*(\d+)\s*K\s*;\s*(.*?)(?=le joueur .+? donne\s*:|$)/g;
-const TRADE_ITEM_RE = /(\d+)\s*x\s*(.+?)\s*\(refId=-?\d+\)/g;
+/** Fin d'un objet échangé : chaque objet se termine par son `(refId=N)`. Le découpage se fait sur ce
+ * marqueur, puis `TRADE_ITEM_RE` lit la quantité et le nom dans le segment isolé. L'ancienne regex
+ * unique `(\d+)\s*x\s*(.+?)\s*\(refId=…\)` était cubique (2 000 espaces après `1x` : 2,5 s,
+ * 4 000 : 20 s) — de quoi figer l'ingestion sur une ligne corrompue. */
+const TRADE_REFID_RE = /\(refId=-?\d+\)/g;
+const TRADE_ITEM_RE = /(\d+)\s*x\s*([\s\S]+)$/;
+/** Plafond d'un enregistrement multi-lignes en attente : un fichier corrompu (aucune ligne d'en-tête
+ * pendant des Mo) ne doit pas faire grossir le tampon sans limite. Un résumé d'échange réel tient
+ * en quelques lignes. */
+const MAX_PENDING_PARTS = 200;
+const MAX_PENDING_CHARS = 32 * 1024;
 
 const DAMAGE_ELEMENTS = new Set<string>([
   'Neutre',
@@ -335,6 +365,17 @@ interface FightParseState {
    * simple resynchronisation ("[_FL_] ... join the fight" est réémis de nombreuses fois par
    * combattant au fil d'un même combat, pas seulement à son arrivée). */
   seenFighterIds: Set<number>;
+  /** Horodatage (ms dans la journée, voir timeToMs) de la DERNIÈRE ACTION résolue dans ce combat —
+   * sort lancé, dégât, soin ou armure — `-1` tant que personne n'y a agi. Une jointure
+   * ("[_FL_] ... join the fight") n'en est PAS une : le client la réémet en rafale pour chaque
+   * combattant au démarrage d'un combat, puis régulièrement au fil de celui-ci. Sert à
+   * resolveFightIdForName pour départager un nom porté par PLUSIEURS combats concurrents
+   * (multi-compte : deux personnages dans le même donjon affrontent les mêmes monstres, aux mêmes
+   * noms) — bug réel corrigé le 2026-09-23 : un combat B qui démarrait pendant un combat A, avec
+   * les mêmes noms d'ennemis, avalait par sa rafale de jointures (`currentFightId = B`) les lignes
+   * de dégâts de A dont la cible était ambiguë ; résolues avec l'état de B, où personne n'avait
+   * encore lancé de sort (`lastCast` nul), elles créaient dans B un attaquant « Inconnu ». */
+  lastActionMs: number;
 }
 
 function createFightParseState(): FightParseState {
@@ -346,6 +387,7 @@ function createFightParseState(): FightParseState {
     summonOwners: new Map(),
     pendingSummonCasters: [],
     seenFighterIds: new Set(),
+    lastActionMs: -1,
   };
 }
 
@@ -388,7 +430,7 @@ export class LogParser {
   private currentFightId: number | null = null;
 
   /** Ligne en cours d'accumulation : un enregistrement Java peut s'étaler sur plusieurs lignes physiques (ex. résumé d'échange), la suite n'ayant pas d'en-tête LEVEL/horodatage. */
-  private pending: { time: string; parts: string[] } | null = null;
+  private pending: { time: string; parts: string[]; chars: number } | null = null;
 
   /** Horodatage (ms depuis minuit) de la dernière occurrence de chaque signature d'événement, pour ignorer les doublons multi-compte. */
   private readonly recentSignatures = new Map<string, number>();
@@ -402,12 +444,27 @@ export class LogParser {
       const flushed = this.flushPending();
       const [, level, time, firstPart] = headerMatch;
       // WARN/ERROR toujours ignorées : on ne les bufferise même pas.
-      this.pending = level === 'INFO' ? { time, parts: [firstPart] } : null;
+      this.pending =
+        level === 'INFO' ? { time, parts: [firstPart], chars: firstPart.length } : null;
       return flushed;
     }
 
     // Suite d'un enregistrement multi-lignes (ex. résumé d'échange) : pas d'en-tête sur cette ligne.
-    this.pending?.parts.push(line.trim());
+    const pending = this.pending;
+    if (pending) {
+      const part = line.trim();
+      if (
+        pending.parts.length >= MAX_PENDING_PARTS ||
+        pending.chars + part.length > MAX_PENDING_CHARS
+      ) {
+        // Enregistrement anormalement long : abandonné plutôt que tronqué (un contenu partiel
+        // produirait une entrée fausse, pas seulement incomplète).
+        this.pending = null;
+        return null;
+      }
+      pending.parts.push(part);
+      pending.chars += part.length;
+    }
     return null;
   }
 
@@ -457,11 +514,22 @@ export class LogParser {
       return { kind: 'combat-start', time };
     }
 
+    if (content === CLIENT_SHUTDOWN_MARKER) {
+      return { kind: 'client-lifecycle', time, event: 'shutdown' };
+    }
+    if (content === CLIENT_STARTUP_MARKER) {
+      return { kind: 'client-lifecycle', time, event: 'startup' };
+    }
+
     if (MARKET_OCCUPATION_START_RE.test(content)) {
       return { kind: 'market-occupation', time, active: true };
     }
     if (MARKET_OCCUPATION_END_RE.test(content)) {
       return { kind: 'market-occupation', time, active: false };
+    }
+
+    if (WALKON_RE.test(content)) {
+      return { kind: 'interactive-walkon', time };
     }
 
     if (INVOCATION_INSTANTIATED_RE.test(content)) {
@@ -549,8 +617,12 @@ export class LogParser {
       const kamas = Number(match[2]);
       const itemsText = match[3];
       const items: { name: string; quantity: number }[] = [];
-      for (const itemMatch of itemsText.matchAll(TRADE_ITEM_RE)) {
-        items.push({ quantity: Number(itemMatch[1]), name: itemMatch[2].trim() });
+      let segmentStart = 0;
+      for (const refId of itemsText.matchAll(TRADE_REFID_RE)) {
+        const segment = itemsText.slice(segmentStart, refId.index).trim();
+        segmentStart = (refId.index ?? 0) + refId[0].length;
+        const itemMatch = TRADE_ITEM_RE.exec(segment);
+        if (itemMatch) items.push({ quantity: Number(itemMatch[1]), name: itemMatch[2].trim() });
       }
       sides.push({ playerName, items, kamas });
     }
@@ -639,6 +711,19 @@ export class LogParser {
     };
   }
 
+  /**
+   * Clôture forcée d'un combat qui n'aura jamais de marqueur FIGHT_END_RE (client fermé en plein
+   * combat, voir ClientLifecycleEntry) : même nettoyage qu'une fin propre. Sans ça, ses
+   * combattants resteraient indéfiniment rattachés à un combat fantôme — et `resolveCurrentFightId`
+   * continuerait de le renvoyer comme unique combat actif pour toute ligne sans nom (butin, gain de
+   * kamas hors combat...). Si des lignes de ce combat arrivent malgré tout ensuite (autre client
+   * multi-compte encore dedans, ou personnage qui y revient à la reconnexion), il est simplement
+   * recréé comme un nouveau combat par parseFighterJoin.
+   */
+  closeFight(fightId: number): void {
+    this.forgetFight(fightId);
+  }
+
   /** Oublie un combat terminé : libère les noms de combattants qui n'appartiennent à aucun autre combat actif, pour éviter qu'un nom de monstre courant reste faussement ambigu pour un futur combat sans rapport. */
   private forgetFight(fightId: number): void {
     const members = this.fightMemberNames.get(fightId);
@@ -666,7 +751,10 @@ export class LogParser {
     return state;
   }
 
-  /** Résout le combat d'un combattant nommé : sans ambiguïté si ce nom n'appartient qu'à un seul combat actif, sinon repli sur le dernier combat résolu (voir resolveCurrentFightId). */
+  /** Résout le combat d'un combattant nommé : sans ambiguïté si ce nom n'appartient qu'à un seul
+   * combat actif ; porté par plusieurs combats concurrents, celui où quelqu'un a agi le plus
+   * récemment (voir mostRecentlyActiveFight) ; sinon repli sur le dernier combat résolu (voir
+   * resolveCurrentFightId). */
   private resolveFightIdForName(name: string): number | null {
     const ids = this.nameToFightIds.get(name);
     if (ids && ids.size === 1) {
@@ -674,7 +762,39 @@ export class LogParser {
       this.currentFightId = id;
       return id;
     }
+    if (ids && ids.size > 1) {
+      const preferred = this.mostRecentlyActiveFight(ids);
+      if (preferred !== null) {
+        this.currentFightId = preferred;
+        return preferred;
+      }
+    }
     return this.resolveCurrentFightId();
+  }
+
+  /**
+   * Parmi plusieurs combats concurrents portant le même nom de combattant : celui où quelqu'un a
+   * AGI le plus récemment (voir FightParseState.lastActionMs) — jamais un combat où personne n'a
+   * encore lancé de sort ni infligé/reçu quoi que ce soit, qui ne peut pas être la source d'une
+   * ligne de dégâts. `null` si aucun d'eux n'a encore d'action (l'appelant retombe alors sur le
+   * repli historique). Égalité stricte (même milliseconde) : le combat courant s'il en fait partie.
+   *
+   * Limite assumée : deux combats dont les ennemis portent les mêmes noms restent indiscernables
+   * pour une ligne prise isolément — un dégât de A qui suit de près un sort lancé dans B est encore
+   * attribué à B. Le tri par dernière action réduit la fenêtre d'erreur à cet entrelacement serré,
+   * là où `currentFightId` seul basculait à CHAQUE jointure réémise par le client.
+   */
+  private mostRecentlyActiveFight(ids: Set<number>): number | null {
+    let best: number | null = null;
+    let bestMs = -1;
+    for (const id of ids) {
+      const ms = this.fightStates.get(id)?.lastActionMs ?? -1;
+      if (ms > bestMs || (ms === bestMs && ms >= 0 && id === this.currentFightId)) {
+        best = id;
+        bestMs = ms;
+      }
+    }
+    return bestMs >= 0 ? best : null;
   }
 
   /** "Lancement de l'occupation pour le joueur {nom} {classe}" : le nom du combattant est un préfixe du texte capturé (la classe suit, ex. "Crâ", "Sram"). */
@@ -728,6 +848,15 @@ export class LogParser {
     const loss = KAMA_LOSS_RE.exec(content);
     if (loss) {
       return { kind: 'kama-loss', time, amount: parseFrenchNumber(loss[1]) };
+    }
+    const itemLoss = ITEM_LOSS_RE.exec(content);
+    if (itemLoss) {
+      return {
+        kind: 'item-loss',
+        time,
+        item: itemLoss[2].trim(),
+        quantity: parseFrenchNumber(itemLoss[1]),
+      };
     }
     const loot = RAMASSE_RE.exec(content);
     if (loot) {
@@ -838,6 +967,7 @@ export class LogParser {
       const fightId = this.resolveFightIdForName(caster);
       const state = this.getFightState(fightId);
       state.lastCast = { caster, spell };
+      state.lastActionMs = this.timeToMs(time);
       state.spellCasters.set(spell.toLowerCase(), caster);
       return { kind: 'spell-cast', time, caster, spell, critical, fightId };
     }
@@ -887,6 +1017,7 @@ export class LogParser {
       // concurrent (voir FightParseState). C'est aussi le fightId attribué à l'entrée émise.
       const fightId = this.resolveFightIdForName(target);
       const state = this.getFightState(fightId);
+      state.lastActionMs = this.timeToMs(time);
 
       if (sign === '-') {
         const { attacker, spell, element } = this.resolveEffectTail(target, tail, state, {
@@ -916,15 +1047,12 @@ export class LogParser {
       const amount = parseFrenchNumber(armor[3]);
       const tail = armor[4] ?? '';
       const fightId = this.resolveFightIdForName(target);
-      const { attacker, spell } = this.resolveEffectTail(
-        target,
-        tail,
-        this.getFightState(fightId),
-        {
-          selfFallback: true,
-          riposteFallback: false,
-        },
-      );
+      const state = this.getFightState(fightId);
+      state.lastActionMs = this.timeToMs(time);
+      const { attacker, spell } = this.resolveEffectTail(target, tail, state, {
+        selfFallback: true,
+        riposteFallback: false,
+      });
       return { kind: 'armor', time, target, attacker, spell, amount, fightId };
     }
 

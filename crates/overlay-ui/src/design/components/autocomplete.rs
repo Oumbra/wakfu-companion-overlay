@@ -46,7 +46,10 @@
 //!    disparaîtrait avec les résultats, et l'utilisateur resterait coincé devant une liste vide.
 //!    Dans ce cas le panneau affiche [`Autocomplete::empty_filter_label`] à la place des rangées.
 //! 5. **Après une sélection** : le champ se vide, le panneau se ferme, et l'entrée active repart
-//!    à la première. **Le filtre, lui, reste** — voir la règle suivante.
+//!    à la première. **Le filtre, lui, reste** — voir la règle suivante. Un champ de **saisie
+//!    assistée** ([`Autocomplete::fill_on_select`]) inverse la première moitié : le libellé choisi
+//!    reste dans le champ, qui garde son focus. Dans les deux cas le **texte libre est accepté** —
+//!    le composant ne valide rien et n'efface jamais ce qui ne correspond à aucune entrée.
 //! 6. **Le filtre choisi vaut pour toute la session** — écart au web, demandé le 2026-09-15. Qui
 //!    filtre sur « Ressources » pour ajouter une alerte va en ajouter plusieurs : remettre le
 //!    filtre à « Tout » après chaque choix lui redemandait le même clic à chaque objet. Il est
@@ -71,7 +74,20 @@
 //! titre que le libellé. Le décor du composant, lui (socle du champ, loupe), reste résolu en
 //! interne par `DesignSystem::get`.
 //!
+//! Elles arrivent en [`egui::load::SizedTexture`], **taille native comprise** : tout ce qui vient
+//! du CDN est peint à son rapport ([`crate::design::fit`]). Une gemme fait 13 × 20, et un monstre
+//! servi par `wakassets/monsterIllustrations` est une bannière rectangulaire — les deux étaient
+//! écrasés en carré, la gemme jusqu'au 2026-09-12 (« très fortement agrandies et aplaties »),
+//! l'image jusqu'au 2026-09-17 (« les images provenant de `wakassets/monsterIllustrations` sont
+//! déformées »). Le champ `gem_size`, qui portait la taille de la gemme à côté de sa texture et
+//! qu'un appelant pouvait donc oublier, a disparu dans la même correction : la taille ne se sépare
+//! plus de la texture.
+//!
 //! ## Ce que le composant ne fait PAS
+//!
+//! Il ne **valide** rien : ce qui est tapé reste ce qui est tapé, et un texte qui ne correspond à
+//! aucune suggestion sort du champ tel quel. Les suggestions sont une aide à la saisie, jamais une
+//! liste fermée — pour une liste fermée, c'est [`design::select`](super::select).
 //!
 //! Il ne cherche rien. L'appelant lui passe des entrées déjà trouvées, déjà triées, déjà marquées
 //! « déjà suivi » — le composant ne connaît ni catalogue, ni `overlay_engine`, ni ce qu'est un
@@ -81,10 +97,10 @@
 //! n'est pas un paramètre du composant, c'est simplement ce que l'appelant décide de lui donner.
 
 use egui::emath::GuiRounding as _;
-use egui::{Align2, Response, Sense, TextureId, Ui, Vec2};
+use egui::{load::SizedTexture, Align2, Response, Sense, Ui, Vec2};
 
 use crate::design::components::icon_button::glyph_fit;
-use crate::design::{text, tokens, DesignSystem, DsIcon, InputSize};
+use crate::design::{fit, text, tokens, DesignSystem, DsIcon, InputSize};
 
 /// Une suggestion affichée par le panneau.
 ///
@@ -97,14 +113,12 @@ pub struct AutocompleteEntry {
     /// À quelle catégorie l'entrée appartient — comparée telle quelle à celle d'un filtre. Le
     /// composant n'interprète pas cette valeur, il l'égale.
     pub category: u16,
-    /// La gemme de rareté, peinte à son rapport natif dans une boîte carrée.
-    pub gem: Option<TextureId>,
-    /// Taille native de la gemme — nécessaire pour la poser sans l'écraser (une gemme du jeu fait
-    /// 13 × 20, pas un carré).
-    pub gem_size: Vec2,
-    /// L'image de l'objet, nue : dans ce panneau la rareté est portée par la gemme, un cadre de
-    /// rareté ferait doublon.
-    pub image: Option<TextureId>,
+    /// La gemme de rareté, peinte à son rapport natif dans une boîte carrée — sa taille vient avec
+    /// elle (une gemme du jeu fait 13 × 20, pas un carré).
+    pub gem: Option<SizedTexture>,
+    /// L'image de l'objet ou du monstre, nue : dans ce panneau la rareté est portée par la gemme,
+    /// un cadre de rareté ferait doublon. Peinte à son rapport elle aussi — voir la doc de module.
+    pub image: Option<SizedTexture>,
     /// Déjà dans la liste cible : grisée, non sélectionnable, sans surbrillance.
     pub disabled: bool,
     /// Mention alignée à droite (« déjà suivi »), affichée seulement si l'entrée est désactivée.
@@ -132,7 +146,6 @@ impl AutocompleteEntry {
             label: label.into(),
             category,
             gem: None,
-            gem_size: Vec2::splat(1.0),
             image: None,
             disabled: false,
             mention: None,
@@ -148,15 +161,16 @@ pub struct AutocompleteFilter {
     /// `None` = le bouton « Tout », qui relâche le filtre. **Ce n'est pas une catégorie** : c'est
     /// la remise à zéro, et il est actif tant qu'aucun filtre ne l'est.
     pub category: Option<u16>,
-    /// L'icône du filtre — contenu, comme les images d'entrée (voir la doc de module).
-    pub icon: Option<TextureId>,
+    /// L'icône du filtre — contenu, comme les images d'entrée (voir la doc de module), taille
+    /// native comprise.
+    pub icon: Option<SizedTexture>,
     /// Infobulle du bouton.
     pub tooltip: String,
 }
 
 impl AutocompleteFilter {
     /// Le bouton « Tout ».
-    pub fn all(tooltip: impl Into<String>, icon: Option<TextureId>) -> Self {
+    pub fn all(tooltip: impl Into<String>, icon: Option<SizedTexture>) -> Self {
         Self {
             category: None,
             icon,
@@ -165,7 +179,7 @@ impl AutocompleteFilter {
     }
 
     /// Un bouton de catégorie.
-    pub fn category(category: u16, tooltip: impl Into<String>, icon: Option<TextureId>) -> Self {
+    pub fn category(category: u16, tooltip: impl Into<String>, icon: Option<SizedTexture>) -> Self {
         Self {
             category: Some(category),
             icon,
@@ -204,6 +218,8 @@ pub struct Autocomplete<'a> {
     min_query_len: usize,
     max_visible_rows: usize,
     enabled: bool,
+    search_icon: bool,
+    fill_on_select: bool,
     log_name: Option<String>,
     forced_open: Option<bool>,
     forced_active: Option<usize>,
@@ -225,6 +241,8 @@ impl<'a> Autocomplete<'a> {
             min_query_len: tokens::AUTOCOMPLETE_MIN_QUERY_LEN,
             max_visible_rows: tokens::AUTOCOMPLETE_MAX_VISIBLE_ROWS,
             enabled: true,
+            search_icon: true,
+            fill_on_select: false,
             log_name: None,
             forced_open: None,
             forced_active: None,
@@ -272,6 +290,38 @@ impl<'a> Autocomplete<'a> {
     /// Nombre de rangées visibles avant que la liste ne défile.
     pub fn max_visible_rows(mut self, rows: usize) -> Self {
         self.max_visible_rows = rows.max(1);
+        self
+    }
+
+    /// **La loupe en tête de champ** — `true` par défaut, l'apparence de la barre de recherche du
+    /// jeu.
+    ///
+    /// À passer à `false` quand le champ n'est pas une recherche mais **une saisie qui se
+    /// complète** : le nom d'un personnage s'écrit, il ne se cherche pas, et une loupe y annonce
+    /// l'inverse de ce que le champ fait (demande utilisateur du 2026-09-16, onglet Personnages).
+    /// Deux champs à loupe sur le même écran, dont un qui n'en est pas une, ne se distinguent plus
+    /// que par leur texte d'invite.
+    ///
+    /// Ne touche qu'au décor : le seuil, le panneau et le clavier sont les mêmes des deux côtés.
+    pub fn search_icon(mut self, search_icon: bool) -> Self {
+        self.search_icon = search_icon;
+        self
+    }
+
+    /// **Ce qu'une sélection fait du champ** — `false` par défaut : il se vide (règle 5), parce
+    /// qu'un champ d'AJOUT a fini son travail dès que l'entrée est passée à la liste, et qu'on en
+    /// ajoute rarement une seule.
+    ///
+    /// À passer à `true` quand la valeur choisie **est** ce que le champ doit porter : le nom d'un
+    /// personnage, choisi parmi ceux que le journal a vus, reste dans le champ et part avec le
+    /// formulaire. Le champ garde alors son focus — il n'y a rien à saisir ensuite, mais il y a
+    /// peut-être quelque chose à corriger.
+    ///
+    /// **Dans les deux cas, le texte libre reste possible** : le composant ne valide rien, il
+    /// n'efface pas ce qui ne correspond à aucune entrée, et `AutocompleteOutcome::selected` vaut
+    /// simplement `None`. Un nom que le journal n'a jamais vu se tape et s'utilise comme un autre.
+    pub fn fill_on_select(mut self, fill_on_select: bool) -> Self {
+        self.fill_on_select = fill_on_select;
         self
     }
 
@@ -330,11 +380,13 @@ impl<'a> Autocomplete<'a> {
                 // La barre de recherche du jeu, pas le champ de formulaire : 28 px, loupe en
                 // miroir, croix d'effacement — voir `InputSize::Search` et `Input::clearable`.
                 let mut input = crate::design::input(self.query)
-                    .leading_icon(DsIcon::Search)
                     .size(InputSize::Search)
                     .clearable(true)
                     .width(width)
                     .enabled(self.enabled);
+                if self.search_icon {
+                    input = input.leading_icon(DsIcon::Search);
+                }
                 if let Some(placeholder) = self.placeholder.clone() {
                     input = input.placeholder(placeholder);
                 }
@@ -508,9 +560,19 @@ impl<'a> Autocomplete<'a> {
             // Les effets d'une sélection — voir la doc de module. **Le filtre n'en fait pas
             // partie** : il est gardé pour la session (règle 6), parce qu'on n'ajoute presque
             // jamais un seul objet d'une catégorie.
-            self.query.clear();
+            //
+            // `fill_on_select` décide du sort du champ : vidé pour un champ d'ajout, rempli du
+            // libellé choisi pour une saisie assistée, qui garde alors son focus — c'est la valeur
+            // du formulaire, elle reste corrigeable.
+            if self.fill_on_select {
+                let label = self.entries[index].label.clone();
+                self.query.clear();
+                self.query.push_str(&label);
+            } else {
+                self.query.clear();
+                field.surrender_focus();
+            }
             active = 0;
-            field.surrender_focus();
         }
 
         ui.data_mut(|d| {
@@ -804,12 +866,11 @@ impl<'a> Autocomplete<'a> {
                 } else {
                     egui::Color32::from_white_alpha(tokens::AUTOCOMPLETE_FILTER_IDLE_ALPHA)
                 };
-                egui::Image::from_texture(egui::load::SizedTexture::new(
-                    icon,
-                    Vec2::splat(tokens::AUTOCOMPLETE_FILTER_BUTTON),
-                ))
-                .tint(teinte)
-                .paint_at(ui, cell.shrink(tokens::AUTOCOMPLETE_FILTER_ICON_PAD));
+                let boite = cell.shrink(tokens::AUTOCOMPLETE_FILTER_ICON_PAD);
+                let peint = fit::contain_rect(boite, icon.size);
+                egui::Image::from_texture(SizedTexture::new(icon.id, peint.size()))
+                    .tint(teinte)
+                    .paint_at(ui, peint);
             }
             crate::design::tooltip(&response).text(&filtre.tooltip);
             if response.clicked() {
@@ -883,21 +944,27 @@ impl<'a> Autocomplete<'a> {
                 Vec2::splat(tokens::AUTOCOMPLETE_GEM_BOX),
             );
             // À son rapport NATIF, comme `object-fit: contain` : une gemme du jeu fait 13 × 20 et
-            // entre dans la boîte en 9 × 14. C'est à l'appelant de fournir `gem_size` — sans elle
-            // la gemme est écrasée en carré, et c'est précisément ce que l'onglet Alertes montrait
-            // jusqu'au 2026-09-12 au soir (« très fortement agrandies et aplaties »).
-            let taille = glyph_fit(entry.gem_size, tokens::AUTOCOMPLETE_GEM_BOX);
-            egui::Image::from_texture(egui::load::SizedTexture::new(gem, taille))
-                .paint_at(ui, egui::Rect::from_center_size(boite.center(), taille));
+            // entre dans la boîte en 9,1 × 14. La taille vient avec la texture depuis le
+            // 2026-09-17 — elle était un champ à part, qu'un appelant pouvait oublier, et c'est
+            // précisément ce que l'onglet Alertes montrait jusqu'au 2026-09-12 au soir (« très
+            // fortement agrandies et aplaties »).
+            let peint = fit::contain_rect(boite, gem.size);
+            egui::Image::from_texture(SizedTexture::new(gem.id, peint.size())).paint_at(ui, peint);
         }
         let colonne = egui::Rect::from_min_size(
             egui::pos2(marge + tokens::AUTOCOMPLETE_IMAGE_COLUMN_OFFSET, row.top()),
             Vec2::new(tokens::AUTOCOMPLETE_IMAGE_COLUMN, row.height()),
         );
         if let Some(image) = entry.image {
-            let taille = Vec2::splat(tokens::AUTOCOMPLETE_IMAGE_SIZE);
-            egui::Image::from_texture(egui::load::SizedTexture::new(image, taille))
-                .paint_at(ui, egui::Rect::from_center_size(colonne.center(), taille));
+            // Même règle que la gemme : la boîte est carrée, l'image y est inscrite à son rapport.
+            // Un monstre servi par `wakassets/monsterIllustrations` est une bannière, pas un carré.
+            let boite = egui::Rect::from_center_size(
+                colonne.center(),
+                Vec2::splat(tokens::AUTOCOMPLETE_IMAGE_SIZE),
+            );
+            let peint = fit::contain_rect(boite, image.size);
+            egui::Image::from_texture(SizedTexture::new(image.id, peint.size()))
+                .paint_at(ui, peint);
         }
         let x = colonne.right() + tokens::AUTOCOMPLETE_ROW_GAP;
 

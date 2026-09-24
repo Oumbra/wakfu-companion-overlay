@@ -43,15 +43,16 @@ use crate::dungeon_run::{
     GroupableFight,
 };
 use crate::history::{
-    fight_signature, purchase_signature, trade_signature, FightLootPayload,
-    FightParticipantPayload, FightPayload, FightSide, FightSpellPayload, HistoryEventKind,
-    HistoryPayload, PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
+    fight_signature, pact_extraction_signature, purchase_signature, trade_signature,
+    FightLootPayload, FightParticipantPayload, FightPayload, FightSide, FightSpellPayload,
+    HistoryEventKind, HistoryPayload, PactExtractionItemPayload, PactExtractionPayload,
+    PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
     HDV_KAMAS_SALE_ITEM,
 };
 use crate::log_time::{format_iso_utc, time_of_day_ms, LogDateTracker};
 use crate::model::{DamageElement, FightResult, LogEntry};
 use crate::roster::{normalize_wakfu_name, Gender, RosterIndex};
-use crate::watchlist::{WatchlistEntry, WatchlistState};
+use crate::watchlist::{WatchlistEntry, WatchlistKind, WatchlistState};
 
 /// Fenêtre de corrélation perte de kamas → ramassage suivant pour reconnaître un achat marchand/
 /// HDV — miroir exact de `PURCHASE_WINDOW_MS` (`stats-store.service.ts`). Réutilisée aussi pour
@@ -59,6 +60,13 @@ use crate::watchlist::{WatchlistEntry, WatchlistState};
 /// `SessionState::consider_hdv_kama_gain`/`resolve_pending_hdv_kama_gain`) — même fenêtre côté web
 /// (`considerHdvKamaGain`).
 const PURCHASE_WINDOW_MS: i64 = 2_000;
+
+/// Délai de grâce, en ms, prolongé à chaque `LogEntry::InteractiveWalkon` (élément interactif du
+/// décor — le pacte notamment) ET à chaque ramassage qui rejoint le lot d'extraction courant,
+/// au-delà duquel la fenêtre d'extraction de pacte se ferme — miroir exact de
+/// `PACT_EXTRACTION_WINDOW_MS` (`stats-store.service.ts`), calibré côté web sur un vrai fichier
+/// utilisateur (écarts de 30 à 80 s entre un WALKON et le premier ramassage qu'il corrèle).
+const PACT_EXTRACTION_WINDOW_MS: i64 = 3 * 60 * 1000;
 
 /// Résout `itemId`/`itemName`, mutuellement exclusifs — miroir exact d'`HistorySyncService.
 /// itemPayload` (`history-sync.service.ts`) : un id catalogue connu remplace TOUJOURS le nom brut
@@ -177,11 +185,13 @@ pub struct FighterDamage {
     /// `LogEntry::EnemyDefeated` (voir `SessionState::apply`, cas `EnemyDefeated`), qui malgré son
     /// nom couvre aussi bien "X est KO !" (réservé aux alliés, `KO_RE`) que "X est hors-combat !"
     /// (diffusé à tout combattant, `HORS_COMBAT_RE`) — voir `log-parser.ts`. Ne redevient JAMAIS
-    /// `false` une fois posé (pas de suivi de "ressuscité en plein combat" ici) : c'est un simple
-    /// indicateur d'affichage (portrait grisé, `overlay-ui::panels::combat`), pas une donnée de
-    /// synchro — `build_fight_sync_event` continue de dériver `defeated`/`fled` indépendamment à
-    /// partir de `resolved_enemies`/`fled_names` pour le payload serveur, ce champ-ci n'y participe
-    /// pas. `#[serde(default)]` même raison que `xp_gained` ci-dessus (champ ajouté après coup).
+    /// `false` une fois posé (pas de suivi de "ressuscité en plein combat" ici). Sert à
+    /// l'affichage (portrait grisé, `overlay-ui::panels::combat`) **et** à la synchro depuis le
+    /// 2026-09-17 : `build_fight_sync_event` le lit en complément de `resolved_enemies`/
+    /// `fled_names` pour remplir `FightParticipantPayload::defeated`, seul moyen de transmettre
+    /// l'état KO d'un combattant restauré après un redémarrage en plein combat (`restore_fight`
+    /// repart d'un `resolved_enemies` vide, alors que ce champ-ci est persisté par `fight_store`).
+    /// `#[serde(default)]` même raison que `xp_gained` ci-dessus (champ ajouté après coup).
     #[serde(default)]
     pub is_ko: bool,
     /// Sorts lancés par ce combattant pendant son DERNIER tour, dans l'ordre du log — la donnée du
@@ -281,7 +291,11 @@ pub struct FightSnapshot {
     pub last_enemy_caster: Option<usize>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// `Serialize`/`Deserialize` (2026-09-17) : la bande Récap de l'overlay persiste les totaux de SA
+/// session (`overlay_ui::recap_session`, un JSON à côté des `fight-*.json`) pour les reprendre
+/// après un redémarrage. `#[serde(default)]` : un fichier écrit avant un champ reste chargeable.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SessionTotals {
     pub kamas_gained: i64,
     pub kamas_lost: i64,
@@ -289,6 +303,20 @@ pub struct SessionTotals {
     pub loot_count: i64,
     pub fights_won: i64,
     pub fights_lost: i64,
+    /// Challenges réussis **de toute la session**, tous combats confondus (2026-09-16) — le
+    /// pendant de `FightSnapshot::challenges_passed`, qui ne compte que ceux d'UN combat.
+    ///
+    /// Deux compteurs et non un total dérivé de `fights` : `MAX_TRACKED_FIGHTS` purge les combats
+    /// terminés les plus anciens, un total recalculé à la volée diminuerait donc en cours de
+    /// session. Même raison que `fights_won`/`fights_lost`, accumulés ici pour la même raison.
+    ///
+    /// **Compté même sans `fightId` résolu** (le parser n'en rattache pas toujours un), miroir
+    /// exact du web : `StatsStoreService.challengesPassed`/`challengesFailed` s'incrémentent sur
+    /// TOUTE ligne de challenge, indépendamment de `Fight.challengesPassed`/`Failed`, qui eux
+    /// exigent un combat.
+    pub challenges_passed: i64,
+    /// Challenges échoués de toute la session — voir [`Self::challenges_passed`].
+    pub challenges_failed: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -296,6 +324,22 @@ pub struct LootItem {
     pub time: String,
     pub item: String,
     pub quantity: i64,
+}
+
+/// Lot d'objets accumulés pendant une fenêtre d'extraction de pacte — voir
+/// `SessionState::pending_pact_batch`. Miroir de `pendingPactBatch` (`stats-store.service.ts`),
+/// à une différence de structure près : un `Vec` plutôt qu'une table de hachage, pour garder
+/// l'ORDRE DE RAMASSAGE des objets (le `Map` JS le garde nativement). Cet ordre est celui des
+/// lignes envoyées au serveur (`pact_extraction_items.line_index`, clé d'une correction d'objet
+/// homonyme côté web) — une table de hachage Rust le rendrait arbitraire d'une exécution à
+/// l'autre. La signature, elle, trie de toute façon (voir `pact_extraction_signature`).
+#[derive(Debug, Clone, PartialEq)]
+struct PactBatch {
+    /// `(clé de fusion — nom en minuscules, nom d'origine, quantité cumulée)`.
+    items: Vec<(String, String, i64)>,
+    /// Heure brute du PREMIER objet du lot : c'est elle qui date l'extraction (miroir de
+    /// `pendingPactBatch.firstTime`), pas celle du WALKON qui a ouvert la fenêtre.
+    first_time: String,
 }
 
 /// Nombre d'objets ramassés gardés en mémoire pour l'affichage (§9 : « Alertes de drop » — ici
@@ -386,9 +430,13 @@ struct FightWorking {
     /// « combat courant » à vider/recréer, chaque `fight_id` a son propre index depuis sa
     /// création).
     fighter_index: HashMap<String, Vec<usize>>,
-    /// Noms d'ennemis (normalisés en minuscules) déjà "résolus" — vaincus explicitement
+    /// Noms de combattants (normalisés en minuscules) déjà "résolus" — vaincus explicitement
     /// (`EnemyDefeated`) ou en fuite (`EnemyFled`) — voir le filet de rattrapage de `apply` pour
-    /// `CombatEnd`. Miroir simplifié de `FightWorking.defeatedNames`/`fledNames`
+    /// `CombatEnd`. Malgré son nom, ce set contient **aussi des alliés** : `EnemyDefeated` couvre
+    /// « X est KO ! » (réservé aux alliés) autant que « X est hors-combat ! » (voir la doc de
+    /// `FighterDamage::is_ko`), et `build_fight_sync_event` s'appuie dessus pour les deux camps.
+    /// Seul le filet de rattrapage de `CombatEnd` reste réservé aux ennemis (une victoire n'a
+    /// jamais mis un allié KO). Miroir simplifié de `FightWorking.defeatedNames`/`fledNames`
     /// (`stats-store.service.ts`) : pas de comptage PAR INSTANCE comme `defeatedInstanceCounts`
     /// côté web — un nom marqué résolu l'est pour TOUTES ses instances d'un coup. Écart assumé,
     /// hors périmètre de ce portage (qui couvre l'attribution des dégâts/soins, pas le comptage de
@@ -445,15 +493,15 @@ struct FightWorking {
     /// et le retour utilisateur 2026-09-02 (captures d'écran à l'appui : « Balise de Contact »,
     /// mécanisme allié, listé côté ennemis).
     summon_names: std::collections::HashSet<String>,
-    /// Noms (minuscules) d'ennemis résolus par une FUITE (`EnemyFled`) — sous-ensemble de
-    /// `resolved_enemies` (voir `mark_resolved`) : sert uniquement à distinguer `defeated`/`fled`
-    /// au moment de construire `FightParticipantPayload` (L5, §7.1), `resolved_enemies` seul ne le
-    /// permettant pas (les deux causes de résolution y sont fusionnées, voir sa doc). Perdu si
-    /// l'overlay redémarre en cours de combat (`restore_fight` ne le reconstruit pas, comme le
-    /// reste de l'état d'attribution) — un ennemi déjà fui avant un redémarrage serait alors
-    /// compté `defeated` plutôt que `fled` s'il se trouve aussi implicitement résolu par le filet
-    /// de rattrapage : écart mineur assumé, cohérent avec les autres pertes déjà documentées de
-    /// `restore_fight`.
+    /// Noms (minuscules) de combattants résolus par une FUITE (`EnemyFled`) — allié compris, comme
+    /// `resolved_enemies` dont c'est un sous-ensemble (voir `mark_resolved`) : sert uniquement à
+    /// distinguer `defeated`/`fled` au moment de construire `FightParticipantPayload` (L5, §7.1),
+    /// `resolved_enemies` seul ne le permettant pas (les deux causes de résolution y sont
+    /// fusionnées, voir sa doc). Perdu si l'overlay redémarre en cours de combat (`restore_fight`
+    /// ne le reconstruit pas, comme le reste de l'état d'attribution) — un ennemi déjà fui avant un
+    /// redémarrage serait alors compté `defeated` plutôt que `fled` s'il se trouve aussi
+    /// implicitement résolu par le filet de rattrapage : écart mineur assumé, cohérent avec les
+    /// autres pertes déjà documentées de `restore_fight`.
     fled_names: std::collections::HashSet<String>,
     /// Budget de lignes `FighterJoined` encore "attendues comme déjà connues" pour un combat
     /// RESTAURÉ (voir `restore_fight`) — vide (`HashMap::new()`) pour un combat découvert
@@ -698,6 +746,23 @@ struct SessionState {
     /// qui vient d'être expliqué par un échange tout juste conclu (cas où le `TradeCompleted`
     /// PRÉCÈDE la ligne de gain).
     last_trade_completed_at_ms: Option<i64>,
+    /// Ligne « Vous avez perdu Nx X » en attente d'un ramassage immédiat (fenêtre
+    /// `PURCHASE_WINDOW_MS`), signature du cycle de démantèlement d'objet — miroir de
+    /// `pendingItemLoss` : `(heure du jour en ms)`. Même rôle que `pending_purchase`, mais pour
+    /// exclure du butin de combat seulement, sans rien enregistrer.
+    pending_item_loss: Option<i64>,
+    /// Heure du jour (ms) au-delà de laquelle la fenêtre d'extraction de pacte courante est
+    /// considérée expirée — posée/prolongée à chaque `InteractiveWalkon` ET à chaque ramassage qui
+    /// rejoint le lot (voir `PACT_EXTRACTION_WINDOW_MS`, `check_pact_window_expiry`). `None` =
+    /// aucune fenêtre ouverte. Miroir de `pactWindowExpiresAtMs`.
+    pact_window_expires_at_ms: Option<i64>,
+    /// Objets accumulés depuis l'ouverture de la fenêtre de pacte courante — flushés en un
+    /// `SyncEvent` `Pact` dès qu'une ligne arrive après expiration, **jamais forcés en fin de lot**
+    /// (contrairement à `pending_hdv_kama_gain`) : une fenêtre de plusieurs minutes peut
+    /// légitimement chevaucher deux lots successifs en lecture incrémentale, la couper
+    /// prématurément fragmenterait une seule extraction réelle en plusieurs lignes. Miroir de
+    /// `pendingPactBatch`.
+    pending_pact_batch: Option<PactBatch>,
     /// Combats passés de `ongoing` à terminés SANS ligne `CombatEnd` depuis le dernier lot (voir
     /// `abandon_fight`) — drainé par `Engine::ingest_batch`, qui supprime leur fichier
     /// `fight_store` : `touched_fight_ids` ne connaît que les combats nommés par une entrée du
@@ -754,11 +819,17 @@ impl SessionState {
             .map(|(id, _)| *id)
             .collect();
         for fight_id in stale {
+            // Nom du personnage en `debug` (constat C6 de `docs/analyse-rgpd.md`) : les deux
+            // identifiants de combat suffisent à suivre l'enchaînement dans le journal.
             tracing::info!(
                 fight_id,
                 joined_fight_id,
-                character = name,
                 "combat abandonné : le personnage en a rejoint un autre"
+            );
+            tracing::debug!(
+                fight_id,
+                character = name,
+                "combat abandonné par ce personnage"
             );
             self.abandon_fight(fight_id, Some(time));
         }
@@ -769,14 +840,18 @@ impl SessionState {
     /// laissé SUSPENDU (`FightWorking::suspended`) : si Wakfu remet le personnage dans ce même
     /// combat à la reconnexion, ses lignes `[_FL_]` rejouées le rouvrent sans dupliquer personne
     /// (voir `apply`, cas `FighterJoined`).
-    fn suspend_all_ongoing_fights(&mut self, time: Option<&str>) {
+    /// Renvoie les combats effectivement suspendus — l'appelant (`Engine::ingest_batch`) les fait
+    /// oublier au parser vendu (`LogParserEngine::close_fight`), qui sinon continuerait de les
+    /// désigner comme combat actif pour toute ligne sans nom.
+    fn suspend_all_ongoing_fights(&mut self, time: Option<&str>) -> Vec<i64> {
         let ongoing: Vec<i64> = self
             .fights
             .iter()
             .filter(|(_, fight)| fight.snapshot.ongoing)
             .map(|(id, _)| *id)
             .collect();
-        for fight_id in ongoing {
+        for fight_id in &ongoing {
+            let fight_id = *fight_id;
             tracing::info!(fight_id, "combat suspendu : client déconnecté ou relancé");
             self.abandon_fight(fight_id, time);
             if let Some(fight) = self.fights.get_mut(&fight_id) {
@@ -788,6 +863,7 @@ impl SessionState {
                 fight.pending_restored_joins = budget;
             }
         }
+        ongoing
     }
 
     /// Renvoie les noms d'ennemis crédités IMPLICITEMENT comme vaincus par le filet de rattrapage
@@ -808,6 +884,13 @@ impl SessionState {
         sync_events: &mut Vec<SyncEvent>,
     ) -> Vec<String> {
         let mut implicitly_defeated_enemies = Vec::new();
+
+        // Ferme (flush) une fenêtre d'extraction de pacte déjà expirée AVANT de traiter cette
+        // ligne — voir `pact_window_expires_at_ms` : si CETTE ligne est celle qui dépasse
+        // l'expiration, elle n'a pas à rejoindre le lot qu'on vient de clore (elle sera réévaluée
+        // normalement juste après, comme un nouveau `InteractiveWalkon` rouvrirait la fenêtre le
+        // cas échéant). Miroir de `checkPactWindowExpiry`, appelé au même endroit côté web.
+        self.check_pact_window_expiry(entry, ctx, sync_events);
 
         // Détection d'achat marchand/HDV (miroir du préambule d'`apply` côté web,
         // `stats-store.service.ts`) : une perte de kamas immédiatement suivie (fenêtre
@@ -840,7 +923,28 @@ impl SessionState {
                     }
                 }
             }
-            if !purchase_loot {
+            // Un ramassage survenant pendant une fenêtre d'extraction de pacte ouverte (voir
+            // `pact_window_expires_at_ms`) n'est jamais du butin de combat, même si un combat est
+            // actif au même moment (`fight_id` résolu par le parser pour un personnage en combat
+            // sur un autre compte, ou combat encore ouvert en mémoire) — même règle que pour un
+            // achat, qui reste prioritaire. Miroir d'`isPacteLoot` (`stats-store.service.ts`).
+            let pact_loot = !purchase_loot && self.pact_window_expires_at_ms.is_some();
+            if pact_loot {
+                self.add_to_pact_batch(item, *quantity, time);
+            }
+            // Cycle de démantèlement d'objet (« Vous avez perdu X » puis « Vous avez ramassé
+            // des ressources ») : le ramassage qui suit immédiatement une perte d'objet n'est pas
+            // du butin de combat non plus — miroir d'`isDismantleLoot`, mêmes priorités (achat,
+            // puis pacte, puis démantèlement).
+            let dismantle_loot = !purchase_loot
+                && !pact_loot
+                && match (self.pending_item_loss, time_of_day_ms(time)) {
+                    (Some(loss_time_ms), Some(time_ms)) => {
+                        time_ms - loss_time_ms <= PURCHASE_WINDOW_MS
+                    }
+                    _ => false,
+                };
+            if !purchase_loot && !pact_loot && !dismantle_loot {
                 if let Some(fight_id) = fight_id {
                     if let Some(fight) = self.fights.get_mut(fight_id) {
                         // Fusionne avec une ligne déjà accumulée pour ce même objet plutôt que
@@ -862,6 +966,9 @@ impl SessionState {
         }
         if !matches!(entry, LogEntry::KamaLoss { .. }) {
             self.pending_purchase = None;
+        }
+        if !matches!(entry, LogEntry::ItemLoss { .. }) {
+            self.pending_item_loss = None;
         }
 
         // Un gain de kamas hors combat en attente de confirmation (voir `pending_hdv_kama_gain`)
@@ -1260,11 +1367,17 @@ impl SessionState {
                 }
             }
             LogEntry::ChallengeResult {
-                success,
-                fight_id: Some(fight_id),
-                ..
+                success, fight_id, ..
             } => {
-                if let Some(fight) = self.fights.get_mut(fight_id) {
+                // Le total de SESSION d'abord, et sans condition sur `fight_id` : voir
+                // `SessionTotals::challenges_passed`. Un challenge dont le combat n'a pas été
+                // résolu par le parser reste un challenge tenté.
+                if *success {
+                    self.totals.challenges_passed += 1;
+                } else {
+                    self.totals.challenges_failed += 1;
+                }
+                if let Some(fight) = (*fight_id).and_then(|id| self.fights.get_mut(&id)) {
                     if *success {
                         fight.challenges_passed += 1;
                     } else {
@@ -1278,6 +1391,14 @@ impl SessionState {
                 time,
                 ..
             } => {
+                // `loot_count`/`recent_loot` comptent TOUT ramassage, qu'il vienne d'un combat,
+                // d'un achat marchand/HDV ou d'une extraction de pacte : ce sont les objets
+                // ramassés de la session, pas le butin d'un combat (seul ce dernier, `FightWorking
+                // ::loot`, exclut les trois cas — voir le préambule d'`apply`). Écart assumé avec
+                // le web, qui range les objets de pacte dans un `sessionPactItems` distinct de
+                // `sessionLoot` parce que sa carte Récap leur consacre une section : la bande de
+                // récap de l'overlay n'affiche qu'un compteur d'objets, où les séparer ferait
+                // simplement disparaître ces objets de l'affichage.
                 self.totals.loot_count += quantity;
                 self.recent_loot.push(LootItem {
                     time: time.clone(),
@@ -1287,6 +1408,12 @@ impl SessionState {
                 if self.recent_loot.len() > RECENT_LOOT_CAPACITY {
                     self.recent_loot.remove(0);
                 }
+            }
+            LogEntry::InteractiveWalkon { time } => {
+                self.open_or_extend_pact_window(time);
+            }
+            LogEntry::ItemLoss { time, .. } => {
+                self.pending_item_loss = time_of_day_ms(time);
             }
             LogEntry::TradeCompleted { time, sides } => {
                 // Voir `pending_hdv_kama_gain` : un gain de kamas hors combat qui vient tout juste
@@ -1299,11 +1426,24 @@ impl SessionState {
                     sync_events.push(event);
                 }
             }
+            // `client-lifecycle` : la coupure du client est traitée EN AMONT du parseur, par
+            // `Engine::ingest_batch` (voir `is_client_cut_line`, qui reconnaît aussi la perte de
+            // connexion et la bannière de démarrage) — rien à refaire ici.
+            //
+            // `market-occupation` : volontairement INEXPLOITÉ, contrairement au web
+            // (`isPurchaseLoot = priceKnown || this.inMarketOccupation`). Le drapeau n'est
+            // refermé que par « On arrête/annule l'occupation MARKET » ou un `client-lifecycle` ;
+            // sur `tests/wakfu.log` (vrai fichier, 2026-08-04), l'ouverture de 20:33:04 n'a JAMAIS
+            // aucune des deux — armer ce drapeau y requalifierait en achat HDV les 628 ramassages
+            // des 1 h 30 suivantes, c'est-à-dire tout le butin de tous les combats du fichier.
+            // Les logs récents (celui qui a servi à calibrer le web, 2026-09-15) portent bien la
+            // ligne de fermeture : le jour où un fichier récent le confirme ici aussi, câbler
+            // l'exclusion (le signal, lui, est déjà parsé et désérialisé).
+            //
             // Hors périmètre de ce premier slice (voir le commentaire de module) : chat,
             // combat-defeat-marker, combat-start (ne porte pas de fightId, voir le TS vendu),
-            // market-occupation, et les variantes sans fightId (kamas/loot hors combat, dégâts non
-            // résolus, spell-cast/enemy-defeated/fled/challenge-result sans fightId résolu par le
-            // parser).
+            // et les variantes sans fightId (kamas/loot hors combat, dégâts non résolus,
+            // spell-cast/enemy-defeated/fled/challenge-result sans fightId résolu par le parser).
             _ => {}
         }
         implicitly_defeated_enemies
@@ -1330,6 +1470,78 @@ impl SessionState {
     /// `Engine::ingest_batch` en fin de lot, pour ne jamais le perdre si la prochaine ligne tarde
     /// à arriver (voire une reconnexion qui viderait silencieusement l'état). Miroir exact de
     /// `flushPendingHdvKamaGain`, appelé au même moment côté web (fin d'`ingest()`).
+    /// Ferme (flush) la fenêtre d'extraction de pacte courante si `entry` arrive après son
+    /// expiration — miroir de `checkPactWindowExpiry`, appelée en tête d'`apply`. Une ligne sans
+    /// heure exploitable (jamais observée en pratique, `time_of_day_ms` ne renvoie `None` que sur
+    /// un horodatage malformé) laisse la fenêtre telle quelle plutôt que de clore un lot sur une
+    /// base non datable.
+    fn check_pact_window_expiry(
+        &mut self,
+        entry: &LogEntry,
+        ctx: ApplyContext<'_>,
+        sync_events: &mut Vec<SyncEvent>,
+    ) {
+        let Some(expires_at) = self.pact_window_expires_at_ms else {
+            return;
+        };
+        if time_of_day_ms(entry.time()).is_some_and(|ms| ms > expires_at) {
+            self.flush_pending_pact_batch(ctx, sync_events);
+        }
+    }
+
+    /// Ouvre une nouvelle fenêtre d'extraction de pacte, ou prolonge celle déjà en cours — appelée
+    /// par `InteractiveWalkon` ET par chaque ramassage qui rejoint le lot courant
+    /// (`add_to_pact_batch`), pour ne pas couper un lot qui s'étale sur plus que la fenêtre.
+    /// Miroir d'`openOrExtendPactWindow`.
+    fn open_or_extend_pact_window(&mut self, time: &str) {
+        if let Some(time_ms) = time_of_day_ms(time) {
+            self.pact_window_expires_at_ms = Some(time_ms + PACT_EXTRACTION_WINDOW_MS);
+        }
+    }
+
+    /// Ajoute un objet au lot d'extraction de pacte en cours (créé si besoin) — miroir
+    /// d'`addToPactBatch`. Fusionne par nom normalisé en minuscules, comme le web.
+    fn add_to_pact_batch(&mut self, item: &str, quantity: i64, time: &str) {
+        let batch = self.pending_pact_batch.get_or_insert_with(|| PactBatch {
+            items: Vec::new(),
+            first_time: time.to_string(),
+        });
+        let key = item.to_lowercase();
+        match batch
+            .items
+            .iter_mut()
+            .find(|(existing, _, _)| *existing == key)
+        {
+            Some((_, _, existing_quantity)) => *existing_quantity += quantity,
+            None => batch.items.push((key, item.to_string(), quantity)),
+        }
+        self.open_or_extend_pact_window(time);
+    }
+
+    /// Committe le lot d'extraction de pacte en cours en un `SyncEvent` `Pact` — miroir de
+    /// `flushPendingPactBatch`/`registerPactExtraction`. Jamais appelée en fin de lot de lignes
+    /// (voir la doc de `pending_pact_batch`).
+    fn flush_pending_pact_batch(
+        &mut self,
+        ctx: ApplyContext<'_>,
+        sync_events: &mut Vec<SyncEvent>,
+    ) {
+        self.pact_window_expires_at_ms = None;
+        let Some(batch) = self.pending_pact_batch.take() else {
+            return;
+        };
+        if batch.items.is_empty() {
+            return;
+        }
+        let occurred_at_ms = self.date_tracker.full_timestamp_ms(&batch.first_time);
+        tracing::debug!(
+            items = batch.items.len(),
+            time = %batch.first_time,
+            "extraction de pacte clôturée"
+        );
+        sync_events.push(build_pact_sync_event(&batch, occurred_at_ms, ctx));
+    }
+
     fn flush_pending_hdv_kama_gain(
         &mut self,
         ctx: ApplyContext<'_>,
@@ -1627,10 +1839,18 @@ impl SessionState {
     /// simple et strictement meilleur : repli sur la PREMIÈRE instance jointe de ce nom, jamais de
     /// dégâts perdus.
     ///
-    /// Ajoute aussi défensivement le combattant lui-même s'il n'a jamais été vu rejoindre (ne
-    /// devrait pas arriver — voir la doc de `FighterJoinedEntry`, émis pour chaque combattant —
-    /// mais un combat en cours au moment de la connexion peut en avoir manqué le début) : sans
-    /// classe, comme un allié pas encore classifié (voir doc de `FighterDamage::class_name`).
+    /// **Un attaquant que ce combat n'a jamais vu rejoindre ne crédite personne et n'est JAMAIS
+    /// ajouté** (2026-09-23, décision utilisateur, bug réel en multi-compte). Jusqu'ici ce chemin
+    /// l'ajoutait « défensivement », sans classe, au motif qu'un combat déjà en cours à la
+    /// connexion aurait pu en manquer la jointure — hypothèse caduque : le rattrapage rejoue
+    /// `wakfu.log` depuis le début (`Tailer::poll`) et un combat restauré du disque rapporte ses
+    /// combattants avec lui (`restore_fight`). Ce qui arrivait réellement par là, c'était une
+    /// ligne de dégâts d'un AUTRE combat concurrent, mal routée par le parser vers un combat qui
+    /// venait de démarrer et où personne n'avait encore agi — résolue avec un `lastCast` vide,
+    /// elle portait l'attaquant « Inconnu » et créait une ligne « Inconnu » dans le panneau. Le
+    /// routage lui-même est corrigé côté parser (`mostRecentlyActiveFight`, `log-parser.ts`) ;
+    /// cette garde reste la seconde ligne de défense : aucune entité ne naît dans un combat
+    /// autrement que par sa jointure `[_FL_]`, une invocation comprise.
     ///
     /// `None` si `name` est une invocation connue de ce combat (`FightWorking::summon_names`) —
     /// miroir du filtre `summonNames` de `addDamage`/`ensurePresent` côté web : ses actions dont
@@ -1668,9 +1888,12 @@ impl SessionState {
                         .and_then(|ids| ids.first().copied())
                 })
         };
-        let idx = match known_idx {
-            Some(idx) => idx,
-            None => self.upsert_fighter(fight_id, name, true, None, Gender::M, None),
+        let Some(idx) = known_idx else {
+            tracing::debug!(
+                fight_id,
+                "action d'un attaquant jamais vu rejoindre ce combat, ignorée"
+            );
+            return None;
         };
 
         let fight = self
@@ -1716,6 +1939,42 @@ impl SessionState {
 /// apply`, préambule achat ; `flush_pending_hdv_kama_gain`) : même construction de payload, seule
 /// la provenance de `item`/`quantity`/`total_cost` diffère. Miroir de `HistorySyncService.
 /// recordPurchase`.
+/// Construit l'événement d'historique d'une extraction de pacte — miroir de
+/// `HistorySyncService.recordPactExtraction`.
+fn build_pact_sync_event(
+    batch: &PactBatch,
+    occurred_at_ms: i64,
+    ctx: ApplyContext<'_>,
+) -> SyncEvent {
+    let signature_items: Vec<(String, i64)> = batch
+        .items
+        .iter()
+        .map(|(_, name, quantity)| (name.clone(), *quantity))
+        .collect();
+    let signature = pact_extraction_signature(&batch.first_time, &signature_items);
+    let items = batch
+        .items
+        .iter()
+        .map(|(_, name, quantity)| {
+            let (item_id, item_name) = item_payload(ctx.catalog, name);
+            PactExtractionItemPayload {
+                item_id,
+                item_name,
+                quantity: *quantity,
+            }
+        })
+        .collect();
+    SyncEvent {
+        kind: HistoryEventKind::Pact,
+        signature,
+        payload: HistoryPayload::PactExtraction(PactExtractionPayload {
+            occurred_at: format_iso_utc(occurred_at_ms),
+            game_server: ctx.game_server.map(str::to_string),
+            items,
+        }),
+    }
+}
+
 fn build_purchase_sync_event(
     item: &str,
     quantity: i64,
@@ -1839,14 +2098,24 @@ fn build_fight_sync_event(
             *counter += 1;
             sig_participants.push((fighter.name.clone(), instance_index));
 
-            let (defeated, fled) = if fighter.is_ally {
-                (false, false)
-            } else {
-                let lower = fighter.name.to_lowercase();
-                let fled = fight.fled_names.contains(&lower);
-                let defeated = !fled && fight.resolved_enemies.contains(&lower);
-                (defeated, fled)
-            };
+            // `defeated`/`fled` se calculent de la MÊME façon pour les deux camps — miroir de
+            // `buildEntityDamageRows` (`stats-store.service.ts`), qui ne consulte jamais le camp :
+            // `registerFightDefeat`/`registerFightFlee` alimentent `defeatedInstanceCounts`/
+            // `fledInstanceCounts` pour tout combattant, allié compris. Jusqu'au 2026-09-17, cette
+            // branche renvoyait `(false, false)` dès que `is_ally` : l'état KO des personnages du
+            // joueur ne quittait jamais l'overlay (colonne `fight_participants.defeated` toujours
+            // `false` pour un allié), et un combat rechargé depuis l'archive du compte affichait
+            // toute l'équipe debout — alors que la même partie jouée avec le client web le
+            // transmettait correctement.
+            //
+            // `is_ko` compte au même titre que `resolved_enemies` : les deux sont posés ensemble
+            // par `EnemyDefeated` (voir `apply`), mais `is_ko` seul survit à un redémarrage de
+            // l'overlay en plein combat (persisté par `fight_store`, alors que `restore_fight`
+            // repart d'un `resolved_enemies` vide). Un combattant qui a FUI n'est jamais compté
+            // vaincu, même résolu (`EnemyFled` pose `resolved_enemies` sans poser `is_ko`).
+            let lower = fighter.name.to_lowercase();
+            let fled = fight.fled_names.contains(&lower);
+            let defeated = !fled && (fighter.is_ko || fight.resolved_enemies.contains(&lower));
             // Un allié n'a jamais d'id monstre (aucun monstre ne porte un nom de personnage) —
             // miroir de `HistorySyncService.monsterId`, appelé côté web UNIQUEMENT pour `side ===
             // 'enemy'`.
@@ -2007,7 +2276,7 @@ fn build_trade_sync_event(
 
 /// Frontière métier complète (§2 du plan) : `LineBatch` → `LogEntry` (QuickJS) → `SessionSnapshot`
 /// (agrégation Rust). Un thread dédié le possède (§3) ; jamais partagé entre threads directement,
-/// voir `overlay-app` pour le câblage réel (`ArcSwap<SessionSnapshot>` publié vers l'UI).
+/// voir `overlay-ui` (`engine_thread`) pour le câblage réel (`ArcSwap<SessionSnapshot>` publié vers l'UI).
 pub struct Engine {
     parser: crate::quickjs_engine::LogParserEngine,
     state: SessionState,
@@ -2197,6 +2466,19 @@ impl Engine {
         self.in_initial_sweep = false;
     }
 
+    /// Supprime du disque les combats en cours **abandonnés** (plus d'une journée sans une ligne
+    /// de log, voir `fight_store::MAX_FIGHT_AGE`) et rend leur nombre — `EngineCommand::GameClosed`
+    /// côté `overlay-ui`, envoyée quand la dernière fenêtre de jeu se ferme (2026-09-18).
+    ///
+    /// Ne touche pas à `state` : un combat abandonné y reste `ongoing` sans plus jamais bouger,
+    /// comme avant, et ne sera simplement pas restauré au prochain lancement. Ce que cette purge
+    /// borne, c'est la durée de vie sur disque des noms de ses combattants — le démarrage faisait
+    /// déjà ce ménage, mais un overlay qui tourne plusieurs jours n'y repasse jamais
+    /// (`docs/analyse-rgpd.md` §3.3).
+    pub fn prune_stale_fights(&mut self) -> usize {
+        crate::fight_store::prune_stale_fights(&self.fight_store_dir)
+    }
+
     /// Remplace le roster utilisé pour classer les alliés (voir `resolve_ally_class`) — appelé
     /// par l'hôte (`overlay-ui`) une fois l'auth/le fetch `GET /api/v1/settings` résolus, et à
     /// chaque nouveau fetch (roster modifié sur le compte). `None` = pas de roster connu (mode
@@ -2290,8 +2572,25 @@ impl Engine {
     /// **Distinct de `set_watchlist_entries`**, qui applique ce que le COMPTE renvoie : celui-ci
     /// est ce que l'utilisateur vient de régler lui-même. Même distinction qu'entre
     /// `EngineCommand::ApplySettings` et `EngineCommand::SetAlertProfile`.
-    pub fn set_watchlist_definitions(&mut self, definitions: Vec<WatchlistEntry>) {
-        self.watchlist.apply_definitions(definitions);
+    ///
+    /// `retirees` porte les entrées que l'édition a RETIRÉES — une entrée qui y figure et revient
+    /// dans `definitions` a été supprimée puis recréée par l'utilisateur, son compteur ne la suit
+    /// donc pas (voir `apply_definitions`, point 2).
+    pub fn set_watchlist_definitions(
+        &mut self,
+        definitions: Vec<WatchlistEntry>,
+        retirees: &[WatchlistEntry],
+    ) {
+        self.watchlist.apply_definitions(definitions, retirees);
+    }
+
+    /// **Remet le compteur d'une entrée suivie à sa valeur de départ** (2026-09-18) — le bouton
+    /// de réinitialisation d'une tuile du bandeau, après confirmation. Voir
+    /// [`WatchlistState::reset_counter`](crate::watchlist::WatchlistState::reset_counter) pour ce
+    /// que « départ » veut dire selon le mode, et pourquoi l'entrée est désignée par son identité
+    /// plutôt que par son rang. Renvoie `false` si aucune entrée ne correspond plus.
+    pub fn reset_watchlist_counter(&mut self, name: &str, kind: WatchlistKind) -> bool {
+        self.watchlist.reset_counter(name, kind)
     }
 
     /// Remplace la liste des objets à son activé au ramassage par celle renvoyée par le compte
@@ -2401,7 +2700,17 @@ impl Engine {
                 self.apply_entry(entry, batch.is_initial_load, &mut touched_fight_ids);
             }
             entries.extend(run);
-            self.state.suspend_all_ongoing_fights(Self::line_time(line));
+            // Le parser vendu doit oublier ces combats en même temps que l'état de session : sans
+            // ça, `resolveCurrentFightId` continue de rattacher au combat fantôme toute ligne sans
+            // nom (butin, vente HDV) — c'est ainsi qu'une vente de 1,8 M kamas s'est retrouvée
+            // créditée au combat suivant côté web (voir `LogParser.closeFight`). Un combat que le
+            // personnage retrouve à la reconnexion est simplement recréé par la jointure `[_FL_]`
+            // qui suit, des deux côtés.
+            for fight_id in self.state.suspend_all_ongoing_fights(Self::line_time(line)) {
+                if let Err(err) = self.parser.close_fight(fight_id) {
+                    tracing::warn!(fight_id, %err, "le parser n'a pas pu oublier ce combat");
+                }
+            }
             run_start = index + 1;
         }
         let run = self.parser.parse_lines(&batch.lines[run_start..])?;
@@ -2527,16 +2836,18 @@ impl Engine {
             }
             // Miroir de `registerLoot` (`stats-store.service.ts`), même gating
             // `currentBatchIsInitialLoad` que ci-dessus — indépendant de la watchlist (voir la
-            // doc de `profile.rs`) : déclenché pour TOUT ramassage dont le nom a son activé au
-            // compte, suivi ou non.
+            // doc de `profile.rs`) : déclenché pour TOUT ramassage dont le nom est dans la liste
+            // d'alertes du compte, suivi ou non, **son activé ou non** — écart voulu avec le
+            // web, qui ignore une entrée silencieuse (voir `profile::LootAlert`) : ici l'entrée
+            // silencieuse garde sa carte et ses confettis, seul le son se tait.
             if let LogEntry::Loot { item, quantity, .. } = entry {
-                if let Some(sound_entry) =
-                    crate::profile::find_enabled_sound_item(&self.sound_items, item)
+                if let Some(sound_entry) = crate::profile::find_sound_item(&self.sound_items, item)
                 {
                     self.pending_loot_alerts.push(crate::profile::LootAlert {
                         name: item.clone(),
                         quantity: *quantity,
                         catalog_id: sound_entry.catalog_id,
+                        sound_enabled: sound_entry.enabled,
                     });
                 }
             }
@@ -2599,6 +2910,9 @@ fn entry_fight_id(entry: &LogEntry) -> Option<i64> {
         | LogEntry::KamaLoss { .. }
         | LogEntry::CombatStart { .. }
         | LogEntry::MarketOccupation { .. }
+        | LogEntry::ItemLoss { .. }
+        | LogEntry::ClientLifecycle { .. }
+        | LogEntry::InteractiveWalkon { .. }
         | LogEntry::LogDateAnchor { .. }
         | LogEntry::TradeCompleted { .. } => None,
     }
@@ -3088,6 +3402,28 @@ mod tests {
         assert_eq!(state.fights[&1].snapshot.last_ally_caster, None);
     }
 
+    /// Une ligne de dégâts dont l'attaquant n'a jamais rejoint CE combat ne crée aucune ligne —
+    /// ni « Inconnu » (attaquant irrésolu par le parser), ni un combattant d'un autre combat
+    /// concurrent mal routé (2026-09-23, voir `fighter_mut`).
+    #[test]
+    fn degats_d_un_attaquant_inconnu_du_combat_ne_creent_aucune_ligne() {
+        let mut state = SessionState::default();
+        let ctx = ApplyContext::default();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 15, false),
+            ctx,
+            &mut Vec::new(),
+        );
+
+        state.apply(&damage(1, "Inconnu", 5_649), ctx, &mut Vec::new());
+        state.apply(&damage(1, "Canis Furiosus", 7_194), ctx, &mut Vec::new());
+
+        let fight = &state.fights[&1].snapshot;
+        assert_eq!(fight.fighters.len(), 1, "{:?}", fight.fighters);
+        assert_eq!(fight.fighters[0].name, "Oumbra");
+        assert_eq!(fight.fighters[0].total_damage, 0);
+    }
+
     #[test]
     fn les_sorts_du_tour_sont_bornes() {
         let mut state = SessionState::default();
@@ -3552,8 +3888,9 @@ mod tests {
     }
 
     /// `EnemyDefeated` couvre aussi bien "X est KO !" (allié) que "X est hors-combat !" (n'importe
-    /// qui) — voir `FighterDamage::is_ko`. Régression visée : ne pas confondre avec
-    /// `resolved_enemies`, qui n'a de sens que pour les ennemis (voir `build_fight_sync_event`).
+    /// qui) — voir `FighterDamage::is_ko`. Régression visée : ne poser le drapeau que sur le
+    /// combattant nommé, jamais sur tout le camp. Le versant synchro du même signal est couvert par
+    /// `le_payload_de_synchro_transmet_le_ko_dun_allie`.
     #[test]
     fn enemy_defeated_marque_is_ko_meme_pour_un_allie() {
         let mut state = SessionState::default();
@@ -4207,6 +4544,69 @@ mod tests {
             participant.spells.len(),
             1,
             "la ventilation des dégâts ne contient que le sort de dégâts"
+        );
+    }
+
+    /// Un allié mis KO part `defeated: true` vers le compte, exactement comme le client web le
+    /// transmet (`buildEntityDamageRows` ne consulte jamais le camp). Régression corrigée le
+    /// 2026-09-17 (remontée utilisateur) : `build_fight_sync_event` forçait `(false, false)` dès
+    /// que `is_ally`, l'état KO des personnages du joueur n'atteignait donc jamais
+    /// `fight_participants.defeated` et un combat rechargé depuis l'archive affichait toute
+    /// l'équipe debout. L'ennemi du même combat, jamais résolu explicitement, vérifie au passage
+    /// que le filet de rattrapage de `CombatEnd` reste, lui, réservé aux ennemis.
+    #[test]
+    fn le_payload_de_synchro_transmet_le_ko_dun_allie() {
+        let mut state = SessionState::default();
+        let mut events = Vec::new();
+        state.apply(
+            &fighter_joined(1, "Oumbra", 8, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &fighter_joined(1, "Caliburnus", 9, false),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &fighter_joined(1, "Bwork", 1, true),
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &enemy_defeated(1, "Oumbra"), // "Oumbra est KO !"
+            ApplyContext::default(),
+            &mut events,
+        );
+        state.apply(
+            &combat_end(1, FightResult::Won),
+            ApplyContext::default(),
+            &mut events,
+        );
+
+        let fight = only_fight_payload(&events);
+        let participant = |name: &str| {
+            fight
+                .participants
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap_or_else(|| panic!("participant {name} absent du payload"))
+        };
+
+        let ko = participant("Oumbra");
+        assert_eq!(ko.side, FightSide::Ally);
+        assert!(ko.defeated, "un allié mis KO doit partir defeated");
+        assert!(!ko.fled);
+
+        let debout = participant("Caliburnus");
+        assert!(
+            !debout.defeated,
+            "un allié jamais mis KO ne doit pas partir defeated"
+        );
+
+        assert!(
+            participant("Bwork").defeated,
+            "le filet de rattrapage d'un combat gagné crédite l'ennemi jamais résolu"
         );
     }
 

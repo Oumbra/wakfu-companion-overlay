@@ -1,8 +1,8 @@
 //! État GPU par fenêtre et boucle de peinture par frame — voir la doc de `lib.rs` pour pourquoi ce
 //! module (contrairement à `alert_sound`/`game_window`/`engine_thread`) est partagé entre les DEUX
-//! binaires (`main.rs` Windows, `bin/overlay-ui-x11.rs` Linux) : rien ici ne dépend de l'OS, la
-//! seule partie qui en dépendrait (le choix du backend GPU, `init_gpu`) reste volontairement
-//! dupliquée dans chaque binaire plutôt que d'être artificiellement partagée ici.
+//! binaires (`main.rs` Windows, `bin/wakfu-companion-overlay-x11.rs` Linux) : rien ici ne dépend de
+//! l'OS, la seule partie qui en dépendrait (le choix du backend GPU, `init_gpu`) reste
+//! volontairement dupliquée dans chaque binaire plutôt que d'être artificiellement partagée ici.
 
 use egui_wgpu::wgpu;
 
@@ -257,12 +257,12 @@ pub fn render(
 /// rien ne force `SetContent`/`Commit` à être rejoués depuis la toute première configuration —
 /// recréer la `Surface` à chaque repromotion (voir `main.rs::App::sync_topmost`) force ce chemin.
 ///
-/// Réservé à cet appel PONCTUEL (à la repromotion, pas à chaque frame ni à chaque
-/// redimensionnement — `reconfigure_surface`/`surface.configure()` restent largement suffisants
-/// et bien moins coûteux pour ces deux cas) : recréer une `Surface` a un coût réel (nouvelle
-/// négociation DXGI), pas justifié pour un événement qui se produit au plus quelques fois par
-/// minute. Spécifique à `main.rs` (Windows/DirectComposition) : `overlay-ui-x11.rs` ne l'appelle
-/// pas, X11/EWMH n'ayant pas cette limitation de composition (pas de `Commit` séparé à rejouer).
+/// Réservé à cet appel PONCTUEL (à la repromotion, pas à chaque frame ni à chaque redimensionnement
+/// — `reconfigure_surface`/`surface.configure()` restent largement suffisants et bien moins coûteux
+/// pour ces deux cas) : recréer une `Surface` a un coût réel (nouvelle négociation DXGI), pas
+/// justifié pour un événement qui se produit au plus quelques fois par minute. Spécifique à
+/// `main.rs` (Windows/DirectComposition) : `wakfu-companion-overlay-x11.rs` ne l'appelle pas,
+/// X11/EWMH n'ayant pas cette limitation de composition (pas de `Commit` séparé à rejouer).
 pub fn recreate_surface(gpu: &mut GpuState, window: &std::sync::Arc<winit::window::Window>) {
     match gpu.instance.create_surface(std::sync::Arc::clone(window)) {
         Ok(surface) => {

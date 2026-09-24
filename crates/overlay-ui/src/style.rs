@@ -1,10 +1,10 @@
 //! Style `egui` partagé entre les points de création d'`egui::Context` de cette UI — `main.rs`
-//! (Windows), `bin/overlay-ui-x11.rs` (Linux, voir doc de `lib.rs`) et le harnais de rendu offscreen
-//! (`overlay-testkit`, §17.1 du plan). Extrait ici le 2026-09-06 (refonte design system tooltip) :
-//! auparavant dupliqué entre les deux binaires, et DÉJÀ divergent avant ce refactor (le binaire
-//! Linux n'appliquait ni le curseur "main" ni le délai de tooltip complet — juste
-//! `show_tooltips_only_when_still`/`tooltip_delay`) — exactement le risque qu'une fonction PARTAGÉE
-//! élimine plutôt qu'un réglage recopié à chaque nouveau point d'entrée.
+//! (Windows), `bin/wakfu-companion-overlay-x11.rs` (Linux, voir doc de `lib.rs`) et le harnais de
+//! rendu offscreen (`overlay-testkit`, §17.1 du plan). Extrait ici le 2026-09-06 (refonte design
+//! system tooltip) : auparavant dupliqué entre les deux binaires, et DÉJÀ divergent avant ce
+//! refactor (le binaire Linux n'appliquait ni le curseur "main" ni le délai de tooltip complet —
+//! juste `show_tooltips_only_when_still`/`tooltip_delay`) — exactement le risque qu'une fonction
+//! PARTAGÉE élimine plutôt qu'un réglage recopié à chaque nouveau point d'entrée.
 
 use crate::design::tokens;
 

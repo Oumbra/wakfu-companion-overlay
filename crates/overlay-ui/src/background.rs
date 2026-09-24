@@ -1,10 +1,10 @@
 //! **Threads de fond partagés par les deux binaires** (2026-09-14) : compte (`spawn_auth_thread`),
 //! file de synchro (`spawn_sync_thread`), catalogue (`spawn_catalog_thread`) et référentiel de
-//! donjons (`spawn_dungeon_thread`). Ils vivaient dans `main.rs` (Windows) depuis les lots L3-L5 ;
-//! rien n'y dépend de l'OS — `std::thread`, `mpsc`, `ArcSwap`, `overlay_sync` et un
-//! `EventLoopProxy` — et le binaire Linux (`bin/overlay-ui-x11.rs`) en a besoin depuis que la
-//! fenêtre de connexion lui est portée (§9.1 undecies du plan) : sortis ici tels quels, doc
-//! comprise, plutôt que dupliqués.
+//! donjons (`spawn_dungeon_thread`), serveurs de jeu (`spawn_game_servers_thread`). Ils vivaient
+//! dans `main.rs` (Windows) depuis les lots L3-L5 ; rien n'y dépend de l'OS — `std::thread`,
+//! `mpsc`, `ArcSwap`, `overlay_sync` et un `EventLoopProxy` — et le binaire Linux
+//! (`bin/wakfu-companion-overlay-x11.rs`) en a besoin depuis que la fenêtre de connexion lui est
+//! portée (§9.1 undecies du plan) : sortis ici tels quels, doc comprise, plutôt que dupliqués.
 //!
 //! Chacun signale au [`crate::startup::StartupProgress`] partagé la fin de son chargement initial,
 //! ce qui fait tomber l'écran de chargement de la fenêtre de connexion (voir `panels::login`).
@@ -16,6 +16,8 @@ use std::thread;
 
 use arc_swap::ArcSwap;
 use overlay_engine::{CatalogIndex, DungeonIndex, WatchlistEntry};
+
+use crate::game_servers::GameServers;
 use winit::event_loop::EventLoopProxy;
 
 use crate::engine_thread::{EngineCommand, SyncCommand};
@@ -54,27 +56,69 @@ pub fn spawn_catalog_thread(
     thread::Builder::new()
         .name("overlay-catalog".into())
         .spawn(move || {
-            load_catalog(&catalog, &catalog_stale, &proxy);
+            // Le réseau exige la session (routes réservées à l'overlay, voir
+            // `overlay_sync::session`) : cache disque publié tout de suite, puis attente du
+            // verdict du thread Auth avant `load_catalog` — l'écran de chargement couvre déjà
+            // cette validation. Sans session, le cache (ou le repli embarqué) reste en place.
+            let mut known_hash = publish_cached_catalog(&catalog, &proxy);
+            let (token, mut generation) = overlay_sync::session::wait_resolved();
+            if token.is_some() {
+                known_hash = load_catalog(&catalog, &catalog_stale, &proxy, known_hash);
+            } else if known_hash.is_none() {
+                load_embedded_catalog(&catalog, &catalog_stale, &proxy);
+            }
             // Quel que soit le chemin pris ci-dessus (cache, réseau, repli, échec) : le
             // catalogue a fini de se charger, l'écran de chargement peut le décompter.
             startup.mark_catalog();
             let _ = proxy.send_event(UserEvent::StartupProgress);
+            // Chaque session publiée ensuite (premier « Se connecter », reconnexion après
+            // « Déconnecter ») vaut un rafraîchissement : un premier lancement sans jeton n'a
+            // que le repli embarqué jusque-là.
+            loop {
+                generation = overlay_sync::session::wait_token_after(generation).1;
+                known_hash = load_catalog(&catalog, &catalog_stale, &proxy, known_hash);
+            }
         })
         .expect("échec de création du thread Catalogue");
 }
 
-fn load_catalog(
+/// Publie le cache disque du catalogue s'il existe et rend son empreinte (`indexHash`) — la
+/// première étape de `load_catalog`, sortie pour s'exécuter AVANT l'attente de la session.
+fn publish_cached_catalog(
+    catalog: &Arc<ArcSwap<CatalogIndex>>,
+    proxy: &EventLoopProxy<UserEvent>,
+) -> Option<String> {
+    let (hash, index) = overlay_sync::catalog_cache::load()?;
+    catalog.store(Arc::new(CatalogIndex::from_compact_json(&index)));
+    let _ = proxy.send_event(UserEvent::NewSnapshot);
+    Some(hash)
+}
+
+/// Repli hors-ligne EMBARQUÉ (§7.4 du plan, `catalog_cache::embedded_fallback`) — uniquement sans
+/// cache disque : un cache déjà chargé reste toujours préférable (référentiel plus récent que le
+/// placeholder embarqué), le réseau injoignable ou l'absence de session n'y changent rien.
+fn load_embedded_catalog(
     catalog: &Arc<ArcSwap<CatalogIndex>>,
     catalog_stale: &Arc<AtomicBool>,
     proxy: &EventLoopProxy<UserEvent>,
 ) {
-    let mut cached_hash = None;
-    if let Some((hash, index)) = overlay_sync::catalog_cache::load() {
-        catalog.store(Arc::new(CatalogIndex::from_compact_json(&index)));
-        let _ = proxy.send_event(UserEvent::NewSnapshot);
-        cached_hash = Some(hash);
-    }
+    catalog.store(Arc::new(CatalogIndex::from_compact_json(
+        &overlay_sync::catalog_cache::embedded_fallback(),
+    )));
+    catalog_stale.store(true, Ordering::Relaxed);
+    let _ = proxy.send_event(UserEvent::NewSnapshot);
+}
 
+/// Rafraîchit le catalogue depuis le réseau (session requise, voir `spawn_catalog_thread`) :
+/// `cached_hash` est l'empreinte de l'index déjà en mémoire (cache disque publié par
+/// `publish_cached_catalog`, ou réseau d'un précédent passage), `None` s'il n'y en a aucun. Rend
+/// l'empreinte de ce qui est en mémoire à la sortie, à repasser au prochain appel.
+fn load_catalog(
+    catalog: &Arc<ArcSwap<CatalogIndex>>,
+    catalog_stale: &Arc<AtomicBool>,
+    proxy: &EventLoopProxy<UserEvent>,
+    cached_hash: Option<String>,
+) -> Option<String> {
     let latest_hash = match overlay_sync::client::fetch_catalog_version() {
         Ok(hash) => hash,
         Err(err) => {
@@ -87,20 +131,16 @@ fn load_catalog(
                     %err,
                     "catalogue injoignable ET aucun cache local — repli sur le catalogue embarqué (daté)"
                 );
-                catalog.store(Arc::new(CatalogIndex::from_compact_json(
-                    &overlay_sync::catalog_cache::embedded_fallback(),
-                )));
-                catalog_stale.store(true, Ordering::Relaxed);
-                let _ = proxy.send_event(UserEvent::NewSnapshot);
+                load_embedded_catalog(catalog, catalog_stale, proxy);
             } else {
                 tracing::warn!(%err, "version du catalogue injoignable, repli sur le cache local");
             }
-            return;
+            return cached_hash;
         }
     };
     if cached_hash.as_deref() == Some(latest_hash.as_str()) {
         tracing::info!("catalogue déjà à jour (cache local)");
-        return;
+        return cached_hash;
     }
     match overlay_sync::client::fetch_catalog_index() {
         Ok(index) => {
@@ -112,11 +152,15 @@ fn load_catalog(
                     "échec de mise en cache du catalogue (retéléchargé au prochain lancement)"
                 );
             }
+            Some(latest_hash)
         }
-        Err(err) => tracing::warn!(
-            %err,
-            "téléchargement du catalogue impossible, repli sur le cache local"
-        ),
+        Err(err) => {
+            tracing::warn!(
+                %err,
+                "téléchargement du catalogue impossible, repli sur le cache local"
+            );
+            cached_hash
+        }
     }
 }
 
@@ -136,20 +180,37 @@ pub fn spawn_dungeon_thread(
     thread::Builder::new()
         .name("overlay-dungeons".into())
         .spawn(move || {
-            load_dungeons(&dungeons, &proxy);
+            // Même attente de session que le thread Catalogue (voir `spawn_catalog_thread`).
+            publish_cached_dungeons(&dungeons, &proxy);
+            let (token, mut generation) = overlay_sync::session::wait_resolved();
+            if token.is_some() {
+                load_dungeons(&dungeons, &proxy);
+            }
             startup.mark_dungeons();
             let _ = proxy.send_event(UserEvent::StartupProgress);
+            loop {
+                generation = overlay_sync::session::wait_token_after(generation).1;
+                load_dungeons(&dungeons, &proxy);
+            }
         })
         .expect("échec de création du thread Donjons");
 }
 
-fn load_dungeons(dungeons: &Arc<ArcSwap<DungeonIndex>>, proxy: &EventLoopProxy<UserEvent>) {
+fn publish_cached_dungeons(
+    dungeons: &Arc<ArcSwap<DungeonIndex>>,
+    proxy: &EventLoopProxy<UserEvent>,
+) {
     if let Some(rows) = overlay_sync::reference_data_cache::load(
         overlay_sync::reference_data_cache::ReferenceData::Dungeons,
     ) {
         dungeons.store(Arc::new(DungeonIndex::from_json(&rows)));
         let _ = proxy.send_event(UserEvent::NewSnapshot);
     }
+}
+
+/// Rafraîchit le référentiel de donjons depuis le réseau (session requise, voir
+/// `spawn_dungeon_thread`).
+fn load_dungeons(dungeons: &Arc<ArcSwap<DungeonIndex>>, proxy: &EventLoopProxy<UserEvent>) {
     match overlay_sync::client::fetch_dungeons() {
         Ok(rows) => {
             dungeons.store(Arc::new(DungeonIndex::from_json(&rows)));
@@ -169,6 +230,43 @@ fn load_dungeons(dungeons: &Arc<ArcSwap<DungeonIndex>>, proxy: &EventLoopProxy<U
             "téléchargement du référentiel de donjons impossible, repli sur le cache local (dungeonId non résolu si aucun cache)"
         ),
     }
+}
+
+/// Thread Serveurs de jeu (2026-09-16, onglet « Personnages ») : même mécanique que le thread
+/// Donjons ci-dessus — cache disque publié immédiatement, réseau qui le remplace dès qu'il arrive.
+///
+/// **Aucun jalon de démarrage** (contrairement au catalogue et aux donjons, voir
+/// [`StartupProgress`]) : cette liste ne sert qu'au sélecteur de serveur de la fenêtre Options,
+/// jamais à l'ingestion ni à l'affichage d'un combat. Faire attendre l'écran de chargement pour
+/// elle retarderait le lancement pour un écran que l'utilisateur n'ouvrira peut-être pas.
+pub fn spawn_game_servers_thread(servers: Arc<ArcSwap<GameServers>>) {
+    thread::Builder::new()
+        .name("overlay-game-servers".into())
+        .spawn(move || {
+            use overlay_sync::reference_data_cache::{self, ReferenceData};
+            if let Some(rows) = reference_data_cache::load(ReferenceData::GameServers) {
+                servers.store(Arc::new(GameServers::from_json(&rows)));
+            }
+            match overlay_sync::client::fetch_game_servers() {
+                Ok(rows) => {
+                    servers.store(Arc::new(GameServers::from_json(&rows)));
+                    if let Err(err) = reference_data_cache::save(ReferenceData::GameServers, &rows)
+                    {
+                        tracing::warn!(
+                            %err,
+                            "échec de mise en cache des serveurs de jeu (retéléchargés au prochain lancement)"
+                        );
+                    }
+                }
+                // Best-effort, comme les donjons : sans liste, le sélecteur de serveur montre ce
+                // que le compte porte déjà et rien d'autre — jamais un blocage.
+                Err(err) => tracing::warn!(
+                    %err,
+                    "téléchargement des serveurs de jeu impossible, repli sur le cache local"
+                ),
+            }
+        })
+        .expect("échec de création du thread Serveurs de jeu");
 }
 
 /// Thread Sync (lot L5, §7.3 du plan) : possède la file SQLite persistante (`overlay_sync::
@@ -193,6 +291,13 @@ fn load_dungeons(dungeons: &Arc<ArcSwap<DungeonIndex>>, proxy: &EventLoopProxy<U
 /// backoff après un échec réessayable (`FlushOutcome::Retry`, voir `backoff_delay` — 15 s à 5 min,
 /// doublé à chaque échec consécutif, miroir de `RETRY_BASE_DELAY_MS`/`RETRY_MAX_DELAY_MS` côté web).
 ///
+/// **Le backoff tient même quand une commande réveille le thread** (audit de sécurité du
+/// 2026-09-23, O3) : `next_history_attempt` retient l'instant du prochain envoi autorisé après un
+/// échec. Un `Enqueue` ou un `SyncWatchlist` reçu avant cet instant met en file mais n'envoie rien
+/// — sans quoi chaque combat terminé relançait un `flush_once` immédiat, `Retry-After` d'un 429
+/// compris, et l'overlay martelait un serveur déjà en difficulté. Seul `Activate` (nouvelle
+/// session) lève l'attente.
+///
 /// **Compteurs de Suivi (`SyncCommand::SyncWatchlist`, §14 point 3 du plan, chantier fermé le
 /// 2026-09-07)** — même thread, mécanisme VOLONTAIREMENT séparé de la file `SyncQueue` ci-dessus :
 /// pas de file SQLite ni de `client_key` idempotent (la valeur ENTIÈRE remplace la clé côté
@@ -202,9 +307,19 @@ fn load_dungeons(dungeons: &Arc<ArcSwap<DungeonIndex>>, proxy: &EventLoopProxy<U
 /// essai (miroir de `WRITE_DEBOUNCE_MS` côté web, `RemoteUserDataRepository`) : un compteur qui
 /// s'incrémente à chaque kill d'un combat ne doit pas déclencher une requête par kill. Un nouvel
 /// instantané reçu PENDANT l'attente (débounce ou backoff) remplace le précédent et relance un
-/// débounce complet — rien n'est perdu (`WatchlistState` garde de toute façon le fichier local
+/// débounce complet — sans jamais avancer un backoff en cours (O3) : l'essai suivant a lieu au plus
+/// tard des deux instants. Rien n'est perdu (`WatchlistState` garde de toute façon le fichier local
 /// comme vérité, voir sa doc), seul le nombre de requêtes est réduit.
-pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
+///
+/// **Session refusée en cours de route** (401, 2026-09-23) : historique ou Suivi, le thread cesse
+/// aussitôt d'envoyer (`account = None` — ce qui arrive ensuite patiente en mémoire, comme au
+/// démarrage) et signale `AuthCommand::SessionExpired` au thread Auth par `auth_tx`, qui efface le
+/// jeton et ramène la fenêtre de connexion. La file SQLite, elle, est **conservée** pour la
+/// reconnexion ; `SyncQueue::claim_owner` la vide si c'est un autre compte qui se reconnecte.
+pub fn spawn_sync_thread(
+    command_rx: mpsc::Receiver<SyncCommand>,
+    auth_tx: mpsc::Sender<AuthCommand>,
+) {
     thread::Builder::new()
         .name("overlay-sync".into())
         .spawn(move || {
@@ -230,6 +345,17 @@ pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
             // `uid` (pour `client_key`) ET `token` (pour authentifier l'envoi, voir
             // `SyncCommand::Activate`) — toujours mis à jour ensemble.
             let mut account: Option<(String, String)> = None;
+            // **Ce qui arrive SANS compte reste en mémoire** (2026-09-18) : rien n'est écrit dans
+            // `sync-queue.sqlite3` tant qu'aucun compte ne peut le recevoir. Le cas ordinaire est
+            // le démarrage — le rattrapage de `wakfu.log` produit ses événements pendant que le
+            // thread Auth résout encore l'`uid` — et ce tampon les fait patienter jusqu'à
+            // `Activate`, qui les verse dans la file. L'autre cas est le mode invité, où ils
+            // seraient sinon restés sur disque sans destinataire, avec les pseudonymes des autres
+            // combattants (`docs/analyse-rgpd.md` §3.3). Borné par `HELD_EVENTS_CAP` : au-delà,
+            // le plus ancien cède la place — perte sans conséquence, le rattrapage du prochain
+            // lancement rejoue ce que `wakfu.log` contient encore.
+            let mut held: std::collections::VecDeque<overlay_engine::SyncEvent> =
+                std::collections::VecDeque::new();
             // Dernier instantané de Suivi reçu et pas encore répliqué avec succès (voir la doc de
             // `spawn_sync_thread` ci-dessus) — `None` tant qu'aucun `SyncCommand::SyncWatchlist`
             // n'est arrivé, ou après un envoi réussi.
@@ -239,44 +365,89 @@ pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
             // mécanismes n'ont ni la même cause de délai ni le même état.
             let mut watchlist_ready_at: Option<std::time::Instant> = None;
             let mut watchlist_consecutive_failures: u32 = 0;
+            // Prochain envoi d'historique autorisé après un échec réessayable (voir la doc
+            // ci-dessus, O3) — `None` : rien n'empêche d'envoyer.
+            let mut next_history_attempt: Option<std::time::Instant> = None;
             // Pas de compte connu au démarrage : n'attend qu'une commande, ne sonde jamais pour
             // rien (même philosophie que `settings_rx.try_recv()` côté thread Engine).
             let mut wait = std::time::Duration::from_secs(3600);
             loop {
                 match command_rx.recv_timeout(wait) {
                     Ok(SyncCommand::Activate { uid, token }) => {
-                        tracing::info!("file de synchro activée (compte connecté, lot L5)");
+                        tracing::info!(
+                            held = held.len(),
+                            "file de synchro activée (compte connecté, lot L5)"
+                        );
+                        // Un autre compte que celui que la file servait (reconnexion après une
+                        // session expirée) : ce qui attendait ne lui appartient pas.
+                        match queue.claim_owner(&uid) {
+                            Ok(0) => {}
+                            Ok(dropped) => tracing::info!(
+                                dropped,
+                                "file de synchro vidée — elle appartenait à un autre compte"
+                            ),
+                            Err(err) => tracing::warn!(%err, "propriétaire de la file de synchro illisible"),
+                        }
+                        // Nouvelle session : un type suspendu (403) a droit à un nouvel essai, et
+                        // l'envoi n'attend plus le backoff de la session précédente.
+                        queue.unblock_all();
+                        next_history_attempt = None;
                         account = Some((uid, token));
+                        // Ce qui attendait depuis plus d'un mois n'a plus de sens — voir
+                        // `MAX_PENDING_AGE` ; ensuite seulement, ce que le démarrage a retenu.
+                        match queue.prune_older_than(overlay_sync::MAX_PENDING_AGE) {
+                            Ok(0) | Err(_) => {}
+                            Ok(removed) => tracing::info!(
+                                removed,
+                                "entrées d'historique abandonnées — en attente depuis plus d'un mois"
+                            ),
+                        }
+                        enqueue_all(&queue, held.drain(..));
                     }
                     Ok(SyncCommand::Deactivate) => {
+                        // Rien de ce qui attendait n'a plus de destinataire — ni en base, ni en
+                        // mémoire (voir `held` et `SyncQueue::clear`).
+                        let dropped = queue.clear().unwrap_or(0) + held.len();
+                        held.clear();
                         tracing::info!(
-                            "file de synchro désactivée (compte déconnecté) — contenu déjà en file conservé sur disque"
+                            dropped,
+                            "file de synchro désactivée (compte déconnecté) — contenu en attente effacé"
                         );
                         account = None;
                     }
                     Ok(SyncCommand::Enqueue(events)) => {
-                        for event in &events {
-                            if let Err(err) = queue.enqueue(event) {
-                                tracing::warn!(
-                                    %err,
-                                    kind = event.kind.as_str(),
-                                    "échec d'enfilage d'un événement d'historique (SQLite)"
-                                );
+                        if account.is_some() {
+                            enqueue_all(&queue, events);
+                        } else {
+                            for event in events {
+                                if held.len() >= HELD_EVENTS_CAP {
+                                    held.pop_front();
+                                }
+                                held.push_back(event);
                             }
                         }
                     }
                     Ok(SyncCommand::SyncWatchlist(entries)) => {
                         pending_watchlist = Some(entries);
-                        watchlist_consecutive_failures = 0;
-                        watchlist_ready_at = Some(std::time::Instant::now() + WATCHLIST_DEBOUNCE);
+                        // Débounce relancé, mais jamais avant la fin d'un backoff en cours (O3) ;
+                        // le compteur d'échecs ne repart de zéro qu'après un envoi réussi.
+                        let debounced = std::time::Instant::now() + WATCHLIST_DEBOUNCE;
+                        watchlist_ready_at = Some(match watchlist_ready_at {
+                            Some(at) if watchlist_consecutive_failures > 0 => at.max(debounced),
+                            _ => debounced,
+                        });
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {} // réessai programmé (backoff) — retombe sur le flush ci-dessous
                     Err(mpsc::RecvTimeoutError::Disconnected) => break, // App fermée
                 }
 
-                let history_wait = match &account {
-                    None => std::time::Duration::from_secs(3600),
-                    Some((uid, token)) => {
+                let backoff = history_backoff_remaining(next_history_attempt, std::time::Instant::now());
+                let history_wait = match (&account, backoff) {
+                    (None, _) => std::time::Duration::from_secs(3600),
+                    // Backoff en cours : les commandes reçues sont en file, rien n'est envoyé.
+                    (Some(_), Some(remaining)) => remaining,
+                    (Some((uid, token)), None) => {
+                        next_history_attempt = None;
                         match queue.flush_once(uid, |path, body| {
                             overlay_sync::post_json_authenticated(token, path, body)
                         }) {
@@ -284,35 +455,110 @@ pub fn spawn_sync_thread(command_rx: mpsc::Receiver<SyncCommand>) {
                                 std::time::Duration::from_secs(3600)
                             }
                             // **Correctif du 2026-09-03** : cet échec n'était auparavant tracé
-                            // nulle part — un blocage persistant (401/429/réseau/5xx) restait
+                            // nulle part — un blocage persistant (429/réseau/5xx) restait
                             // invisible, backoff après backoff, jusqu'à 5 min entre essais.
-                            Ok(overlay_sync::FlushOutcome::Retry(reason)) => {
+                            // Un 429 impose son propre délai (`Retry-After`, plafonné à 1 h).
+                            Ok(overlay_sync::FlushOutcome::Retry { reason, after }) => {
+                                let delay = retry_delay(after, queue.consecutive_failures());
                                 tracing::warn!(
                                     reason = %reason,
                                     consecutive_failures = queue.consecutive_failures(),
-                                    "échec d'envoi de l'historique — nouvel essai après un backoff"
+                                    delay_s = delay.as_secs(),
+                                    "échec d'envoi de l'historique — nouvel essai après un délai"
                                 );
-                                backoff_delay(queue.consecutive_failures())
+                                next_history_attempt = Some(std::time::Instant::now() + delay);
+                                delay
+                            }
+                            Ok(overlay_sync::FlushOutcome::Unauthorized(reason)) => {
+                                session_refused(&mut account, &auth_tx, &reason);
+                                std::time::Duration::from_secs(3600)
                             }
                             Err(err) => {
                                 tracing::warn!(%err, "erreur de file de synchro (SQLite)");
-                                std::time::Duration::from_secs(60)
+                                let delay = std::time::Duration::from_secs(60);
+                                next_history_attempt = Some(std::time::Instant::now() + delay);
+                                delay
                             }
                         }
                     }
                 };
 
-                let watchlist_wait = flush_watchlist_once(
+                let watchlist_wait = match flush_watchlist_once(
                     &account,
                     &mut pending_watchlist,
                     &mut watchlist_ready_at,
                     &mut watchlist_consecutive_failures,
-                );
+                ) {
+                    WatchlistFlush::Wait(delay) => delay,
+                    WatchlistFlush::Unauthorized(reason) => {
+                        session_refused(&mut account, &auth_tx, &reason);
+                        std::time::Duration::from_secs(3600)
+                    }
+                };
 
                 wait = history_wait.min(watchlist_wait);
             }
         })
         .expect("échec de création du thread Sync");
+}
+
+/// **401 en cours de session** — voir la doc de `spawn_sync_thread` : plus rien ne part avec ce
+/// jeton, le thread Auth est prévenu. Une seule fois par session : `account` repasse à `None`, et
+/// seul un nouvel `Activate` le rétablit.
+fn session_refused(
+    account: &mut Option<(String, String)>,
+    auth_tx: &mpsc::Sender<AuthCommand>,
+    reason: &str,
+) {
+    if account.take().is_none() {
+        return;
+    }
+    tracing::warn!(
+        reason,
+        "[compte] jeton refusé par le serveur (401) en cours de session — synchronisation suspendue, reconnexion proposée ; la file d'envoi est conservée"
+    );
+    let _ = auth_tx.send(AuthCommand::SessionExpired);
+}
+
+/// Temps restant avant le prochain envoi d'historique autorisé — `None` quand rien n'empêche
+/// d'envoyer maintenant (aucun échec en cours, ou backoff écoulé). Voir `next_history_attempt`
+/// dans `spawn_sync_thread` (O3).
+fn history_backoff_remaining(
+    next_attempt: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> Option<std::time::Duration> {
+    next_attempt.filter(|at| *at > now).map(|at| at - now)
+}
+
+/// Délai avant le prochain passage après un échec réessayable : celui qu'impose le serveur
+/// (`Retry-After` d'un 429), sinon le backoff ordinaire.
+fn retry_delay(
+    after: Option<std::time::Duration>,
+    consecutive_failures: u32,
+) -> std::time::Duration {
+    after.unwrap_or_else(|| backoff_delay(consecutive_failures))
+}
+
+/// Nombre maximal d'événements d'historique retenus en mémoire sans compte connecté (voir `held`
+/// dans `spawn_sync_thread`). Un `wakfu.log` d'une journée chargée en produit quelques centaines ;
+/// cinq mille couvrent largement le rattrapage initial, pour quelques Mo au pire.
+const HELD_EVENTS_CAP: usize = 5_000;
+
+/// Écrit chaque événement dans la file SQLite — l'échec d'un seul n'arrête pas les autres, et se
+/// contente d'un avertissement au journal (best-effort, comme l'ouverture de la file).
+fn enqueue_all(
+    queue: &overlay_sync::SyncQueue,
+    events: impl IntoIterator<Item = overlay_engine::SyncEvent>,
+) {
+    for event in events {
+        if let Err(err) = queue.enqueue(&event) {
+            tracing::warn!(
+                %err,
+                kind = event.kind.as_str(),
+                "échec d'enfilage d'un événement d'historique (SQLite)"
+            );
+        }
+    }
 }
 
 /// Débounce avant le premier essai d'un envoi watchlist — miroir de `WRITE_DEBOUNCE_MS`
@@ -324,23 +570,25 @@ const WATCHLIST_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis
 /// Renvoie le délai avant le PROCHAIN passage utile pour CE mécanisme (à combiner par l'appelant
 /// avec celui de l'historique, voir `wait`) : 1 h tant que rien n'est en attente ou qu'aucun
 /// compte n'est connu (réveillé immédiatement par la prochaine commande), le temps restant avant
-/// `ready_at` pendant un débounce/backoff en cours, ou le nouveau backoff après un échec.
+/// `ready_at` pendant un débounce/backoff en cours, ou le nouveau backoff après un échec — ou
+/// `Unauthorized` sur un 401 (l'instantané reste en attente pour la reconnexion).
 fn flush_watchlist_once(
     account: &Option<(String, String)>,
     pending: &mut Option<Vec<WatchlistEntry>>,
     ready_at: &mut Option<std::time::Instant>,
     consecutive_failures: &mut u32,
-) -> std::time::Duration {
+) -> WatchlistFlush {
     let Some(entries) = pending.as_ref() else {
-        return std::time::Duration::from_secs(3600);
+        return WatchlistFlush::Wait(std::time::Duration::from_secs(3600));
     };
     let Some((_, token)) = account else {
-        return std::time::Duration::from_secs(3600); // pas de compte : rien à tenter avant `Activate`
+        // pas de compte : rien à tenter avant `Activate`
+        return WatchlistFlush::Wait(std::time::Duration::from_secs(3600));
     };
     let now = std::time::Instant::now();
     if let Some(at) = ready_at {
         if now < *at {
-            return *at - now;
+            return WatchlistFlush::Wait(*at - now);
         }
     }
 
@@ -349,7 +597,10 @@ fn flush_watchlist_once(
             *pending = None;
             *ready_at = None;
             *consecutive_failures = 0;
-            std::time::Duration::from_secs(3600)
+            WatchlistFlush::Wait(std::time::Duration::from_secs(3600))
+        }
+        Err(err @ overlay_sync::SyncError::Http { status: 401, .. }) => {
+            WatchlistFlush::Unauthorized(err.to_string())
         }
         Err(err) => {
             *consecutive_failures += 1;
@@ -358,11 +609,23 @@ fn flush_watchlist_once(
                 consecutive_failures = *consecutive_failures,
                 "échec de synchro des compteurs de Suivi — nouvel essai après un backoff"
             );
-            let delay = backoff_delay(*consecutive_failures);
+            let retry_after = match &err {
+                overlay_sync::SyncError::Http { retry_after, .. } => *retry_after,
+                _ => None,
+            };
+            let delay = retry_delay(retry_after, *consecutive_failures);
             *ready_at = Some(now + delay);
-            delay
+            WatchlistFlush::Wait(delay)
         }
     }
+}
+
+/// Ce que `flush_watchlist_once` demande au thread Sync.
+enum WatchlistFlush {
+    /// Prochain passage utile dans ce délai.
+    Wait(std::time::Duration),
+    /// 401 — voir `session_refused`.
+    Unauthorized(String),
 }
 
 /// Miroir de `RETRY_BASE_DELAY_MS`/`RETRY_MAX_DELAY_MS`/le calcul de `scheduleRetry`
@@ -424,6 +687,12 @@ pub fn spawn_auth_thread(
                 );
 
                 let mut connected = result.is_ok();
+                if !connected {
+                    // Verdict rendu sans session (pas de jeton, jeton refusé, appairage annulé ou
+                    // échoué) : les threads Catalogue/Donjons qui attendent ce verdict repartent
+                    // sur leur cache (`session::wait_resolved`), et `client` répond `NoSession`.
+                    overlay_sync::session::clear();
+                }
                 status.store(Arc::new(match result {
                     Ok(()) => AuthStatus::Connected,
                     Err(AttemptEnd::Idle) => AuthStatus::Disconnected { failure: None },
@@ -442,7 +711,13 @@ pub fn spawn_auth_thread(
                             break;
                         }
                         Ok(AuthCommand::Disconnect) if connected => {
+                            // **Le serveur d'abord, le disque ensuite** (2026-09-18, constat C5) :
+                            // c'est le jeton qui désigne la session à effacer côté serveur, et
+                            // `clear_token` le fait disparaître. L'ordre inverse laisserait une
+                            // session valide en base sans plus aucun moyen de la nommer.
+                            crate::local_data::revoke_server_session();
                             overlay_sync::token_store::clear_token();
+                            overlay_sync::session::clear();
                             let _ = settings_tx.send(EngineCommand::Disconnect);
                             let _ = sync_tx.send(SyncCommand::Deactivate);
                             connected = false;
@@ -450,6 +725,35 @@ pub fn spawn_auth_thread(
                             let _ = proxy.send_event(UserEvent::AuthStatusChanged);
                             tracing::info!(
                                 "[compte] déconnecté — jeton effacé, retour à la fenêtre de connexion."
+                            );
+                            // **Les données locales à tiers partent avec le compte** (2026-09-18,
+                            // constat C5 de `docs/analyse-rgpd.md` §3.5) : combats en cours, récap
+                            // de session, compteurs de Suivi, gabarits de tour, et le contenu des
+                            // journaux. APRÈS les deux commandes ci-dessus, jamais avant : le
+                            // moteur oublie sa session sur `EngineCommand::Disconnect`
+                            // (`forget_session`) et le thread de synchro vide sa file sur
+                            // `Deactivate` — purger d'abord laisserait chacun réécrire ce qu'il
+                            // tient encore en mémoire. Le récap, lui, appartient à l'hôte, qui
+                            // l'efface en voyant le statut changer
+                            // (`recap_session::RecapSession::purge`).
+                            let _ = crate::local_data::purge(crate::local_data::Scope::OnDisconnect);
+                        }
+                        Ok(AuthCommand::SessionExpired) if connected => {
+                            // **Jeton refusé en cours de session** (401 vu par le thread Sync,
+                            // 2026-09-23) : même issue que le 401 au démarrage (`attempt_connect`)
+                            // — jeton effacé, état neutre, la fenêtre de connexion revient sur
+                            // « Se connecter » et un clic relance l'appairage (`pair_if_needed`).
+                            // Rien d'autre n'est effacé : pas de révocation serveur (le jeton n'y
+                            // est déjà plus valide), ni purge des données locales — ce n'est pas
+                            // l'utilisateur qui a demandé à partir. La file d'envoi attend la
+                            // reconnexion (voir `spawn_sync_thread`).
+                            overlay_sync::token_store::clear_token();
+                            overlay_sync::session::clear();
+                            connected = false;
+                            status.store(Arc::new(AuthStatus::Disconnected { failure: None }));
+                            let _ = proxy.send_event(UserEvent::AuthStatusChanged);
+                            tracing::warn!(
+                                "[compte] session refusée par le serveur (révoquée ou expirée) — jeton effacé, reconnexion proposée."
                             );
                         }
                         Ok(_) => continue, // commande sans effet dans l'état courant — ignorée
@@ -483,10 +787,74 @@ fn auth_failure(err: &overlay_sync::SyncError, step: &str) -> AuthFailure {
         SyncError::PairingExpired => "Appairage expiré",
         SyncError::PairingCancelled => "Appairage annulé",
         SyncError::TokenStore(_) => "Stockage de la session impossible",
+        SyncError::NoSession => "Aucune session",
     };
     AuthFailure {
         headline: headline.to_string(),
         detail: format!("{step} — {err}"),
+    }
+}
+
+/// Âge au-delà duquel un jeton natif stocké est **renouvelé au démarrage** (voir
+/// [`rotate_token_if_due`]) — 7 jours, contre 30 de validité glissante : un jeton copié n'ouvre
+/// donc plus rien une semaine plus tard, sans que l'utilisateur ait rien à faire, et un poste
+/// lancé chaque jour n'appelle la route qu'une fois par semaine.
+const TOKEN_ROTATION_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+
+/// **Renouvelle le jeton s'il a plus de [`TOKEN_ROTATION_AGE`]** — ou si son âge est inconnu
+/// (sauvegardé avant que la date ne soit tenue, 2026-09-19) — et rend le jeton à utiliser pour la
+/// suite de la session (`POST /api/v1/auth/native/session`, constat C5 de `docs/analyse-rgpd.md`
+/// §3.5 ; côté serveur, `server/auth/pairing.ts::rotateNativeSession`).
+///
+/// Appelé **entre** la validation du jeton stocké (`GET /api/v1/settings` réussi) et l'activation
+/// de la file d'envoi — c'est le seul endroit du processus qui garde un jeton en mémoire
+/// (`SyncCommand::Activate`), et il reçoit ainsi le nouveau d'emblée ; tout le reste (`local_data`,
+/// validations de la fenêtre Options) relit le trousseau à chaque appel. La grâce de 5 min laissée
+/// à l'ancien jeton n'a donc rien à couvrir ici que d'éventuelles requêtes déjà parties.
+///
+/// **Le nouveau jeton est persisté AVANT d'être utilisé**, et un échec n'est jamais une
+/// déconnexion : la route absente (déploiement pas encore à jour), un 401 ou une panne réseau
+/// laissent l'ancien jeton en place, qui vient d'être accepté — ce n'est pas lui qui est en cause.
+/// Si le serveur a répondu mais que la sauvegarde échoue, le nouveau jeton sert quand même pour
+/// cette session (l'ancien meurt dans 5 min) ; il sera redemandé au prochain lancement, comme
+/// après n'importe quel échec de `save_token`.
+fn rotate_token_if_due(token: String) -> String {
+    match overlay_sync::token_store::token_age() {
+        Some(age) if age < TOKEN_ROTATION_AGE => {
+            tracing::debug!(
+                age_days = age.as_secs() / 86_400,
+                "[compte] jeton natif récent, pas de rotation"
+            );
+            return token;
+        }
+        Some(age) => tracing::info!(
+            age_days = age.as_secs() / 86_400,
+            "[compte] jeton natif de plus de 7 jours — renouvellement."
+        ),
+        None => {
+            tracing::info!("[compte] date d'émission du jeton natif inconnue — renouvellement.")
+        }
+    }
+    match overlay_sync::client::rotate_native_session(&token) {
+        Ok(rotated) => {
+            if let Err(err) = overlay_sync::token_store::save_token(&rotated.token) {
+                tracing::warn!(
+                    "[compte] nouveau jeton natif non sauvegardé ({err}) — utilisé pour cette session, sera redemandé au prochain lancement."
+                );
+            }
+            tracing::info!(
+                expires_at = %rotated.expires_at,
+                previous_valid_until = %rotated.previous_token_valid_until,
+                "[compte] jeton natif renouvelé — l'ancien n'est plus accepté que quelques minutes."
+            );
+            rotated.token
+        }
+        Err(err) => {
+            tracing::warn!(
+                "[compte] renouvellement du jeton natif impossible ({err}) — jeton actuel conservé, prochaine tentative au prochain lancement."
+            );
+            token
+        }
     }
 }
 
@@ -522,6 +890,9 @@ fn attempt_connect(
                     settings.watchlist.len()
                 );
                 let _ = settings_tx.send(EngineCommand::ApplySettings(settings));
+                // Jeton validé, file pas encore activée : le moment de le renouveler (voir
+                // `rotate_token_if_due`) — la file reçoit celui qui vaut pour la session.
+                let token = rotate_token_if_due(token);
                 activate_sync_queue(&token, sync_tx);
                 return Ok(());
             }
@@ -562,10 +933,17 @@ fn attempt_connect(
     let token = match overlay_sync::pair_and_wait(
         |handle| {
             tracing::info!("=== Connexion du compte ===");
+            // **Le code d'appairage n'est PAS journalisé** (constat C6 de `docs/analyse-rgpd.md`) :
+            // c'est un secret à usage unique, exploitable par quiconque lit le fichier pendant sa
+            // fenêtre de validité — et le journal vit 14 jours, en clair, sur un poste partagé le
+            // cas échéant. Il n'avait de toute façon pas à y être pour être utilisable : il
+            // s'affiche dans la fenêtre de connexion (`AuthStatus::PairingStarted`, juste en
+            // dessous), qui est le seul endroit où on le lit vraiment. Ce qui reste ici — l'URL de
+            // vérification, sans paramètre — suffit au diagnostic (« le navigateur s'ouvre-t-il ?
+            // sur quelle origine ? »).
             tracing::info!(
-                "Ouvre {} et confirme le code : {}",
-                handle.verification_url,
-                handle.pairing_code
+                "Confirme l'appairage sur {} — le code est affiché dans la fenêtre de connexion.",
+                handle.verification_url
             );
             // Voir `AuthStatus::PairingStarted` : c'est ce qui rend le code visible dans la
             // fenêtre de connexion, pas seulement dans ces logs.
@@ -631,6 +1009,10 @@ fn attempt_connect(
 /// session (roster/watchlist restent pleinement fonctionnels, seul l'historique ne remonte pas au
 /// compte) plutôt que de faire échouer toute la connexion pour un besoin annexe.
 fn activate_sync_queue(token: &str, sync_tx: &mpsc::Sender<SyncCommand>) {
+    // Jeton validé par `GET /api/v1/settings` juste avant : c'est lui que les routes réservées à
+    // l'overlay attendent (`overlay_sync::session`, 2026-09-20) — publié AVANT `/auth/me`, dont
+    // l'échec ne concerne que la file d'historique, pas le catalogue ni les icônes.
+    overlay_sync::session::publish(token);
     match overlay_sync::client::fetch_account_id(token) {
         Ok(uid) => {
             let _ = sync_tx.send(SyncCommand::Activate {
@@ -886,5 +1268,53 @@ fn download_and_stage(
             });
         }
         Err(err) => fail(&err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Un 429 impose son délai ; sans lui, backoff ordinaire (15 s doublés, plafond 5 min).
+    #[test]
+    fn le_delai_du_serveur_prime_sur_le_backoff() {
+        assert_eq!(
+            retry_delay(Some(Duration::from_secs(42)), 1),
+            Duration::from_secs(42)
+        );
+        assert_eq!(retry_delay(None, 1), Duration::from_secs(15));
+        assert_eq!(retry_delay(None, 3), Duration::from_secs(60));
+        assert_eq!(retry_delay(None, 30), Duration::from_secs(300));
+    }
+
+    /// O3 : tant que le backoff court, aucun envoi — une commande reçue entre-temps ne l'abrège
+    /// pas ; une fois l'instant passé (ou sans échec), l'envoi est permis.
+    #[test]
+    fn le_backoff_d_historique_retient_l_envoi_jusqu_a_son_terme() {
+        let now = std::time::Instant::now();
+        assert_eq!(history_backoff_remaining(None, now), None);
+        assert_eq!(
+            history_backoff_remaining(Some(now + Duration::from_secs(30)), now),
+            Some(Duration::from_secs(30))
+        );
+        assert_eq!(history_backoff_remaining(Some(now), now), None);
+        assert_eq!(
+            history_backoff_remaining(Some(now), now + Duration::from_secs(1)),
+            None
+        );
+    }
+
+    /// Un 401 prévient le thread Auth UNE fois, et coupe l'envoi : le compte est oublié jusqu'au
+    /// prochain `Activate`.
+    #[test]
+    fn un_401_previent_le_thread_auth_une_seule_fois() {
+        let (tx, rx) = mpsc::channel();
+        let mut account = Some(("uid".to_string(), "jeton".to_string()));
+        session_refused(&mut account, &tx, "HTTP 401");
+        session_refused(&mut account, &tx, "HTTP 401");
+        assert!(account.is_none());
+        assert_eq!(rx.try_recv(), Ok(AuthCommand::SessionExpired));
+        assert!(rx.try_recv().is_err(), "pas de second signal");
     }
 }

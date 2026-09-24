@@ -58,7 +58,7 @@ fn run(path: PathBuf, out: Sender<std::io::Result<LineBatch>>) {
         Ok(mut w) => match w.watch(&parent, RecursiveMode::NonRecursive) {
             Ok(()) => Some(w),
             Err(err) => {
-                tracing::warn!(%err, path = %parent.display(), "notify::watch a échoué, repli sur le sondage périodique seul");
+                tracing::warn!(%err, path = %crate::privacy::redact_path(&parent), "notify::watch a échoué, repli sur le sondage périodique seul");
                 None
             }
         },

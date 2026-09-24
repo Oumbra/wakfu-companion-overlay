@@ -94,16 +94,20 @@ jobs:
       # `main`/`master` ne reçoit que des fusions faites par le mainteneur (CLAUDE.md) : un commit
       # automatique n'y a rien à faire. Vérifié AVANT le clone, pour échouer en deux secondes plutôt
       # qu'après dix minutes de compilation.
+      # Nom de branche passé par `env`, jamais interpolé dans le script : un `${{ }}` dans `run:` est
+      # substitué AVANT l'interprétation par le shell (injection de commande par un nom de branche).
       - name: refuser la branche principale
         if: inputs.pousser
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
-          case "${{ github.ref_name }}" in
+          case "$BRANCH" in
             main|master)
-              echo "::error::Régénération poussée sur '${{ github.ref_name }}' refusée — le travail va sur 'dev'."
+              echo "::error::Régénération poussée sur '$BRANCH' refusée — le travail va sur 'dev'."
               exit 1
               ;;
           esac
-          echo "branche : ${{ github.ref_name }}"
+          echo "branche : $BRANCH"
 
       # Voir la même étape dans `ci.yml` : une image Ubuntu nue n'a ni `git` ni `ca-certificates`,
       # et `checkout` retomberait sur un téléchargement d'archive REST — dont on ne pourrait plus
@@ -114,12 +118,16 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ca-certificates curl git
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          # Les identifiants du clone servent au `git push` final. `fetch-depth: 0` n'est pas requis
-          # (`bump-version.sh` ne lit que HEAD), mais un clone superficiel refuse le push quand la
-          # branche a avancé entre-temps — le coût est de quelques secondes.
+          # `fetch-depth: 0` n'est pas requis (`bump-version.sh` ne lit que HEAD), mais un clone
+          # superficiel refuse le push quand la branche a avancé entre-temps — le coût est de
+          # quelques secondes.
           fetch-depth: 0
+          # Audit de sécurité du 2026-09-23 : le jeton `contents: write` n'est PAS laissé dans
+          # `.git/config` pendant la compilation et l'exécution d'overlay-testkit (build.rs,
+          # proc-macros, tests). Seule l'étape « committer et pousser » le reçoit, par `env`.
+          persist-credentials: false
 
       # Le dépôt appartient à root, le conteneur tourne en root : sans cette ligne git refuse d'y
       # opérer (« detected dubious ownership ») dès le premier `git status`.
@@ -139,7 +147,7 @@ jobs:
 
       # Même clé de cache que `test-linux` : ce workflow compile exactement le même arbre, il n'y a
       # aucune raison de le recompiler de zéro.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: . -> target
 
@@ -179,7 +187,7 @@ jobs:
           set -eu
           mkdir -p diagnostic-captures/avant diagnostic-captures/apres
           # Indexé tout de suite, et la liste lue dans l'INDEX : `git diff` seul ignorerait une
-          # référence NOUVELLE (un test ajouté sans sa capture, cas de `d5c259c`), qui est
+          # référence NOUVELLE (un test ajouté sans sa capture, cas de `d0afbb9`), qui est
           # justement celle qu'il faut relire le plus attentivement. `.gitignore` écarte déjà
           # `*.old.png`/`*.new.png`/`*.diff.png`, ce `-A` ne peut donc rien emporter d'autre.
           git add -A crates/overlay-testkit/tests/snapshots/
@@ -212,7 +220,7 @@ jobs:
 
       - name: captures régénérées — avant, diff, après
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: captures-regenerees
           path: diagnostic-captures/
@@ -240,12 +248,16 @@ jobs:
         if: inputs.pousser && steps.recap.outputs.nombre != '0'
         env:
           MOTIF: ${{ inputs.motif }}
+          NOMBRE: ${{ steps.recap.outputs.nombre }}
+          BRANCH: ${{ github.ref_name }}
+          # Seule étape du job à détenir le jeton d'écriture (voir `persist-credentials` du checkout).
+          PUSH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add crates/overlay-testkit/tests/snapshots/
-          provenance="${{ steps.recap.outputs.nombre }} référence(s) réécrite(s) dans le conteneur de rendu épinglé du CI (run ${{ github.run_id }}) ; avant/diff/après dans l'artefact captures-regenerees."
+          provenance="$NOMBRE référence(s) réécrite(s) dans le conteneur de rendu épinglé du CI (run $GITHUB_RUN_ID) ; avant/diff/après dans l'artefact captures-regenerees."
           if [ -n "${MOTIF:-}" ]; then
             git commit -m "test: références régénérées dans l'environnement du CI" \
                        -m "$MOTIF" -m "$provenance"
@@ -253,7 +265,11 @@ jobs:
             git commit -m "test: références régénérées dans l'environnement du CI" -m "$provenance"
           fi
           bash scripts/bump-version.sh
-          git push origin "HEAD:${{ github.ref_name }}"
+          # Jeton fourni à CETTE commande seulement (en-tête HTTP), jamais écrit dans `.git/config`.
+          auth="$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          git -c "http.$GITHUB_SERVER_URL/.extraheader=AUTHORIZATION: basic $auth" \
+            push origin "HEAD:refs/heads/$BRANCH"
 
       - name: rien à pousser
         if: inputs.pousser && steps.recap.outputs.nombre == '0'

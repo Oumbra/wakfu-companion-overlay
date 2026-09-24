@@ -248,8 +248,13 @@ impl<'a> Input<'a> {
     /// `enabled(false)`, qui grise la valeur pour dire « ce réglage ne s'applique pas ».
     ///
     /// Un champ en lecture seule affiche une valeur qui compte, et que l'utilisateur change par un
-    /// autre moyen : c'est le cas du champ central d'un [`design::stepper`](super::stepper), dont
-    /// la valeur se règle aux deux boutons. Le jeu l'écrit dans son or habituel, pas en gris.
+    /// autre moyen : c'est le cas du champ de combinaison de l'onglet « Raccourcis », qui se
+    /// remplit en pressant les touches, pas en les écrivant. Le jeu l'écrit dans son or habituel,
+    /// pas en gris.
+    ///
+    /// **Le champ d'un [`design::stepper`](super::stepper) ne l'est plus** depuis le 2026-09-16 :
+    /// il accepte la saisie au clavier, comme dans le jeu (voir la doc de ce composant pour les
+    /// règles de validation que cela demande).
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
@@ -480,7 +485,22 @@ impl Widget for Input<'_> {
         // 2026-09-13 sur les maquettes de l'onglet Chat, voir `tests/input_row.rs` d'`overlay-
         // testkit`). Un enfant a son propre curseur : la place du champ, c'est
         // `allocate_exact_size` plus haut qui l'a prise, et elle seule.
-        let mut edit_child = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
+        // **Un `id_salt` NOMMÉ pour la zone d'édition** (2026-09-16) : sans lui, l'identité du
+        // `TextEdit` dérive du compteur d'identifiants automatiques du `Ui` parent, qui **n'est
+        // pas stable** — un widget que le défilement sort du champ visible ne consomme pas les
+        // mêmes identifiants, et ceux de tous les champs qui suivent se décalent d'une frame à
+        // l'autre. Le champ hérite alors de l'état mémorisé d'un AUTRE champ, dont son
+        // DÉFILEMENT HORIZONTAL (`TextEditState::text_offset`) : la valeur se peint hors du
+        // cadre, et le champ paraît vide alors qu'il ne l'est pas.
+        //
+        // Vécu le 2026-09-16 sur la ligne « Fermeture automatique des notifications de décompte »
+        // de l'onglet « Paramètres » : son champ se peignait vide dès que la fenêtre était
+        // défilée assez pour sortir le champ « Fichier » (long, focalisé) du champ visible.
+        let mut edit_child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(text_rect)
+                .id_salt(self.log_name.as_deref().unwrap_or("ds-input")),
+        );
         let mut edit_response = edit_child.add_enabled(enabled, edit);
         if self.request_focus {
             edit_response.request_focus();

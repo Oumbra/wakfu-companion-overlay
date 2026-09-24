@@ -2,8 +2,18 @@
 //! Service sous Linux) en priorité, repli fichier `0600` explicite et signalé (jamais silencieux,
 //! `docs/plan-architecture.md` §7.2) quand aucun trousseau n'est disponible (WM minimalistes sous
 //! Linux sans Secret Service).
+//!
+//! **Un jeton par déploiement** (2026-09-21). Un jeton natif n'est valable que pour le
+//! déploiement qui l'a émis (sa ligne de session vit dans SA base) ; un poste peut faire tourner un
+//! exe de release (prod) et un exe de preview (dev) — voir `build.rs`. Jusque-là ils partageaient
+//! le même emplacement et s'écrasaient mutuellement, d'où le 401 en boucle décrit dans `build.rs`.
+//! L'emplacement est désormais dérivé de `client::base_url()` ([`slot`]) : la prod garde les noms
+//! historiques (`native-session`, aucune migration pour les sessions existantes), tout autre
+//! déploiement suffixe l'hôte (`native-session@claude-dev.wakfu-companion.com`). C'est aussi ce
+//! qui permet à `gen-catalog-fallback` de retrouver le jeton du déploiement qu'il vise.
 
 use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::SyncError;
 
@@ -18,29 +28,180 @@ const APP_NAME: &str = "wakfu-companion-overlay";
 const APP_NAME: &str = "wakfu-companion-overlay-test";
 
 const ACCOUNT: &str = "native-session";
+/// Hôte du déploiement dont l'emplacement n'est pas suffixé — la prod, pour ne pas invalider les
+/// sessions appairées avant le 2026-09-21 (voir la doc de tête).
+const UNSUFFIXED_HOST: &str = "wakfu-companion.com";
 
-fn entry() -> Result<keyring::Entry, SyncError> {
-    keyring::Entry::new(APP_NAME, ACCOUNT).map_err(|err| SyncError::TokenStore(err.to_string()))
+/// Nom d'emplacement (compte du trousseau, base des fichiers de repli) pour le déploiement visé —
+/// voir la doc de tête.
+fn slot() -> String {
+    slot_for(&crate::client::base_url())
 }
 
-fn token_file_path() -> PathBuf {
-    directories::ProjectDirs::from("", "", APP_NAME)
-        .map(|dirs| dirs.data_dir().join("native-session.token"))
-        .unwrap_or_else(|| PathBuf::from("native-session.token"))
+fn slot_for(base_url: &str) -> String {
+    let host = base_url
+        .trim_end_matches('/')
+        .split("://")
+        .nth(1)
+        .unwrap_or(base_url)
+        .to_ascii_lowercase();
+    if host == UNSUFFIXED_HOST {
+        return ACCOUNT.to_string();
+    }
+    // `localhost:8788` (`wrangler pages dev`) : `:` interdit dans un nom de fichier Windows.
+    let host: String = host
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{ACCOUNT}@{host}")
+}
+
+fn entry() -> Result<keyring::Entry, SyncError> {
+    keyring::Entry::new(APP_NAME, &slot()).map_err(|err| SyncError::TokenStore(err.to_string()))
+}
+
+fn token_file_path() -> Option<PathBuf> {
+    data_file(&format!("{}.token", slot()))
+}
+
+/// **Quand le jeton courant a été émis** — secondes Unix, à côté du fichier de repli. Ce n'est pas
+/// un secret (une date), et le trousseau n'a pas de place pour une seconde valeur : un fichier
+/// suffit. Écrit par [`save_token`], lu par [`token_age`], retiré par [`clear_token`].
+fn issued_at_file_path() -> Option<PathBuf> {
+    data_file(&format!("{}.issued-at", slot()))
+}
+
+fn data_dir() -> Option<PathBuf> {
+    overlay_engine::app_dirs::project_dirs(APP_NAME).map(|dirs| dirs.data_dir().to_path_buf())
+}
+
+/// Un fichier du dossier de données — `None` quand ce dossier est introuvable (aucun `HOME`,
+/// profil incomplet). **Jamais de repli sur un chemin relatif** (audit de sécurité du 2026-09-23,
+/// O6) : le jeton en clair aurait atterri dans le répertoire courant du processus, n'importe où.
+fn data_file(name: &str) -> Option<PathBuf> {
+    data_dir().map(|dir| dir.join(name))
+}
+
+/// Depuis combien de temps le jeton courant a été émis — `None` si la date n'a jamais été
+/// enregistrée (jeton sauvegardé par une version antérieure au 2026-09-19) ou n'est plus lisible.
+/// C'est ce que `background::attempt_connect` compare au seuil de rotation ; un âge inconnu vaut
+/// « à renouveler », ce qui pose la date au passage.
+pub fn token_age() -> Option<Duration> {
+    let secs: u64 = std::fs::read_to_string(issued_at_file_path()?)
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH + Duration::from_secs(secs))
+        .ok()
+}
+
+fn record_issued_now() {
+    let Some(path) = issued_at_file_path() else {
+        tracing::warn!("dossier de données introuvable — date d'émission du jeton non enregistrée");
+        return;
+    };
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let written = path
+        .parent()
+        .map(std::fs::create_dir_all)
+        .unwrap_or(Ok(()))
+        .and_then(|_| std::fs::write(&path, secs.to_string()));
+    if let Err(err) = written {
+        // Pas bloquant : sans date, le prochain lancement renouvellera le jeton une fois de plus.
+        tracing::warn!(path = %path.display(), %err, "date d'émission du jeton non enregistrée");
+    }
+}
+
+/// Le fichier de repli **existe** : le trousseau a manqué au moins une fois et le jeton est sur
+/// disque en clair. C'est ce que la fenêtre Options (section « Compte ») dit à l'utilisateur
+/// (constat C7 de `docs/analyse-rgpd.md`, 2026-09-19) — le `warn!` du journal ne suffit pas, il ne
+/// le lit pas. `clear_token` (déconnexion, effacement) retire le fichier, et l'avis avec lui.
+pub fn token_file_in_use() -> bool {
+    token_file_path().is_some_and(|path| path.is_file())
+}
+
+/// Où vit le fichier de repli — pour le dire à l'utilisateur à côté de [`token_file_in_use`].
+/// Sans dossier de données, le seul nom du fichier (affichage uniquement : rien n'y est écrit).
+pub fn token_file_location() -> PathBuf {
+    token_file_path().unwrap_or_else(|| PathBuf::from(format!("{}.token", slot())))
 }
 
 fn save_token_file(token: &str) -> Result<(), SyncError> {
-    let path = token_file_path();
+    let path = token_file_path().ok_or_else(|| {
+        SyncError::TokenStore(
+            "dossier de données introuvable — jeton non enregistré sur disque".to_string(),
+        )
+    })?;
+    save_token_file_at(&path, token)
+}
+
+fn save_token_file_at(path: &std::path::Path, token: &str) -> Result<(), SyncError> {
+    use std::io::Write as _;
+
+    let io_err = |err: std::io::Error| SyncError::TokenStore(err.to_string());
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| SyncError::TokenStore(err.to_string()))?;
+        std::fs::create_dir_all(parent).map_err(io_err)?;
     }
-    std::fs::write(&path, token).map_err(|err| SyncError::TokenStore(err.to_string()))?;
+    // **Écriture atomique dans un fichier neuf, privé dès sa création** (2026-09-23). Jusque-là le
+    // fichier de repli était ouvert en `truncate` sur place : un arrêt pendant l'écriture laissait
+    // un jeton vide ou tronqué (session perdue au lancement suivant), et un fichier préexistant
+    // gardait ses bits (`0644` d'une ancienne version) jusqu'au `set_permissions` qui suivait
+    // l'écriture — le jeton neuf y était lisible par tout compte de la machine dans l'intervalle.
+    //
+    // Désormais : un fichier temporaire à côté (même dossier, donc même système de fichiers),
+    // créé `create_new` en `0600` sous Unix — le mode vaut dès la création puisque le fichier ne
+    // préexiste jamais —, écrit, `sync_all`, puis renommé sur le fichier final. `rename` remplace
+    // atomiquement la cible (Unix comme Windows, `MOVEFILE_REPLACE_EXISTING`) : un lecteur voit
+    // l'ancien jeton ou le nouveau, jamais un entre-deux, et le fichier final hérite des bits du
+    // temporaire. Sous Windows, pas de mode : `%APPDATA%` est déjà réservé au compte utilisateur
+    // par l'ACL héritée du profil (comportement inchangé).
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "token".to_string());
+    let tmp = path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+    // Reste d'un arrêt brutal du MÊME pid (réutilisé) : `create_new` refuserait de l'ouvrir.
+    let _ = std::fs::remove_file(&tmp);
+    let written = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
+        file.write_all(token.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp, path)
+    })();
+    if let Err(err) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(io_err(err));
+    }
+    // Le renommage lui-même n'est durable qu'une fois le dossier synchronisé (Unix) —
+    // best-effort : le jeton est déjà complet sur disque, seul l'ancien nom pourrait revenir.
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|err| SyncError::TokenStore(err.to_string()))?;
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = std::fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
     }
+    // Sous Windows, `%APPDATA%` est déjà réservé au compte utilisateur par l'ACL héritée du
+    // profil ; pas de DPAPI pour l'instant (choix du 2026-09-19 : signaler d'abord, chiffrer
+    // ensuite si le cas se présente réellement).
     tracing::warn!(
         path = %path.display(),
         "trousseau OS indisponible — jeton natif stocké en clair sur disque (voir §7.2 du plan)"
@@ -49,28 +210,45 @@ fn save_token_file(token: &str) -> Result<(), SyncError> {
 }
 
 fn load_token_file() -> Option<String> {
-    std::fs::read_to_string(token_file_path())
+    std::fs::read_to_string(token_file_path()?)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
 
-/// Sauvegarde le jeton natif — trousseau OS, repli fichier si indisponible.
+/// Sauvegarde le jeton natif — trousseau OS, repli fichier si indisponible — et **date son
+/// émission** ([`token_age`]) : un jeton sauvegardé est un jeton que le serveur vient d'émettre,
+/// à l'appairage comme à la rotation (`client::rotate_native_session`).
 ///
 /// ⚠️ Écrit PUIS relit immédiatement avant de faire confiance au trousseau (`verify_keyring_write`)
 /// — un `keyring::Entry::set_password` peut renvoyer `Ok` sans que l'écriture soit réellement
-/// relisible par une `Entry` construite séparément (observé en session : reproductible même en
-/// mono-processus, deux `Entry` indépendantes créées à la suite — cause exacte non élucidée,
-/// probablement un trousseau système restreint/virtualisé dans un environnement d'exécution
-/// contraint). Sans cette vérification, un jeton silencieusement non persisté ferait recommencer
-/// l'appairage à **chaque** lancement sans que rien ne le signale — exactement ce que §7.2 du plan
-/// interdit ("jamais silencieux").
+/// relisible par une `Entry` construite séparément. Cause élucidée par l'audit du 2026-09-23 :
+/// `keyring` était compilé sans aucune feature de backend, donc sur son magasin `mock` (en
+/// mémoire, propre à chaque `Entry`). Les backends sont désormais déclarés (`Cargo.toml`), mais
+/// la vérification reste : un Secret Service absent ou verrouillé sous Linux doit toujours
+/// retomber sur le fichier de repli, jamais sur un jeton silencieusement perdu (§7.2 du plan,
+/// "jamais silencieux").
+///
+/// Une fois le jeton dans le trousseau, un fichier de repli laissé par une sauvegarde antérieure
+/// est supprimé : il contiendrait un jeton en clair, périmé, et l'avis des Options resterait
+/// affiché à tort.
+///
+/// **Réciproquement** (audit de sécurité du 2026-09-23, O6) : quand une sauvegarde — une rotation
+/// typiquement — retombe sur le fichier, l'entrée du trousseau est effacée (best-effort). Elle
+/// porterait l'ANCIEN jeton, et [`load_token`] la préférait : l'overlay repartait au lancement
+/// suivant avec un jeton révoqué par la rotation.
 pub fn save_token(token: &str) -> Result<(), SyncError> {
+    record_issued_now();
     if verify_keyring_write(token) {
+        remove_token_file();
         return Ok(());
     }
     tracing::warn!("trousseau OS indisponible ou écriture non relisible — repli fichier");
-    save_token_file(token)
+    save_token_file(token)?;
+    if let Ok(stale) = entry() {
+        let _ = stale.delete_credential();
+    }
+    Ok(())
 }
 
 /// Écrit dans le trousseau puis relit via une `Entry` FRAÎCHE (jamais celle qui a écrit) pour
@@ -86,32 +264,142 @@ fn verify_keyring_write(token: &str) -> bool {
 }
 
 /// `None` si aucun jeton n'a jamais été enregistré (ou trousseau ET fichier absents/illisibles) —
-/// jamais une erreur : l'overlay doit démarrer sans compte lié (mode invité), voir `overlay-app`.
+/// jamais une erreur : l'overlay doit pouvoir démarrer sans compte lié et afficher sa fenêtre de connexion.
+///
+/// **Le fichier de repli prime s'il existe** (audit de sécurité du 2026-09-23, O6) : il n'est
+/// écrit que quand le trousseau a manqué, et [`save_token`] le supprime dès qu'une écriture au
+/// trousseau réussit — sa présence dit donc qu'il porte le jeton le PLUS RÉCENT. L'entrée du
+/// trousseau, elle, peut être celle d'avant une rotation retombée sur le fichier (si son effacement
+/// a lui aussi échoué). Le jeton du fichier est ensuite migré vers le trousseau dès qu'il répond.
 pub fn load_token() -> Option<String> {
-    entry()
-        .ok()
-        .and_then(|e| e.get_password().ok())
-        .or_else(load_token_file)
+    if let Some(token) = load_token_file() {
+        // Jeton resté dans le fichier de repli (sauvegardé avant que le trousseau ne soit
+        // réellement compilé, ou pendant une indisponibilité passagère) : migré dès que le
+        // trousseau répond.
+        if verify_keyring_write(&token) {
+            remove_token_file();
+            tracing::info!("jeton natif migré du fichier de repli vers le trousseau OS");
+        }
+        return Some(token);
+    }
+    entry().ok().and_then(|e| e.get_password().ok())
 }
 
-/// Efface le jeton des deux emplacements possibles — best-effort (une absence des deux côtés
-/// n'est pas une erreur).
+fn remove_token_file() {
+    let Some(path) = token_file_path() else {
+        return;
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            tracing::warn!(path = %path.display(), %err, "fichier de repli du jeton non supprimé")
+        }
+    }
+}
+
+/// Efface le jeton **du déploiement courant** des deux emplacements possibles, et sa date
+/// d'émission — best-effort (une absence n'est pas une erreur). C'est le geste de la déconnexion ;
+/// l'effacement complet passe par [`clear_all_tokens`].
 pub fn clear_token() {
-    if let Ok(e) = entry() {
+    clear_slot(&slot());
+}
+
+/// Efface le jeton de **tous les déploiements** connus sur ce poste — pour « Supprimer les données
+/// locales » (`overlay_ui::local_data`, constat C5 de `docs/analyse-rgpd.md`), qui promet l'état
+/// d'une installation neuve. Depuis le 2026-09-21 chaque déploiement a son emplacement
+/// ([`slot`]) : les fichiers de repli partent avec la racine de dossiers, mais une entrée du
+/// trousseau posée par un autre exe (preview contre dev, release contre prod) survivrait à
+/// [`clear_token`], qui ne vise que l'emplacement de l'exe qui l'appelle.
+///
+/// Les emplacements visés : la prod et le déploiement dev (les deux seuls que `build.rs` fige),
+/// celui de l'exe courant (une surcharge `WAKFU_COMPANION_API_URL`), et tout emplacement dont un
+/// fichier `<slot>.token` ou `<slot>.issued-at` subsiste dans le dossier de données — `save_token`
+/// date chaque émission sur disque, trousseau ou pas, donc un déploiement appairé depuis le
+/// 2026-09-19 y laisse toujours sa trace. Le trousseau, lui, ne s'énumère pas par préfixe.
+pub fn clear_all_tokens() {
+    let mut slots: std::collections::BTreeSet<String> = KNOWN_HOSTS
+        .iter()
+        .map(|host| slot_for(&format!("https://{host}")))
+        .collect();
+    slots.insert(slot());
+    if let Some(dir) = data_dir() {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            slots.extend(
+                entries
+                    .flatten()
+                    .filter_map(|entry| slot_from_file_name(&entry.file_name().to_string_lossy())),
+            );
+        }
+    }
+    for slot in slots {
+        clear_slot(&slot);
+    }
+}
+
+/// Hôtes des déploiements figés par `build.rs` — les seuls qu'un exe livré ou de preview vise
+/// sans surcharge à l'exécution.
+const KNOWN_HOSTS: &[&str] = &["wakfu-companion.com", "claude-dev.wakfu-companion.com"];
+
+/// L'emplacement dont `name` est un fichier (`<slot>.token`, `<slot>.issued-at`) — `None` pour
+/// tout autre fichier du dossier de données.
+fn slot_from_file_name(name: &str) -> Option<String> {
+    let stem = name
+        .strip_suffix(".token")
+        .or_else(|| name.strip_suffix(".issued-at"))?;
+    (stem == ACCOUNT || stem.starts_with(&format!("{ACCOUNT}@"))).then(|| stem.to_string())
+}
+
+fn clear_slot(slot: &str) {
+    if let Ok(e) = keyring::Entry::new(APP_NAME, slot) {
         let _ = e.delete_credential();
     }
-    let _ = std::fs::remove_file(token_file_path());
+    for name in [format!("{slot}.token"), format!("{slot}.issued-at")] {
+        if let Some(path) = data_file(&name) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn un_emplacement_par_deploiement_la_prod_gardant_le_nom_historique() {
+        assert_eq!(slot_for("https://wakfu-companion.com"), "native-session");
+        assert_eq!(slot_for("https://WAKFU-companion.com/"), "native-session");
+        assert_eq!(
+            slot_for("https://claude-dev.wakfu-companion.com"),
+            "native-session@claude-dev.wakfu-companion.com"
+        );
+        assert_eq!(
+            slot_for("http://localhost:8788"),
+            "native-session@localhost_8788"
+        );
+    }
+
+    /// Les emplacements se retrouvent d'après leurs fichiers ; le reste du dossier de données
+    /// (file de synchro, caches) n'en est pas un.
+    #[test]
+    fn un_emplacement_se_retrouve_d_apres_ses_fichiers() {
+        assert_eq!(
+            slot_from_file_name("native-session.token").as_deref(),
+            Some("native-session")
+        );
+        assert_eq!(
+            slot_from_file_name("native-session@localhost_8788.issued-at").as_deref(),
+            Some("native-session@localhost_8788")
+        );
+        assert_eq!(slot_from_file_name("native-session"), None);
+        assert_eq!(slot_from_file_name("sync-queue.sqlite3"), None);
+        assert_eq!(slot_from_file_name("other.token"), None);
+    }
+
     /// Garde-fou de non-régression : trouvé en session (2026-09-01) en testant contre un vrai
     /// déploiement — `keyring::Entry::set_password` peut renvoyer `Ok` sans que l'écriture soit
-    /// relisible par une `Entry` FRAÎCHE (reproductible même en mono-processus, deux `Entry`
-    /// indépendantes créées à la suite ; cause exacte non élucidée, probablement un trousseau
-    /// système restreint/virtualisé selon l'environnement d'exécution). `save_token`/`load_token`
+    /// relisible par une `Entry` FRAÎCHE (cause trouvée le 2026-09-23 : aucun backend compilé,
+    /// magasin `mock` ; reste possible avec un Secret Service absent ou verrouillé). `save_token`/`load_token`
     /// doivent rester cohérents entre eux quel que soit le backend réellement utilisé derrière —
     /// exécuté depuis un thread dédié (comme le vrai `spawn_auth_thread` d'`overlay-ui`, jamais le
     /// thread de test lui-même) pour rester fidèle au contexte réel.
@@ -126,14 +414,75 @@ mod tests {
                 save_token("jeton-de-test-123")
                     .expect("save_token ne doit jamais échouer totalement (repli fichier)");
                 assert_eq!(load_token().as_deref(), Some("jeton-de-test-123"));
+                // Daté à la sauvegarde : c'est ce que la rotation au démarrage consulte.
+                let age = token_age().expect("date d'émission enregistrée avec le jeton");
+                assert!(age < Duration::from_secs(60), "{age:?}");
+
+                // O6 : un fichier de repli présent porte le jeton le plus récent (une rotation
+                // retombée sur le fichier) — il prime sur une entrée du trousseau restée derrière.
+                save_token_file("jeton-de-test-plus-recent").unwrap();
+                assert_eq!(load_token().as_deref(), Some("jeton-de-test-plus-recent"));
+                assert_eq!(load_token().as_deref(), Some("jeton-de-test-plus-recent"));
 
                 clear_token();
                 assert!(
                     load_token().is_none(),
                     "clear_token doit effacer les deux emplacements"
                 );
+                assert!(token_age().is_none(), "la date part avec le jeton");
             })
             .unwrap();
         handle.join().unwrap();
+    }
+
+    /// Le fichier de repli naît en `0600` — et le reste quand il préexistait plus permissif.
+    /// Dans un dossier à part : le test ci-dessus peut lui aussi passer par le fichier de repli
+    /// (trousseau absent en CI), les deux ne doivent pas se marcher dessus.
+    #[cfg(unix)]
+    #[test]
+    fn le_fichier_de_repli_est_prive_des_sa_creation() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("token-store-mode-{}", std::process::id()));
+        let path = dir.join("native-session.token");
+        let _ = std::fs::remove_dir_all(&dir);
+        save_token_file_at(&path, "jeton-de-test-mode").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        save_token_file_at(&path, "jeton-de-test-mode-2").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "un fichier préexistant est remis en 0600");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "jeton-de-test-mode-2",
+            "remplacé, pas complété"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Écriture par fichier temporaire + renommage : rien ne traîne à côté du jeton, et un
+    /// temporaire abandonné par un arrêt brutal n'empêche pas la sauvegarde suivante.
+    #[test]
+    fn l_ecriture_du_fichier_de_repli_est_atomique_et_ne_laisse_rien() {
+        let dir = std::env::temp_dir().join(format!("token-store-atomic-{}", std::process::id()));
+        let path = dir.join("native-session.token");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let stale = dir.join(format!(".native-session.token.{}.tmp", std::process::id()));
+        std::fs::write(&stale, "reste d'un arrêt brutal").unwrap();
+
+        save_token_file_at(&path, "jeton-atomique-1").unwrap();
+        save_token_file_at(&path, "jeton-atomique-2").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "jeton-atomique-2");
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["native-session.token".to_string()], "{names:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -8,17 +8,26 @@
 //! de connexion n'a pas sa place derrière une combinaison globale qu'on peut frapper par
 //! inadvertance, d'autant qu'elle ne se rejoue qu'en refaisant tout un appairage.
 //!
-//! Jusqu'ici chaque combinaison était une constante en dur dans `main.rs`/`bin/overlay-ui-x11.rs`
-//! (`HOTKEY_LABEL`, `DETAILS_HOTKEY_LABEL`…), doublée d'un libellé recopié à la main dans les
-//! tooltips des boutons (`panels::watchlist::control_button_row`,
-//! `panels::combat::paint_side_switch`). Ce module devient la **source unique** : la liste des
-//! actions ([`ShortcutAction`]), leur combinaison par défaut, la combinaison effective après
-//! personnalisation ([`ShortcutBindings`]) et le libellé affiché partout (`Ctrl+Shift+W`).
+//! **La fermeture de l'overlay non plus, depuis le 2026-09-17** (demande utilisateur), pour la
+//! même raison : une combinaison globale qui tue le programme d'un seul geste, sans confirmation,
+//! est un piège en plein combat. Elle est devenue le bouton « Fermer l'overlay » en pied de
+//! l'onglet « Paramètres » (confirmé, 2026-09-16), doublé par l'entrée « Quitter » de la zone de
+//! notification — et Ctrl+C dans le terminal reste.
+//!
+//! Jusqu'ici chaque combinaison était une constante en dur dans
+//! `main.rs`/`bin/wakfu-companion-overlay-x11.rs` (`HOTKEY_LABEL`, `DETAILS_HOTKEY_LABEL`…),
+//! doublée d'un libellé recopié à la main dans les tooltips des boutons
+//! (`panels::watchlist::control_button_row`, `panels::combat::paint_side_switch`). Ce module
+//! devient la **source unique** : la liste des actions ([`ShortcutAction`]), leur combinaison par
+//! défaut, la combinaison effective après personnalisation ([`ShortcutBindings`]) et le libellé
+//! affiché partout (`Ctrl+Shift+W`).
 //!
 //! **Portée réelle des raccourcis** : `global_hotkey` (XGrabKey sous X11, `RegisterHotKey` sous
-//! Windows) — ils fonctionnent sans focus sur une fenêtre overlay (les fenêtres portent
-//! `WS_EX_NOACTIVATE` et ne reçoivent jamais d'événement clavier, voir la doc de
-//! `main.rs::QUIT_HOTKEY_LABEL`), donc **volés au jeu et à toute autre application** : d'où le
+//! Windows) — ils fonctionnent sans focus sur une fenêtre overlay (celles-ci portent
+//! `WS_EX_NOACTIVATE` et ne reçoivent qu'exceptionnellement un événement clavier : un clic en mode
+//! interactif peut malgré tout leur donner le premier plan, ce qui a coûté le filet « Échap » de
+//! `main.rs::window_event`, retiré le 2026-09-17), donc **volés au jeu et à toute autre
+//! application** : d'où le
 //! garde-fou [`Shortcut::is_valid`] — une lettre nue ne peut pas être bindée, elle serait prise à
 //! Wakfu lui-même dès la première ligne de chat écrite.
 //!
@@ -33,7 +42,7 @@
 //! mais la frappe est perdue pour l'application qui avait le focus.
 //!
 //! **Toutes les actions ne sont pas câblées sur les deux OS** : le binaire Linux
-//! (`bin/overlay-ui-x11.rs`) n'enregistre que les actions de
+//! (`bin/wakfu-companion-overlay-x11.rs`) n'enregistre que les actions de
 //! [`ShortcutAction::LINUX_SUPPORTED`] (voir sa doc de module : pas de thread Auth/Catalogue ni de
 //! compte lié). Les autres restent personnalisables et persistées, simplement inertes là-bas.
 
@@ -71,15 +80,16 @@ pub enum ShortcutAction {
     /// mise en garde pour une personnalisation : une touche de fonction nue est un mauvais choix
     /// ici, même si le champ l'accepte avec un modificateur.
     Refresh,
-    /// Fermeture de l'overlay (`event_loop.exit()`).
-    ///
-    /// **Pourquoi un raccourci GLOBAL et pas Échap** (retour utilisateur 2026-09-02) : les fenêtres
-    /// overlay portent `WS_EX_NOACTIVATE` (voir `main.rs::apply_extended_styles`, jamais désactivé
-    /// même en mode interactif — nécessaire pour ne jamais voler le focus au jeu) donc ne reçoivent
-    /// JAMAIS `WindowEvent::KeyboardInput` : Échap ne peut en pratique jamais se déclencher, malgré
-    /// ce qu'annonçait la bannière de démarrage à l'époque. L'utilisateur devait faire un Ctrl+C
-    /// dans le terminal (`STATUS_CONTROL_C_EXIT` en sortie — normal, mais peu clair).
-    Quit,
+    // **Il y avait ici `Quit`** (fermeture de l'overlay, `Ctrl+Shift+Q`, `event_loop.exit()`),
+    // retiré le 2026-09-17 à la demande de l'utilisateur — voir la doc de module. Il avait été
+    // créé en raccourci GLOBAL plutôt qu'en Échap (retour utilisateur 2026-09-02) parce que les
+    // fenêtres overlay portent `WS_EX_NOACTIVATE` (voir `main.rs::apply_extended_styles`, jamais
+    // désactivé même en mode interactif — nécessaire pour ne jamais voler le focus au jeu) donc ne
+    // reçoivent JAMAIS `WindowEvent::KeyboardInput` : Échap ne se déclenchait jamais malgré ce
+    // qu'annonçait la bannière, et l'utilisateur en était réduit à un Ctrl+C dans le terminal
+    // (`STATUS_CONTROL_C_EXIT` en sortie — normal, mais peu clair). Ce besoin-là est couvert
+    // depuis par le bouton « Fermer l'overlay » de l'onglet « Paramètres » et par la zone de
+    // notification. Sa clé de config (`quit`) est ignorée à la relecture, comme `disconnect`.
     /// Ouverture de la modale Options (`panels::options_modal`) — le seul raccourci qui reste
     /// atteignable quoi qu'il arrive aux autres : c'est par lui qu'on répare une personnalisation
     /// ratée.
@@ -94,18 +104,33 @@ pub enum ShortcutAction {
     /// (`panels::watchlist::control_button_row`, `panels::combat::paint_side_switch`), à l'image du
     /// jeu. C'est cette demande-là qui rend la personnalisation utile : ces libellés d'infobulle
     /// suivent désormais la combinaison RÉELLE.
+    ///
+    /// **`Ctrl+Shift+S` depuis le 2026-09-18** (demande utilisateur), en même temps que le libellé
+    /// est passé de « Ouvrir les détails (site) » à « Ouvrir le site » : l'action ne s'appelle plus
+    /// « détails », sa lettre non plus — **S comme site**. Le `D` libéré revient à
+    /// [`Self::WatchlistRemove`], qui l'a échangé contre son `S` (voir sa doc) ; les deux bougent
+    /// donc ensemble, un `Ctrl+Shift+S` qui ouvrirait le site ET retirerait du suivi serait un
+    /// conflit refusé par [`ShortcutBindings::conflict`].
     Details,
     /// Bouton "Ajouter" du carré de contrôle — reste INERTE comme le bouton lui-même (voir la doc
     /// de module de `panels::watchlist` : aucune sélection/formulaire câblés côté overlay pour
     /// cette itération), juste enregistré/journalisé.
     WatchlistAdd,
     /// Bouton "Supprimer" du carré de contrôle — même remarque que [`Self::WatchlistAdd`].
+    ///
+    /// **`Ctrl+Shift+D` depuis le 2026-09-18** (demande utilisateur) : échange de lettre avec
+    /// [`Self::Details`], parti sur le `S` de « site » — **D comme delete**, la lettre du retrait
+    /// dans à peu près tous les logiciels.
     WatchlistRemove,
     /// Bascule Alliés/Ennemis du panneau Combat, EN MODE TOGGLE (retour utilisateur explicite :
     /// « ça inverse la sélection [...] si actuellement c'est sélectionné allié [...] ça passe en
     /// ennemi et inversement ») plutôt que deux raccourcis séparés un par camp — voir
     /// `panels::combat::CombatSide::toggled` et `main.rs::App::toggle_combat_side`, appliqué à
     /// CHAQUE fenêtre Combat ouverte, pas seulement celle au premier plan.
+    ///
+    /// **`Ctrl+Shift+T` depuis le 2026-09-18** (demande utilisateur), après un `Ctrl+Shift+E` né
+    /// du groupe du 2026-09-06 : **T comme toggle**, ce que fait exactement l'action — le `E`
+    /// d'« ennemis » ne disait que la moitié d'une bascule qui va aussi dans l'autre sens.
     CombatSide,
     /// Fait tourner la grandeur mesurée par le panneau Combat — Dégâts → Armure → Soins → Dégâts
     /// (demande utilisateur du 2026-09-14, `Ctrl+Shift+V`). Même mode TOGGLE que [`Self::CombatSide`]
@@ -134,10 +159,9 @@ pub enum ShortcutAction {
 
 impl ShortcutAction {
     /// Toutes les actions, dans l'ordre d'affichage — voir doc du type.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 10] = [
         Self::Toggle,
         Self::Refresh,
-        Self::Quit,
         Self::Options,
         Self::Details,
         Self::WatchlistAdd,
@@ -148,16 +172,15 @@ impl ShortcutAction {
         Self::FollowPartner,
     ];
 
-    /// Actions réellement enregistrées par le binaire Linux (`bin/overlay-ui-x11.rs`) — voir doc
-    /// de module. Les autres restent personnalisables et persistées là-bas (un même `config.toml`
-    /// peut servir aux deux OS), simplement sans effet : ce binaire n'a ni thread Auth/Catalogue à
-    /// rafraîchir, ni compte à déconnecter, ni fenêtre Combat à basculer.
+    /// Actions réellement enregistrées par le binaire Linux (`bin/wakfu-companion-overlay-x11.rs`)
+    /// — voir doc de module. Les autres restent personnalisables et persistées là-bas (un même
+    /// `config.toml` peut servir aux deux OS), simplement sans effet : ce binaire n'a ni thread
+    /// Auth/Catalogue à rafraîchir, ni compte à déconnecter, ni fenêtre Combat à basculer.
     ///
     /// **À tenir à jour avec ce que ce binaire câble réellement** : une action ajoutée là-bas sans
     /// être ajoutée ici ne serait jamais enregistrée auprès de l'OS.
-    pub const LINUX_SUPPORTED: [Self; 6] = [
+    pub const LINUX_SUPPORTED: [Self; 5] = [
         Self::Toggle,
-        Self::Quit,
         Self::Options,
         Self::WatchlistRemove,
         // Câblés là-bas comme sous Windows : `chat_command` a une implémentation X11 complète
@@ -175,7 +198,6 @@ impl ShortcutAction {
         match self {
             Self::Toggle => "toggle",
             Self::Refresh => "refresh",
-            Self::Quit => "quit",
             Self::Options => "options",
             Self::Details => "details",
             Self::WatchlistAdd => "watchlist_add",
@@ -193,9 +215,8 @@ impl ShortcutAction {
         match self {
             Self::Toggle => "Interactif / clic-traversant",
             Self::Refresh => "Rafraîchir l'affichage",
-            Self::Quit => "Quitter l'overlay",
             Self::Options => "Ouvrir les options",
-            Self::Details => "Ouvrir les détails (site)",
+            Self::Details => "Ouvrir le site",
             Self::WatchlistAdd => "Ajouter au suivi",
             Self::WatchlistRemove => "Retirer du suivi",
             Self::CombatSide => "Alterner Alliés / Ennemis",
@@ -209,7 +230,7 @@ impl ShortcutAction {
     /// la référence) — les actions d'une même section sont contiguës dans [`Self::ALL`].
     pub fn section(self) -> &'static str {
         match self {
-            Self::Toggle | Self::Refresh | Self::Quit | Self::Options => "Overlay",
+            Self::Toggle | Self::Refresh | Self::Options => "Overlay",
             Self::Details | Self::WatchlistAdd | Self::WatchlistRemove => "Suivi",
             Self::CombatSide | Self::CombatMetric => "Combat",
             Self::InvitePartner | Self::FollowPartner => "Multicompte",
@@ -224,12 +245,11 @@ impl ShortcutAction {
         match self {
             Self::Toggle => Shortcut::new(ctrl_shift, Code::KeyW),
             Self::Refresh => Shortcut::new(ctrl_shift, Code::KeyR),
-            Self::Quit => Shortcut::new(ctrl_shift, Code::KeyQ),
             Self::Options => Shortcut::new(ctrl_shift, Code::KeyO),
-            Self::Details => Shortcut::new(ctrl_shift, Code::KeyD),
+            Self::Details => Shortcut::new(ctrl_shift, Code::KeyS),
             Self::WatchlistAdd => Shortcut::new(ctrl_shift, Code::KeyA),
-            Self::WatchlistRemove => Shortcut::new(ctrl_shift, Code::KeyS),
-            Self::CombatSide => Shortcut::new(ctrl_shift, Code::KeyE),
+            Self::WatchlistRemove => Shortcut::new(ctrl_shift, Code::KeyD),
+            Self::CombatSide => Shortcut::new(ctrl_shift, Code::KeyT),
             Self::CombatMetric => Shortcut::new(ctrl_shift, Code::KeyV),
             // Nues, par exception assumée — voir la doc de ces deux variantes.
             Self::InvitePartner => Shortcut::new(Modifiers::empty(), Code::F1),
@@ -242,9 +262,9 @@ impl ShortcutAction {
     }
 }
 
-/// Clé de config du raccourci de déconnexion, retiré le 2026-09-13 — voir [`ShortcutAction`] et
-/// [`ShortcutBindings::from_config`].
-const RETIRED_DISCONNECT_KEY: &str = "disconnect";
+/// Clés de config des raccourcis RETIRÉS — déconnexion (`disconnect`, 2026-09-13) et fermeture de
+/// l'overlay (`quit`, 2026-09-17) — voir [`ShortcutAction`] et [`ShortcutBindings::from_config`].
+const RETIRED_KEYS: [&str; 2] = ["disconnect", "quit"];
 
 /// Une combinaison `modificateurs + touche`. Enveloppe volontaire de `global_hotkey::HotKey` (dont
 /// elle sait produire l'équivalent, [`Shortcut::to_hotkey`]) : ce dernier n'a **ni libellé lisible**
@@ -401,10 +421,10 @@ impl ShortcutBindings {
         let mut bindings = Self::default();
         for (key, value) in raw {
             let Some(action) = ShortcutAction::from_key(key) else {
-                if key == RETIRED_DISCONNECT_KEY {
+                if RETIRED_KEYS.contains(&key.as_str()) {
                     // Clé d'un raccourci RETIRÉ (voir `ShortcutAction`), pas une faute de frappe :
-                    // tout `config.toml` écrit avant le 2026-09-13 en porte une. Silencieuse, donc,
-                    // là où une clé vraiment inconnue mérite un avertissement.
+                    // tout `config.toml` écrit avant le 2026-09-17 en porte au moins une.
+                    // Silencieuse, donc, là où une clé vraiment inconnue mérite un avertissement.
                     continue;
                 }
                 tracing::warn!(
@@ -451,12 +471,12 @@ impl ShortcutBindings {
 /// (qui doit rester en vie tant qu'on veut recevoir des événements — voir le spike S1), la table
 /// `id de HotKey -> action` consultée à la réception, et les combinaisons actuellement actives.
 ///
-/// Existe pour que `main.rs` (Windows, toutes les actions) et `bin/overlay-ui-x11.rs` (Linux, les
-/// trois de [`ShortcutAction::LINUX_SUPPORTED`]) partagent la MÊME logique d'(dés)enregistrement —
-/// devenue non triviale avec la personnalisation : il faut désenregistrer l'ancien jeu avant
-/// d'enregistrer le nouveau ([`Self::apply`]), et tout désenregistrer tant que la modale Options
-/// est ouverte ([`Self::suspend`]) sans quoi l'OS avalerait la frappe que l'utilisateur essaie
-/// justement d'assigner.
+/// Existe pour que `main.rs` (Windows, toutes les actions) et `bin/wakfu-companion-overlay-x11.rs`
+/// (Linux, les trois de [`ShortcutAction::LINUX_SUPPORTED`]) partagent la MÊME logique
+/// d'(dés)enregistrement — devenue non triviale avec la personnalisation : il faut désenregistrer
+/// l'ancien jeu avant d'enregistrer le nouveau ([`Self::apply`]), et tout désenregistrer tant que
+/// la modale Options est ouverte ([`Self::suspend`]) sans quoi l'OS avalerait la frappe que
+/// l'utilisateur essaie justement d'assigner.
 ///
 /// **Aucun `expect` sur l'enregistrement** (contrairement au code d'origine, qui paniquait) : une
 /// combinaison peut être refusée par l'OS parce qu'une AUTRE application l'a déjà prise — cas
@@ -811,23 +831,26 @@ fn code_from_egui(key: egui::Key) -> Option<Code> {
 mod tests {
     use super::*;
 
-    /// Les combinaisons par défaut sont EXACTEMENT celles qui étaient en dur avant ce module (voir
-    /// la doc des anciennes constantes de `main.rs`) : une mise à jour de l'overlay ne doit pas
-    /// changer les raccourcis sous les doigts d'un utilisateur qui n'a rien personnalisé.
+    /// Les combinaisons par défaut restent celles qui étaient en dur avant ce module (voir la doc
+    /// des anciennes constantes de `main.rs`) : une mise à jour de l'overlay ne doit pas changer
+    /// les raccourcis sous les doigts d'un utilisateur qui n'a rien personnalisé. Les trois
+    /// exceptions sont des demandes explicites de l'utilisateur, datées dans la doc des variantes
+    /// concernées — c'est ce test qui les rend visibles.
     #[test]
     fn defauts_identiques_aux_anciennes_constantes() {
         let bindings = ShortcutBindings::default();
         assert_eq!(bindings.label(ShortcutAction::Toggle), "Ctrl+Shift+W");
         assert_eq!(bindings.label(ShortcutAction::Refresh), "Ctrl+Shift+R");
-        assert_eq!(bindings.label(ShortcutAction::Quit), "Ctrl+Shift+Q");
         assert_eq!(bindings.label(ShortcutAction::Options), "Ctrl+Shift+O");
-        assert_eq!(bindings.label(ShortcutAction::Details), "Ctrl+Shift+D");
+        // Échangés l'un avec l'autre le 2026-09-18 (S comme « site », D comme « delete »).
+        assert_eq!(bindings.label(ShortcutAction::Details), "Ctrl+Shift+S");
         assert_eq!(bindings.label(ShortcutAction::WatchlistAdd), "Ctrl+Shift+A");
         assert_eq!(
             bindings.label(ShortcutAction::WatchlistRemove),
-            "Ctrl+Shift+S"
+            "Ctrl+Shift+D"
         );
-        assert_eq!(bindings.label(ShortcutAction::CombatSide), "Ctrl+Shift+E");
+        // Ctrl+Shift+E jusqu'au 2026-09-18 — T comme « toggle ».
+        assert_eq!(bindings.label(ShortcutAction::CombatSide), "Ctrl+Shift+T");
         // Né le 2026-09-14 avec le switch de grandeur, combinaison choisie par l'utilisateur.
         assert_eq!(bindings.label(ShortcutAction::CombatMetric), "Ctrl+Shift+V");
         // Nées nues (2026-09-13), à la demande de l'utilisateur — voir la doc de ces variantes.
@@ -937,25 +960,32 @@ mod tests {
     fn from_config_ignore_les_entrees_invalides() {
         let raw = BTreeMap::from([
             ("toggle".to_string(), "Ctrl+Alt+T".to_string()),
-            ("quit".to_string(), "pas un raccourci".to_string()),
+            ("options".to_string(), "pas un raccourci".to_string()),
             ("inconnue".to_string(), "Ctrl+Alt+Z".to_string()),
         ]);
         let bindings = ShortcutBindings::from_config(&raw);
         assert_eq!(bindings.label(ShortcutAction::Toggle), "Ctrl+Alt+T");
-        assert_eq!(bindings.label(ShortcutAction::Quit), "Ctrl+Shift+Q");
+        assert_eq!(bindings.label(ShortcutAction::Options), "Ctrl+Shift+O");
     }
 
-    /// Une config écrite AVANT le retrait du raccourci de déconnexion reste lisible : sa clé
-    /// `disconnect` est ignorée, et tout le reste du fichier s'applique normalement.
+    /// Une config écrite AVANT le retrait des raccourcis de déconnexion et de fermeture reste
+    /// lisible : leurs clés `disconnect` et `quit` sont ignorées, et tout le reste du fichier
+    /// s'applique normalement.
     #[test]
-    fn from_config_ignore_le_raccourci_de_deconnexion_retire() {
+    fn from_config_ignore_les_raccourcis_retires() {
         let raw = BTreeMap::from([
-            (RETIRED_DISCONNECT_KEY.to_string(), "Ctrl+Alt+D".to_string()),
+            ("disconnect".to_string(), "Ctrl+Alt+D".to_string()),
+            ("quit".to_string(), "Ctrl+Shift+Q".to_string()),
             ("options".to_string(), "Ctrl+Alt+O".to_string()),
         ]);
         let bindings = ShortcutBindings::from_config(&raw);
         assert_eq!(bindings.label(ShortcutAction::Options), "Ctrl+Alt+O");
-        assert!(!bindings.to_config().contains_key(RETIRED_DISCONNECT_KEY));
+        for key in RETIRED_KEYS {
+            assert!(
+                !bindings.to_config().contains_key(key),
+                "clé retirée « {key} » réécrite"
+            );
+        }
     }
 
     #[test]

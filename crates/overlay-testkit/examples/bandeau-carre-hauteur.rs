@@ -115,9 +115,9 @@ fn planche(variante: &Variante) {
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
             overlay_ui::style::apply(&ctx);
-            let icone = design::DesignSystem::get(&ctx)
-                .icon(design::DsIcon::Kamas)
-                .id();
+            let icone = egui::load::SizedTexture::from_handle(
+                design::DesignSystem::get(&ctx).icon(design::DsIcon::Kamas),
+            );
 
             let origine = ui.max_rect().min;
             // Le haut des TUILES : c'est la ligne de référence de toute la planche.

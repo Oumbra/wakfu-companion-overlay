@@ -64,7 +64,7 @@ fn fight() -> FightSnapshot {
         ongoing: true,
         result: None,
         fighters: vec![
-            fighter("Anonyme-Ouginak1", Some("iop"), true, 12_480, 0, 0),
+            fighter("Percuteur", Some("iop"), true, 12_480, 0, 0),
             fighter("Fayto", Some("feca"), true, 3_120, 9_460, 640),
             fighter("Sagitta Lucis", Some("eniripsa"), true, 1_890, 1_200, 7_310),
             fighter("Caliburnus", Some("cra"), true, 6_740, 460, 1_050),
@@ -98,7 +98,10 @@ impl Textures {
 }
 
 fn harness_for(side: CombatSide, metric: CombatMetric) -> Harness<'static> {
-    let fight = fight();
+    harness_with(fight(), side, metric)
+}
+
+fn harness_with(fight: FightSnapshot, side: CombatSide, metric: CombatMetric) -> Harness<'static> {
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let mut textures = Textures {
@@ -124,11 +127,19 @@ fn harness_for(side: CombatSide, metric: CombatMetric) -> Harness<'static> {
                 portraits,
                 combat_frame,
                 icons,
+                // Le panneau Combat n'a ni bustes de classe ni serveurs de jeu à peindre — ils
+                // n'existent que pour l'onglet « Personnages » de la fenêtre Options.
+                avatars: None,
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -139,8 +150,14 @@ fn harness_for(side: CombatSide, metric: CombatMetric) -> Harness<'static> {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     })
@@ -161,6 +178,19 @@ fn armure_du_camp_allie() {
     let mut harness = harness_for(CombatSide::Allies, CombatMetric::Armor);
     harness.run();
     harness.snapshot("combat_metrique_armure");
+}
+
+/// Total à SEPT chiffres : le Iop porté à un peu plus d'un million, comme la capture utilisateur
+/// du 16 sept. 2026 (« 1 047 404 » mordait de 10 px sur la case Soins). Le total passe au corps
+/// compact (16) et tient dans le bandeau, qui déborde de 6 px de chaque côté de la colonne quel
+/// que soit le total — voir `combat::show_leader_row`.
+#[test]
+fn total_a_sept_chiffres_au_corps_compact() {
+    let mut fight = fight();
+    fight.fighters[0].total_damage = 1_035_654; // total du camp : 1 047 404
+    let mut harness = harness_with(fight, CombatSide::Allies, CombatMetric::Damage);
+    harness.run();
+    harness.snapshot("combat_metrique_total_sept_chiffres");
 }
 
 #[test]
@@ -211,11 +241,19 @@ fn grandeur_sans_valeur_affiche_son_message() {
                 portraits,
                 combat_frame,
                 icons,
+                // Le panneau Combat n'a ni bustes de classe ni serveurs de jeu à peindre — ils
+                // n'existent que pour l'onglet « Personnages » de la fenêtre Options.
+                avatars: None,
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -226,8 +264,14 @@ fn grandeur_sans_valeur_affiche_son_message() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });

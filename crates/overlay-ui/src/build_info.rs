@@ -46,6 +46,29 @@ pub const FULL_LABEL: &str = concat!(
 /// Surcharge posée par les tests de capture — voir [`freeze_for_snapshots`].
 static FROZEN: OnceLock<&'static str> = OnceLock::new();
 
+/// L'heure de démarrage du processus — voir [`mark_process_start`].
+static PROCESS_START: OnceLock<std::time::SystemTime> = OnceLock::new();
+
+/// **Note l'heure de démarrage**, à appeler en tout premier dans `main` — avant que quoi que ce
+/// soit n'écrive sur le disque.
+///
+/// Sert à `local_data::has_user_data` : le seul moyen de distinguer une installation déjà utilisée
+/// d'une première ouverture est la date de `config.toml`, et ce fichier est créé par le lancement
+/// en cours. Lue trop tard, l'heure serait postérieure à cette écriture, et toute installation
+/// neuve passerait pour ancienne.
+///
+/// Idempotente : le premier appel gagne.
+pub fn mark_process_start() {
+    let _ = PROCESS_START.set(std::time::SystemTime::now());
+}
+
+/// L'heure notée par [`mark_process_start`], ou l'instant présent si personne ne l'a notée — ce
+/// repli fait passer un `config.toml` fraîchement écrit pour ancien, donc offre l'effacement là où
+/// il ne servira peut-être à rien : le comportement d'avant le sondage, jamais l'inverse.
+pub fn process_start() -> std::time::SystemTime {
+    *PROCESS_START.get_or_init(std::time::SystemTime::now)
+}
+
 /// Libellé à peindre dans une bannière de fenêtre.
 ///
 /// Passe par une fonction plutôt que d'utiliser [`BANNER_LABEL`] directement pour laisser les
@@ -70,6 +93,13 @@ pub fn freeze_for_snapshots() {
     let _ = FROZEN.set(FROZEN_LABEL);
 }
 
+/// Vrai une fois [`freeze_for_snapshots`] appelée — pour tout ce qui, comme la bannière, ne doit
+/// pas varier d'une capture à l'autre sans changement demandé (l'année de la mention de droits
+/// d'auteur de l'onglet « À propos », `panels::a_propos_tab::copyright_year`).
+pub fn is_frozen() -> bool {
+    FROZEN.get().is_some()
+}
+
 /// Le libellé figé des captures. Même gabarit qu'un vrai numéro (trois composantes d'un chiffre),
 /// pour que la référence rende compte de la place réellement occupée en production.
 pub const FROZEN_LABEL: &str = "0.0.0";
@@ -83,6 +113,7 @@ mod tests {
         assert_eq!(BANNER_LABEL, VERSION);
         // Sans surcharge posée, c'est bien la vraie version qui est peinte.
         assert_eq!(banner_label(), BANNER_LABEL);
+        assert!(!is_frozen());
     }
 
     #[test]

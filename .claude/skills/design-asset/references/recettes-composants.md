@@ -20,6 +20,9 @@ Les captures d'origine sont dans l'historique git — commit
 | `icon-tabs` | `genericize` | `--tol 3 --roi-inset 1 --grow 3 --floor 14 --parts 2,2,63,42 69,2,131,42 137,2,199,42 205,2,266,42` |
 | `tabs-with-first-tab-active` | `strip` | `--parts 0,0,261,44 263,0,521,44 522,0,782,44` |
 | `tabs-with-first-tab-active-and-hover-2nd-tab` | `strip` | idem |
+| `switch-first-slot-active` | `cutout --tol 8` puis `strip` | `--roi-inset 6 --grow 2 --parts 0,0,42,44 44,0,87,44` |
+| `switch-second-slot-active` | `cutout --tol 8` puis `strip` | `--roi-inset 6 --grow 2 --parts 0,0,44,44 46,0,88,44` |
+| `switch-first-slot-active-and-second-slot-hover` | `cutout --tol 8` puis `strip` | `--roi-inset 6 --grow 2 --parts 0,0,42,44 44,0,88,44` |
 
 ## Ce que ce lot a appris
 
@@ -85,3 +88,29 @@ Le symptôme à reconnaître sur la planche : dans la vignette des coins, un ang
 gris là où le bord droit est noir, ou un liseré qui s'amincit en approchant de l'arc.
 `icon-tabs` était le cas le plus visible — sa barre de 268 px porte un cadre épais, et le
 coin en perdait la moitié.
+
+## Le switch de genre (2026-09-16) — un biseau n'est pas un libellé
+
+Deux captures du même sélecteur à deux cases (♂ actif, puis ♀ actif). Le détourage est sans
+histoire (`radius_fit_iou` 1,0, liseré récupéré sur deux anneaux, `--tol 8`). Le piège est dans
+`analyze` : la case active porte un **biseau clair de 2 px en haut et en bas**, et la détection de
+contenu le rend comme deux « composants » de 44 × 8 en plus des glyphes. Ce sont des bandes de
+texture, pas du contenu incrusté : `--roi-inset 6` les sort de la détection (les glyphes sont à
+y 13..31, il reste de la marge), et `removed.bbox` retombe sur les seuls glyphes (18 × 18 et
+14 × 20 avec `--grow 2`).
+
+**Case par case, comme une barre d'onglets** (`--parts`), en excluant les deux colonnes du
+séparateur : les deux cases n'ont pas le même fond (kaki clair / gris-brun), une passe unique
+n'aurait pas de médiane commune.
+
+**Les deux captures ne font pas la même largeur** (87 et 88) : la case inactive y mesure 41 et
+42 px, l'ombre intérieure côté liseré tenant sur 1 ou 2 px selon le rendu du jeu. Égalisées à 88
+par duplication d'une colonne de remplissage de la case inactive — texture uniforme, invisible —
+pour que les quatre cases découpées ensuite (`switch-slot-*.png`, voir le catalogue des
+composants) aient des largeurs cohérentes d'un état à l'autre.
+
+**Troisième capture, le survol** (`switch-first-slot-active-and-second-slot-hover`, ♂ actif et
+souris sur ♀) : 87 px comme la première, même recette, même égalisation à 88 (colonne 60
+dupliquée). Elle n'est découpée en rien : la case survolée mesure identique à la case active
+(écart moyen 1,0/255, biseaux compris, sans ombre intérieure), le composant réutilise donc les
+textures actives pour l'état survolé. Le fichier reste comme référence de comparaison.

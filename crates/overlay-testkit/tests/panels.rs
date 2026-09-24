@@ -33,6 +33,7 @@ use overlay_engine::{
     WatchlistMode,
 };
 use overlay_ingest::Tailer;
+use overlay_ui::avatars::AvatarAtlas;
 use overlay_ui::panels;
 use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
@@ -95,6 +96,10 @@ struct Textures {
     portraits: Option<PortraitAtlas>,
     combat_frame: Option<CombatFrame>,
     icons: Option<UiIcons>,
+    /// Les bustes de classe de l'onglet « Personnages » — chargés comme les autres atlas, une
+    /// fois, et gardés vivants entre les frames : un `TextureHandle` libère sa texture dès que son
+    /// dernier exemplaire tombe, et la capture sortirait avec des tuiles vides.
+    avatars: Option<AvatarAtlas>,
 }
 
 impl Textures {
@@ -103,15 +108,19 @@ impl Textures {
             portraits: None,
             combat_frame: None,
             icons: None,
+            avatars: None,
         }
     }
 
-    fn get_or_load(&mut self, ctx: &egui::Context) -> (&PortraitAtlas, &CombatFrame, &UiIcons) {
+    fn get_or_load(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> (&PortraitAtlas, &CombatFrame, &UiIcons, &AvatarAtlas) {
         // `overlay_ui::style::apply` — MÊME style que les deux binaires (`main.rs`, `bin/
-        // overlay-ui-x11.rs`, voir sa doc), sans quoi ces snapshots resteraient sur le thème PAR
-        // DÉFAUT d'egui pour les tooltips (`egui_kittest::Harness::new_ui` crée son propre
-        // `egui::Context`, qui ne passe jamais par le point de configuration des deux binaires) et
-        // ne vaudraient plus rien pour vérifier visuellement le design system tooltip.
+        // wakfu-companion-overlay-x11.rs`, voir sa doc), sans quoi ces snapshots resteraient sur le
+        // thème PAR DÉFAUT d'egui pour les tooltips (`egui_kittest::Harness::new_ui` crée son
+        // propre `egui::Context`, qui ne passe jamais par le point de configuration des deux
+        // binaires) et ne vaudraient plus rien pour vérifier visuellement le design system tooltip.
         overlay_ui::style::apply(ctx);
         // Numéro de version FIGÉ dans toutes les captures de ce binaire de test (`v0.0.0`) : la
         // version réelle est incrémentée automatiquement à chaque commit `feat:`/`fix:`/… (voir
@@ -130,7 +139,8 @@ impl Textures {
             .combat_frame
             .get_or_insert_with(|| CombatFrame::load(ctx));
         let icons = self.icons.get_or_insert_with(|| UiIcons::load(ctx));
-        (portraits, combat_frame, icons)
+        let avatars = self.avatars.get_or_insert_with(|| AvatarAtlas::load(ctx));
+        (portraits, combat_frame, icons, avatars)
     }
 }
 
@@ -156,7 +166,7 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -165,13 +175,19 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -182,8 +198,14 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -223,7 +245,7 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -232,13 +254,19 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -249,28 +277,791 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
 
     harness.run();
 
-    // Centre du bouton "Alliés" (moitié gauche du switch) — le switch coiffe désormais la colonne
+    // Centre de la case "Alliés" (moitié gauche du switch) — le switch coiffe désormais la colonne
     // des portraits (échange du 15 sept., voir `panels::combat`), donc plus aucun `COLUMN_GAP` ni
-    // bandeau leader dans le compte : 8 (outer_margin) + 5 (switch centré dans les 70 px du cadre,
-    // (70 - 60) / 2) + 15 (moitié de `SWITCH_OPTION_WIDTH`, 30) = 28 ; 8 + 50 (y du switch,
-    // `COMBAT_TOP_MARGIN` + `LEADER_PANEL_PADDING`) + 13 (moitié de `SWITCH_HEIGHT`, 26) = 71.
-    harness.hover_at(egui::pos2(28.0, 71.0));
+    // bandeau leader dans le compte, et depuis le 16 sept. (`design::switch`) son bandeau est
+    // calé à gauche sur le cadre : 8 (outer_margin) + 6 (`LEADER_PANEL_PADDING`) + 17,5 (moitié
+    // d'une case à l'échelle 36/44, 35) = 31,5 ; 8 + 50 (y du switch, `COMBAT_TOP_MARGIN` +
+    // `LEADER_PANEL_PADDING`) + 18 (moitié de `SWITCH_HEIGHT`, 36) = 76.
+    harness.hover_at(egui::pos2(31.0, 76.0));
     harness.run();
     harness.snapshot("combat_tooltip_allies_au_dessus");
 
-    // Centre du bouton "Ennemis" (moitié droite, décalée d'un `SWITCH_OPTION_WIDTH` complet) :
-    // 28 + 30 = 58 ; même y.
-    harness.hover_at(egui::pos2(58.0, 71.0));
+    // Centre de la case "Ennemis" (moitié droite, décalée d'une case et du séparateur de 2) :
+    // 31 + 37 = 68 ; même y.
+    harness.hover_at(egui::pos2(68.0, 76.0));
     harness.run();
     harness.snapshot("combat_tooltip_ennemis_au_dessus");
+}
+
+/// La bande Récap de session (2026-09-16, `panels::recap`) — cinq chiffres posés en haut à gauche
+/// de la fenêtre de jeu.
+///
+/// **Les totaux viennent du rejeu réel**, comme tout le reste de ce fichier (voir sa doc de
+/// module) : XP, kamas, combats gagnés/perdus et challenges sont ceux que le vrai `wakfu.log`
+/// produit à travers le vrai moteur. Seuls le CHRONO et l'heure de début sont fixés ici — et ils
+/// doivent l'être : ils viennent de la session de l'overlay (`overlay_ui::recap_session`), qui
+/// n'existe pas dans le fichier par construction, et qui rendrait cette capture différente à
+/// chaque exécution.
+#[test]
+fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
+    let snapshot = replay_real_log();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    // 1 h 23 min 45 s — une durée qui exerce les trois champs de `HH:MM:SS` d'un coup, plutôt
+    // qu'un compte rond où une erreur de minutes ou de secondes passerait inaperçue.
+    let uptime = std::time::Duration::from_secs(5025);
+    let recap = panels::recap::RecapView {
+        totals: snapshot.totals,
+        uptime,
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
+
+    // La fenêtre OS du bloc, pas les 800 × 600 par défaut du harnais (2026-09-17) : une
+    // infobulle ne peut pas sortir de sa fenêtre, et c'est cette contrainte-là que les captures
+    // de survol doivent montrer — ici quatre lignes (la paire Kamas/XP s'empile), plus la marge
+    // haute des infobulles et les 8 px de marge du harnais de chaque côté.
+    let mut harness = Harness::builder()
+        .with_size(egui::Vec2::new(
+            panels::recap::WIDTH + 16.0,
+            panels::recap::height(4) + overlay_ui::render_content::RECAP_TOOLTIP_RESERVE + 16.0,
+        ))
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+            paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::Recap,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
+                    combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
+                    watchlist: &[],
+                    watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    recap: &recap,
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
+                    options: None,
+                    veiled: false,
+                    login: None,
+                    card_settings: None,
+                },
+            );
+        });
+
+    harness.run();
+    harness.snapshot("recap_apres_rejeu_reel");
+}
+
+/// Le même bloc avec les chiffres d'une session ORDINAIRE, où tout tient sur trois lignes — le cas
+/// courant, que le rejeu ci-dessus ne montre pas : son `wakfu.log` cumule vingt milliards d'XP,
+/// ce qui empile déjà la ligne Kamas/XP (`panels::recap::layout_rows`, 2026-09-16). Les deux
+/// captures ensemble couvrent donc les deux états de la règle « responsive » : empilé (rejeu
+/// brut) et côte à côte (ici).
+#[test]
+fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
+    let snapshot = replay_real_log();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    // 1 h 23 min 45 s — une durée qui exerce les trois champs de `HH:MM:SS` d'un coup, plutôt
+    // qu'un compte rond où une erreur de minutes ou de secondes passerait inaperçue.
+    let uptime = std::time::Duration::from_secs(5025);
+    // Les totaux du rejeu, l'XP RAMENÉE à ce qu'une session d'une heure rapporte (quelques
+    // dizaines de milliers) : c'est la seule case du rejeu qui déborde, et c'est le seul champ
+    // touché — kamas, combats et challenges restent ceux du vrai moteur. Même exception, pour la
+    // même raison, que le mode `up` du Suivi (doc de module de ce fichier) : aucun rejeu ne
+    // produit cet état-là.
+    // Deux reprises : l'infobulle de la durée gagne sa seconde ligne (« reprise 2 fois »), ce
+    // que la capture de survol ci-dessous montre.
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: snapshot.totals.xp_gained / 1_000_000,
+            ..snapshot.totals
+        },
+        uptime,
+        started_at: "20:12".to_string(),
+        resumed: 2,
+    };
+    // Le clic sur le glyphe de remise à zéro ne fait rien dans le bloc : il remonte une
+    // intention, que ce test relève ici (voir `RenderOutcome::recap_reset_requested`).
+    let reset_requested = std::rc::Rc::new(std::cell::RefCell::new(false));
+
+    // La fenêtre OS du bloc à trois lignes — voir le test précédent.
+    let mut harness = Harness::builder()
+        .with_size(egui::Vec2::new(
+            panels::recap::WIDTH + 16.0,
+            panels::recap::HEIGHT + overlay_ui::render_content::RECAP_TOOLTIP_RESERVE + 16.0,
+        ))
+        .build_ui({
+            let reset_requested = std::rc::Rc::clone(&reset_requested);
+            move |ui| {
+                let ctx = ui.ctx().clone();
+                let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+                let outcome = paint_content(
+                    ui,
+                    RenderContent {
+                        kind: OverlayKind::Recap,
+                        fight: None,
+                        portraits,
+                        combat_frame,
+                        icons,
+                        avatars: Some(avatars),
+                        game_servers: &Default::default(),
+                        combat_side: &mut combat_side,
+                        combat_metric: &mut combat_metric,
+                        watchlist: &[],
+                        watchlist_enabled: true,
+                        spells_enabled: true,
+                        combat_on_right: false,
+                        watchlist_selection: &mut Default::default(),
+                        watchlist_completions: &Default::default(),
+                        watchlist_reset: None,
+                        watchlist_toast: None,
+                        catalog: &catalog,
+                        catalog_stale: false,
+                        remote_icons: &remote_icon_store,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        auth_status: &auth_status,
+                        auth_command_tx: &auth_sink,
+                        interactive: true,
+                        shortcuts: &shortcuts,
+                        now,
+                        recap: &recap,
+                        recap_cells: Default::default(),
+                        recap_chrome: Default::default(),
+                        combat_chrome: Default::default(),
+                        options: None,
+                        veiled: false,
+                        login: None,
+                        card_settings: None,
+                    },
+                );
+                if outcome.recap_reset_requested {
+                    *reset_requested.borrow_mut() = true;
+                }
+            }
+        });
+
+    harness.run();
+    harness.snapshot("recap_session_ordinaire");
+
+    // Survol de la case Kamas (moitié gauche de la première ligne : le bloc est à (8, 8 + 36),
+    // sous la marge haute `RECAP_TOOLTIP_RESERVE` ; sa moitié gauche va de x = 18 à 111, la ligne
+    // de y = 50 à 72) : l'infobulle s'ouvre AU-DESSUS de la case, dans cette marge — et tient dans
+    // les 206 px de la fenêtre OS du bloc, c'est pour ça qu'elle ne dit que « Kamas gagnés »
+    // (voir `panels::recap::Cell`).
+    harness.hover_at(egui::pos2(64.0, 61.0));
+    harness.run();
+    harness.snapshot("recap_tooltip_kamas_au_dessus");
+
+    // Survol de la durée (troisième ligne, y = 110 à 132, centrée) : « Session depuis 20:12 »
+    // et « reprise 2 fois » sur deux lignes, au-dessus de la case — par-dessus les deux lignes du
+    // dessus, qui lui laissent 60 px.
+    harness.hover_at(egui::pos2(100.0, 121.0));
+    harness.run();
+    harness.snapshot("recap_tooltip_duree_reprises");
+
+    // Survol du glyphe de remise à zéro (au bout de la même ligne : x = 188 à 204) : il passe à
+    // l'or, l'infobulle dit « Remettre à zéro ».
+    harness.hover_at(egui::pos2(196.0, 121.0));
+    harness.run();
+    harness.snapshot("recap_tooltip_remise_a_zero");
+
+    // Le clic remonte l'intention — et rien d'autre : le bloc n'a pas d'état à remettre à zéro.
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: egui::pos2(196.0, 121.0),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        });
+    }
+    harness.run();
+    assert!(
+        *reset_requested.borrow(),
+        "le clic sur le glyphe doit remonter `recap_reset_requested`"
+    );
+}
+
+/// Appui (ou relâchement) du bouton principal à cet endroit — ce que `Harness` ne fournit pas
+/// tout fait, et qu'il faut pour jouer un glisser-déposer plutôt qu'un clic.
+fn press(harness: &mut Harness<'_>, pos: egui::Pos2, pressed: bool) {
+    harness.event(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    });
+}
+
+/// **La bande Récap se saisit à la souris** (2026-09-17, demande utilisateur : « placer l'overlay
+/// de recap via du drag & drop ») — voir `panels::recap::RecapDrag`.
+///
+/// Ce test tient les deux moitiés de la règle, celles dont l'hôte dépend et qu'aucune capture ne
+/// montrerait (le bloc ne se déplace pas lui-même : il remonte le geste, et c'est la fenêtre OS
+/// qui bouge) :
+///
+/// 1. saisi sur son fond, le bloc remonte la POSITION du curseur à chaque étape — position et non
+///    écart parcouru, sans quoi l'hôte verrait la bande s'arrêter au premier pixel (voir la doc
+///    de `RecapDrag`) ;
+/// 2. saisi sur son glyphe de remise à zéro, il ne remonte RIEN : ce bouton capte le glissement
+///    comme le clic (`Sense::click_and_drag`) précisément pour que la bande ne parte pas à chaque
+///    appui dessus.
+///
+/// Le curseur du jeu passe à la croix fléchée sur le fond — `Grab`/`Grabbing` retombent déjà sur
+/// ce bitmap (`overlay_ui::cursor`, doc de module), c'est ce qui annonce à l'écran qu'il y a
+/// quelque chose à attraper là où rien n'est écrit.
+#[test]
+fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: 42_910,
+            kamas_gained: 128_400,
+            ..Default::default()
+        },
+        uptime: std::time::Duration::from_secs(5025),
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
+    // Tout ce que le bloc a remonté depuis le début du test, dans l'ordre.
+    let gestes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let reset_requested = std::rc::Rc::new(std::cell::RefCell::new(false));
+
+    let mut harness = Harness::builder()
+        .with_size(egui::Vec2::new(
+            panels::recap::WIDTH + 16.0,
+            panels::recap::HEIGHT + overlay_ui::render_content::RECAP_TOOLTIP_RESERVE + 16.0,
+        ))
+        .build_ui({
+            let gestes = std::rc::Rc::clone(&gestes);
+            let reset_requested = std::rc::Rc::clone(&reset_requested);
+            move |ui| {
+                let ctx = ui.ctx().clone();
+                let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+                let outcome = paint_content(
+                    ui,
+                    RenderContent {
+                        kind: OverlayKind::Recap,
+                        fight: None,
+                        portraits,
+                        combat_frame,
+                        icons,
+                        avatars: Some(avatars),
+                        game_servers: &Default::default(),
+                        combat_side: &mut combat_side,
+                        combat_metric: &mut combat_metric,
+                        watchlist: &[],
+                        watchlist_enabled: true,
+                        spells_enabled: true,
+                        combat_on_right: false,
+                        watchlist_selection: &mut Default::default(),
+                        watchlist_completions: &Default::default(),
+                        watchlist_reset: None,
+                        watchlist_toast: None,
+                        catalog: &catalog,
+                        catalog_stale: false,
+                        remote_icons: &remote_icon_store,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        auth_status: &auth_status,
+                        auth_command_tx: &auth_sink,
+                        interactive: true,
+                        shortcuts: &shortcuts,
+                        now,
+                        recap: &recap,
+                        recap_cells: Default::default(),
+                        // **Déverrouillée** : le défaut de `RecapChrome` est l'inverse
+                        // (2026-09-17), et une bande verrouillée ne remonterait aucun geste —
+                        // c'est ce que vérifie `bande_recap_verrouillee_ne_bouge_pas`.
+                        recap_chrome: panels::recap::RecapChrome {
+                            locked: false,
+                            ..Default::default()
+                        },
+                        combat_chrome: Default::default(),
+                        options: None,
+                        veiled: false,
+                        login: None,
+                        card_settings: None,
+                    },
+                );
+                if outcome.recap_drag != panels::recap::RecapDrag::None {
+                    gestes.borrow_mut().push(outcome.recap_drag);
+                }
+                if outcome.recap_reset_requested {
+                    *reset_requested.borrow_mut() = true;
+                }
+            }
+        });
+
+    // Le bloc occupe (8, 44) à (214, 158) dans cette fenêtre : la marge de la fenêtre (8 px) plus
+    // la réserve d'infobulle en haut (36 px). Ce point-ci est sur le fond, entre la case Kamas et
+    // la case XP — du fond nu, pas un chiffre.
+    let saisie = egui::pos2(118.0, 61.0);
+    harness.hover_at(saisie);
+    harness.run();
+    let images = overlay_ui::cursor::images();
+    assert!(
+        harness
+            .output()
+            .platform_output
+            .cursor_image
+            .as_ref()
+            .is_some_and(|image| std::sync::Arc::ptr_eq(&image.rgba, &images.moving.rgba)),
+        "le fond de la bande doit annoncer qu'il s'attrape : croix fléchée du jeu"
+    );
+
+    press(&mut harness, saisie, true);
+    harness.run();
+    assert_eq!(
+        gestes.borrow().first().copied(),
+        Some(panels::recap::RecapDrag::Started(saisie)),
+        "l'appui sur le fond doit remonter la position de saisie"
+    );
+
+    // La souris part vers le bas à droite. Le glissement se signale, **sans position** : celle
+    // que ce repère-ci donnerait est mesurée depuis le coin de la fenêtre, donc elle change
+    // quand l'hôte déplace cette fenêtre, et s'en servir pour la déplacer la faisait vibrer
+    // (2026-09-17, voir `recap_placement::drag_offset`). L'hôte lit le curseur d'écran.
+    let deplacee = egui::pos2(160.0, 100.0);
+    harness.event(egui::Event::PointerMoved(deplacee));
+    harness.run();
+    assert_eq!(
+        gestes.borrow().last().copied(),
+        Some(panels::recap::RecapDrag::Moved),
+        "le glissement doit se signaler à l'hôte"
+    );
+
+    press(&mut harness, deplacee, false);
+    harness.run();
+    assert_eq!(
+        gestes.borrow().last().copied(),
+        Some(panels::recap::RecapDrag::Released),
+        "le relâchement doit clore le geste — c'est là que l'hôte persiste la position"
+    );
+
+    // **Le glyphe de remise à zéro garde la priorité.** Appui-glissé-relâché sur lui : aucun
+    // geste de bande, et pas de remise à zéro non plus (un clic qu'on glisse s'annule, ce qui est
+    // la bonne réponse pour un geste destructeur).
+    gestes.borrow_mut().clear();
+    let glyphe = egui::pos2(196.0, 121.0);
+    harness.hover_at(glyphe);
+    harness.run();
+    press(&mut harness, glyphe, true);
+    harness.run();
+    harness.event(egui::Event::PointerMoved(egui::pos2(196.0, 140.0)));
+    harness.run();
+    press(&mut harness, egui::pos2(196.0, 140.0), false);
+    harness.run();
+    assert!(
+        gestes.borrow().is_empty(),
+        "un appui sur le glyphe de remise à zéro ne doit jamais faire partir la bande : {:?}",
+        gestes.borrow()
+    );
+    assert!(
+        !*reset_requested.borrow(),
+        "une remise à zéro amorcée puis glissée s'annule"
+    );
+}
+
+/// La confirmation de remise à zéro (`OverlayKind::ResetConfirm`, 2026-09-17) : la boîte du design
+/// system centrée sous un voile qui couvre toute la fenêtre — la fenêtre de jeu, en vrai. Échap
+/// répond « Non », ce que ce test relève par `RenderOutcome::reset_choice`.
+#[test]
+fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let choice = std::rc::Rc::new(std::cell::RefCell::new(
+        overlay_ui::design::ConfirmChoice::Pending,
+    ));
+
+    let mut harness = Harness::new_ui({
+        let choice = std::rc::Rc::clone(&choice);
+        move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+            let outcome = paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::ResetConfirm(
+                        overlay_ui::render_content::ResetTarget::RecapSession,
+                    ),
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
+                    combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
+                    watchlist: &[],
+                    watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
+                    options: None,
+                    veiled: false,
+                    login: None,
+                    card_settings: None,
+                },
+            );
+            if outcome.reset_choice != overlay_ui::design::ConfirmChoice::Pending {
+                *choice.borrow_mut() = outcome.reset_choice;
+            }
+        }
+    });
+
+    harness.run();
+    harness.snapshot("recap_confirmation_remise_a_zero");
+
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(
+        *choice.borrow(),
+        overlay_ui::design::ConfirmChoice::No,
+        "Échap doit répondre « Non »"
+    );
+}
+
+/// **La confirmation de réinitialisation d'un compteur** (`ResetTarget::WatchlistCounter`,
+/// 2026-09-18) : la même fenêtre, le même voile que le Récap — et la question NOMME l'objet, par
+/// l'entrée que l'hôte prête au rendu (`RenderContent::watchlist_reset`). Échap répond « Non ».
+#[test]
+fn confirmation_de_reinitialisation_d_un_compteur_nomme_l_objet() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let choice = std::rc::Rc::new(std::cell::RefCell::new(
+        overlay_ui::design::ConfirmChoice::Pending,
+    ));
+    let entree = WatchlistEntry {
+        name: "Bottes Lantha".to_string(),
+        kind: WatchlistKind::Item,
+        mode: WatchlistMode::Down,
+        count: 12,
+        countdown_target: 50,
+        catalog_id: None,
+    };
+
+    let mut harness = Harness::new_ui({
+        let choice = std::rc::Rc::clone(&choice);
+        move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+            let outcome = paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::ResetConfirm(
+                        overlay_ui::render_content::ResetTarget::WatchlistCounter,
+                    ),
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
+                    combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
+                    watchlist: &[],
+                    watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: Some(&entree),
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
+                    options: None,
+                    veiled: false,
+                    login: None,
+                    card_settings: None,
+                },
+            );
+            if outcome.reset_choice != overlay_ui::design::ConfirmChoice::Pending {
+                *choice.borrow_mut() = outcome.reset_choice;
+            }
+        }
+    });
+
+    harness.run();
+    harness.snapshot("suivi_confirmation_reinitialisation");
+
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(
+        *choice.borrow(),
+        overlay_ui::design::ConfirmChoice::No,
+        "Échap doit répondre « Non »"
+    );
+}
+
+/// Le même bloc avec deux cases éteintes par les Options (2026-09-16, tard,
+/// `panels::recap::RecapCells`) : sans combats ni durée, les challenges prennent la deuxième
+/// ligne pour eux seuls, centrés sur toute la largeur, et le bloc perd sa troisième ligne — la
+/// grille se resserre, elle ne laisse pas de trou.
+#[test]
+fn bloc_recap_sans_combats_ni_duree_se_resserre() {
+    let snapshot = replay_real_log();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let uptime = std::time::Duration::from_secs(5025);
+    // Même XP ramenée que la session ordinaire ci-dessus, pour que la ligne Kamas / XP tienne.
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: snapshot.totals.xp_gained / 1_000_000,
+            ..snapshot.totals
+        },
+        uptime,
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Recap,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
+                combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
+                watchlist: &[],
+                watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
+                watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                recap: &recap,
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
+                recap_cells: panels::recap::RecapCells {
+                    duration: false,
+                    fights: false,
+                    challenges: true,
+                },
+                options: None,
+                veiled: false,
+                login: None,
+                card_settings: None,
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("recap_sans_combats_ni_duree");
+}
+
+/// La durée seule éteinte (2026-09-17) : Combats / Challenges deviennent la dernière ligne, et le
+/// glyphe de remise à zéro y est — Challenges le toucherait, la ligne entière se range donc dans
+/// la largeur qui reste à sa gauche (voir `panels::recap::show`). Les kamas et l'XP, au-dessus,
+/// ne bougent pas.
+#[test]
+fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
+    let snapshot = replay_real_log();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let uptime = std::time::Duration::from_secs(5025);
+    // Même XP ramenée que la session ordinaire ci-dessus, pour que la ligne Kamas / XP tienne.
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: snapshot.totals.xp_gained / 1_000_000,
+            ..snapshot.totals
+        },
+        uptime,
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Recap,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
+                combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
+                watchlist: &[],
+                watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
+                watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                recap: &recap,
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
+                recap_cells: panels::recap::RecapCells {
+                    duration: false,
+                    fights: true,
+                    challenges: true,
+                },
+                options: None,
+                veiled: false,
+                login: None,
+                card_settings: None,
+            },
+        );
+    });
+
+    harness.run();
+    harness.snapshot("recap_sans_duree");
 }
 
 #[test]
@@ -295,7 +1086,7 @@ fn panneau_suivi_vide_ne_panique_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -304,13 +1095,19 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -321,8 +1118,14 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -450,7 +1253,7 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -459,13 +1262,19 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &watchlist_entries,
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
                 catalog_stale: false,
@@ -476,8 +1285,14 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -519,7 +1334,7 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -528,13 +1343,19 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &entries,
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -545,8 +1366,14 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -648,7 +1475,7 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             paint_content(
                 ui,
                 RenderContent {
@@ -657,13 +1484,19 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -674,8 +1507,14 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -687,7 +1526,9 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
         (BANDEAU_MOINS, "watchlist_tooltip_supprimer_dessous"),
         (BANDEAU_DETAILS, "watchlist_tooltip_details_dessous"),
         (BANDEAU_OPTIONS, "watchlist_tooltip_options_dessous"),
-        (BANDEAU_TUILE_0, "watchlist_tooltip_tuile_dessous"),
+        // Hors du disque de réinitialisation : c'est le NOM de la tuile que cette planche montre
+        // (voir `BANDEAU_TUILE_0_PRISE`).
+        (BANDEAU_TUILE_0_PRISE, "watchlist_tooltip_tuile_dessous"),
     ] {
         harness.hover_at(pos);
         harness.run();
@@ -736,14 +1577,15 @@ fn bandeau_largeur_suivi(entry_count: usize, tracking_enabled: bool) -> f32 {
 /// de place ou de taille, c'est cette ligne-ci qu'on corrige, pas une vingtaine d'ordonnées.
 const INTERRUPTEUR_Y: f32 = 38.0;
 
-/// **Décalage vertical apporté par la case « Couper le son des notifications »** des onglets Suivi
-/// et Chat (2026-09-15, voir `panels::sound_row`) : la hauteur d'une ligne simple, l'espacement du
-/// panneau étant nul. Tout ce que ces DEUX onglets peignent après la ligne « Tester le son de
-/// l'alerte » est descendu d'autant — l'onglet Alertes, lui, n'a pas la case (le son d'un
-/// ramassage s'y coupe tuile par tuile), ses ordonnées ne bougent donc pas.
+/// **Axe du champ d'ajout de l'onglet « Alertes »**, en ordonnée de fenêtre — la case
+/// « Activer … » comprise.
 ///
-/// Nommée plutôt que fondue dans chaque coordonnée, même raison que [`INTERRUPTEUR_Y`].
-const SOURDINE_Y: f32 = 39.0;
+/// Il était à 364 (326 + [`INTERRUPTEUR_Y`]) sous le titre « Objets surveillés », sa phrase et la
+/// légende du pictogramme ; il est passé AVANT ce titre le 2026-09-16 (demande utilisateur), tout
+/// de suite sous la case, et remonte de 85 px : le titre (16 d'encre + 13 d'écart), la phrase
+/// (≈ 21), la légende (21) et le `SECTION_GAP` (18) qui fermait ce bloc. Le panneau de
+/// suggestions s'ouvre sous lui : bande de filtres, rangées et poignée suivent du même pas.
+const CHAMP_ALERTES_Y: f32 = 241.0 + INTERRUPTEUR_Y;
 
 /// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
 /// [`panneau_suivi_toutes_les_infobulles_sous_la_bande`].
@@ -788,7 +1630,7 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             paint_content(
                 ui,
                 RenderContent {
@@ -797,11 +1639,17 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
                     watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -812,8 +1660,14 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -880,7 +1734,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             paint_content(
                 ui,
                 RenderContent {
@@ -889,13 +1743,19 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
-                    // Ce que l'hôte passe quand la case « Activer le Suivi » est décochée — il
+                    // Ce que l'hôte passe quand la case « Activer le suivi » est décochée — il
                     // vide DÉJÀ la liste dans ce cas, d'où les deux ensemble.
                     watchlist_enabled: false,
+                    spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -906,8 +1766,14 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -924,14 +1790,68 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
     }
 }
 
+/// **Le bandeau pendant qu'une tuile célèbre son aboutissement** (2026-09-17) — quatre instants
+/// de la séquence sur une bande réelle, à côté de deux tuiles qui, elles, ne célèbrent pas.
+///
+/// La galerie du design system montre déjà la séquence sur un emplacement isolé
+/// (`design_gallery_completion`) ; ce que celle-ci ajoute est ce que la galerie ne peut pas
+/// montrer : la tuile qui célèbre **au milieu de ses voisines**, avec la **gerbe de confettis** du
+/// panneau — qui sort de la zone défilante et n'appartient donc pas au composant.
+///
+/// **Le temps est injecté**, comme pour le toast : `push` reçoit un instant de départ reculé
+/// d'autant, et `now` reste celui du rendu. Aucune horloge réelle n'intervient — les confettis
+/// comme les particules sont hachés sur leur index.
+#[test]
+fn bandeau_suivi_celebration() {
+    // Voir `watchlist_bandeau_geste` : ce test capture, il doit donc figer la version.
+    overlay_ui::build_info::freeze_for_snapshots();
+    let entries = entrees_de_bandeau();
+    let cle = format!("{}::", entries[1].name);
+    let mut bandeau = harnais_bandeau(entries);
+
+    // **Un seul harnais pour les quatre instants** : `egui_kittest` refuse plusieurs
+    // `SnapshotResults` dans un même test, et c'est une bonne contrainte — quatre harnais, ce
+    // serait quatre fenêtres différentes pour une seule séquence.
+    for (elapsed, nom) in [
+        (0.20, "souleve"),
+        (1.20, "couronne"),
+        (2.10, "eclat"),
+        (2.80, "dissolution"),
+    ] {
+        let mut completions = panels::watchlist::WatchlistCompletions::default();
+        // Départ reculé de `elapsed` depuis l'instant du RENDU (pas celui d'ici) : au rendu, la
+        // célébration en est donc exactement là, à la microseconde près.
+        completions.push(
+            cle.clone(),
+            bandeau.now - std::time::Duration::from_secs_f32(elapsed),
+            overlay_ui::design::tokens::ITEM_SLOT_COMPLETION_DURATION,
+            true,
+        );
+        *bandeau.completions.borrow_mut() = completions;
+        bandeau.harness.run();
+        bandeau
+            .harness
+            .snapshot(format!("watchlist_celebration_{nom}"));
+    }
+}
+
 /// Le harnais du bandeau in-game, avec l'état que l'hôte lui prête rendu inspectable — trois tests
 /// s'en servent (sélection multiple, glisser-déposer, planche du geste).
 struct Bandeau {
     harness: egui_kittest::Harness<'static>,
     /// Le pendant du champ `App::watchlist_selection`.
     selection: std::rc::Rc<std::cell::RefCell<panels::watchlist::WatchlistSelection>>,
+    /// Le pendant du champ `App::watchlist_completions` — voir [`bandeau_suivi_celebration`].
+    completions: std::rc::Rc<std::cell::RefCell<panels::watchlist::WatchlistCompletions>>,
+    /// L'instant que le harnais passe au rendu, figé à sa création. **Indispensable pour une
+    /// capture d'animation** : un `Instant::now()` pris par l'appelant serait postérieur de
+    /// quelques millisecondes, et la capture dépendrait alors de la vitesse de la machine.
+    now: std::time::Instant,
     /// Ce que le panneau a demandé d'écrire à la dernière frame — le pendant de `RenderOutcome`.
     edition: std::rc::Rc<std::cell::RefCell<Option<panels::watchlist::WatchlistEdit>>>,
+    /// L'entrée dont le bouton de réinitialisation a été cliqué — le pendant de
+    /// `RenderOutcome::watchlist_reset_requested` (2026-09-18).
+    reset: std::rc::Rc<std::cell::RefCell<Option<WatchlistEntry>>>,
     window_width: f32,
 }
 
@@ -969,18 +1889,24 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
     let selection = Rc::new(RefCell::new(
         panels::watchlist::WatchlistSelection::default(),
     ));
+    let completions = Rc::new(RefCell::new(
+        panels::watchlist::WatchlistCompletions::default(),
+    ));
     let edition: Rc<RefCell<Option<panels::watchlist::WatchlistEdit>>> =
         Rc::new(RefCell::new(None));
+    let reset: Rc<RefCell<Option<WatchlistEntry>>> = Rc::new(RefCell::new(None));
 
     let window_width = bandeau_largeur(entries.len());
     let harness = egui_kittest::Harness::builder()
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR + 88.0))
         .build_ui({
             let selection = Rc::clone(&selection);
+            let completions = Rc::clone(&completions);
             let edition = Rc::clone(&edition);
+            let reset = Rc::clone(&reset);
             move |ui| {
                 let ctx = ui.ctx().clone();
-                let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+                let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
                 let outcome = paint_content(
                     ui,
                     RenderContent {
@@ -989,11 +1915,17 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         portraits,
                         combat_frame,
                         icons,
+                        avatars: Some(avatars),
+                        game_servers: &Default::default(),
                         combat_side: &mut combat_side,
                         combat_metric: &mut combat_metric,
                         watchlist: &entries,
                         watchlist_enabled: true,
+                        spells_enabled: true,
+                        combat_on_right: false,
                         watchlist_selection: &mut selection.borrow_mut(),
+                        watchlist_completions: &completions.borrow(),
+                        watchlist_reset: None,
                         watchlist_toast: None,
                         catalog: &catalog,
                         catalog_stale: false,
@@ -1004,19 +1936,31 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         interactive: true,
                         shortcuts: &shortcuts,
                         now,
+                        recap: &Default::default(),
+                        recap_cells: Default::default(),
+                        recap_chrome: Default::default(),
+                        combat_chrome: Default::default(),
                         options: None,
+                        veiled: false,
                         login: None,
+                        card_settings: None,
                     },
                 );
                 if outcome.watchlist_edit.is_some() {
                     *edition.borrow_mut() = outcome.watchlist_edit;
+                }
+                if outcome.watchlist_reset_requested.is_some() {
+                    *reset.borrow_mut() = outcome.watchlist_reset_requested;
                 }
             }
         });
     Bandeau {
         harness,
         selection,
+        completions,
+        now,
         edition,
+        reset,
         window_width,
     }
 }
@@ -1093,7 +2037,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
         .with_size(egui::Vec2::new(LARGEUR_PLAFONNEE, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             paint_content(
                 ui,
                 RenderContent {
@@ -1102,11 +2046,17 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -1117,8 +2067,14 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -1159,6 +2115,11 @@ const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(116.0, 40.0);
 const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(268.0, 40.0);
 /// Un point de prise excentré dans la première tuile — le fantôme se tient par où on l'a pris, et
 /// c'est ce décalage qui laisse voir la tuile visée dessous (voir la planche de l'onglet Suivi).
+///
+/// **C'est aussi le point qui survole la tuile SANS viser son bouton** depuis le 2026-09-18 : le
+/// disque de réinitialisation (26 px, centré) occupe le centre, et le nom de la tuile ne s'ouvre
+/// pas quand il est visé (voir `panels::watchlist::entry_tile`). Un test qui veut l'infobulle du
+/// NOM survole donc ici, jamais [`BANDEAU_TUILE_0`].
 const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(99.0, 23.0);
 
 /// **Le glisser-déposer du bandeau rend la liste réordonnée, pas une suppression.**
@@ -1178,8 +2139,11 @@ fn panneau_suivi_le_glisser_deposer_reordonne_la_bande() {
     harness.run();
 
     // La croix fléchée dit que la tuile se déplace, avant même qu'on l'ait prise — `overlay_ui::
-    // cursor` la traduit ensuite en bitmap du jeu.
-    harness.hover_at(BANDEAU_TUILE_0);
+    // cursor` la traduit ensuite en bitmap du jeu. **Prise par son bord, pas par son centre** :
+    // depuis le 2026-09-18, le centre d'une tuile survolée porte le bouton de réinitialisation
+    // (`panels::watchlist::reset_button`), qui annonce une main — voir
+    // `panneau_suivi_le_bouton_de_reinitialisation_demande_confirmation`.
+    harness.hover_at(BANDEAU_TUILE_0_PRISE);
     harness.run();
     assert_eq!(
         harness.output().platform_output.cursor_icon,
@@ -1187,7 +2151,7 @@ fn panneau_suivi_le_glisser_deposer_reordonne_la_bande() {
         "une tuile survolée doit annoncer qu'elle se déplace"
     );
 
-    harness.drag_at(BANDEAU_TUILE_0);
+    harness.drag_at(BANDEAU_TUILE_0_PRISE);
     harness.run();
     harness.hover_at(BANDEAU_TUILE_2);
     harness.run();
@@ -1246,6 +2210,57 @@ fn panneau_suivi_deplacement_en_vol() {
     harness.snapshot("watchlist_deplacement");
 }
 
+/// **Le bouton de réinitialisation d'une tuile** (2026-09-18) : au centre de la tuile survolée,
+/// la flèche `Undo` sur son disque — le même bouton que le crayon d'une carte de héros
+/// (`panels::tile_button`). Il annonce une main, et son clic ne remet RIEN lui-même : il remonte
+/// l'entrée à l'hôte, qui ouvre la confirmation (`ResetTarget::WatchlistCounter`) — c'est elle qui
+/// décide, et c'est le moteur qui remet (`WatchlistState::reset_counter`, testé de son côté).
+///
+/// La capture montre la tuile survolée, avec le bouton posé sur un compteur en cours (12/50 en
+/// décompte) : le disque recouvre le centre de l'icône et laisse les coins, où vivent le glyphe de
+/// mode et le compteur qu'on va remettre.
+#[test]
+fn panneau_suivi_le_bouton_de_reinitialisation_demande_confirmation() {
+    overlay_ui::build_info::freeze_for_snapshots();
+    let mut entries = entrees_de_bandeau();
+    entries[0].mode = WatchlistMode::Down;
+    entries[0].countdown_target = 50;
+    entries[0].count = 12;
+    entries[1].count = 7;
+    let Bandeau {
+        mut harness,
+        reset,
+        edition,
+        ..
+    } = harnais_bandeau(entries);
+    harness.run();
+
+    // Au repos, rien : le bouton n'existe que sous le pointeur.
+    harness.snapshot("watchlist_reinitialisation_repos");
+
+    harness.hover_at(BANDEAU_TUILE_0);
+    harness.run();
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand,
+        "le centre d'une tuile survolée est un bouton, il annonce une main"
+    );
+    harness.snapshot("watchlist_reinitialisation_survol");
+
+    clique(&mut harness, BANDEAU_TUILE_0);
+
+    let demande = reset.borrow();
+    let demande = demande
+        .as_ref()
+        .expect("aucune réinitialisation remontée : le bouton n'est pas branché");
+    assert_eq!(demande.name, "Bottes Lantha");
+    assert_eq!(demande.mode, WatchlistMode::Down);
+    assert!(
+        edition.borrow().is_none(),
+        "un clic sur le bouton ne doit ni déplacer ni retirer la tuile"
+    );
+}
+
 /// **La sélection multiple du bandeau, de bout en bout** — ouvrir, cocher, supprimer.
 ///
 /// Retour utilisateur du 2026-09-13 : « j'ai beau appuyer sur le bouton moins, le mode de
@@ -1275,7 +2290,10 @@ fn panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple() {
     let Bandeau {
         mut harness,
         selection,
+        completions: _,
+        now: _,
         edition: restantes,
+        reset: _,
         window_width,
     } = harnais_bandeau(entrees_de_bandeau());
     harness.run();
@@ -1381,7 +2399,7 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
         .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             paint_content(
                 ui,
                 RenderContent {
@@ -1390,13 +2408,19 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &entries,
                     watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
                     // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                     // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -1407,8 +2431,14 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
+                    veiled: false,
                     login: None,
+                    card_settings: None,
                 },
             );
         });
@@ -1476,7 +2506,7 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -1485,13 +2515,19 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &entries,
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1502,14 +2538,125 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
 
     harness.run();
     harness.snapshot("watchlist_decompte_grandes_valeurs");
+}
+
+/// Les trois modes côte à côte (2026-09-17) : un objectif « 2/5 », un décompte « 3/5 » et un
+/// incrémental « 7 ». Sans marque, les deux premières tuiles seraient identiques : c'est le
+/// **glyphe de mode** (`design::SlotGlyph`, coin haut-gauche, à trois pixels du liseré, dans
+/// l'or du nombre courant) qui les distingue — drapeau pour l'objectif, cible pour le
+/// décompte, rien pour l'incrémental. La seconde capture survole la tuile objectif **par son bord**
+/// (son centre porte le bouton de réinitialisation depuis le 2026-09-18) : l'infobulle dit le mode
+/// après le nom, « Laine de Bouftou · Objectif » (voir `panels::watchlist::tile_tooltip`). Le
+/// disque, lui, est visible au centre — une tuile survolée le montre toujours. Seule planche de la suite à exercer le drapeau : les autres suivis à cible du
+/// harnais sont tous des décomptes.
+#[test]
+fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let entries = vec![
+        WatchlistEntry {
+            name: "Laine de Bouftou".to_string(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Goal,
+            count: 2,
+            countdown_target: 5,
+            catalog_id: None,
+        },
+        WatchlistEntry {
+            name: "Bois de Frêne".to_string(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Down,
+            count: 3,
+            countdown_target: 5,
+            catalog_id: None,
+        },
+        WatchlistEntry {
+            name: "Fleur de Kalé".to_string(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Up,
+            count: 7,
+            countdown_target: 0,
+            catalog_id: None,
+        },
+    ];
+    let window_width = bandeau_largeur(entries.len());
+
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(window_width, BANDEAU_HAUTEUR))
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+            paint_content(
+                ui,
+                RenderContent {
+                    kind: OverlayKind::Watchlist,
+                    fight: None,
+                    portraits,
+                    combat_frame,
+                    icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
+                    combat_side: &mut combat_side,
+                    combat_metric: &mut combat_metric,
+                    watchlist: &entries,
+                    watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
+                    watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
+                    watchlist_toast: None,
+                    catalog: &catalog,
+                    catalog_stale: false,
+                    remote_icons: &remote_icon_store,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    auth_status: &auth_status,
+                    auth_command_tx: &auth_sink,
+                    interactive: true,
+                    shortcuts: &shortcuts,
+                    now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
+                    options: None,
+                    login: None,
+                    card_settings: None,
+                    veiled: false,
+                },
+            );
+        });
+
+    harness.run();
+    harness.snapshot("watchlist_glyphes_de_mode");
+
+    // Hors du disque de réinitialisation, pour la même raison (voir `BANDEAU_TUILE_0_PRISE`) :
+    // c'est « Laine de Bouftou · Objectif » que cette planche doit montrer.
+    harness.hover_at(BANDEAU_TUILE_0_PRISE);
+    harness.run();
+    harness.snapshot("watchlist_tooltip_tuile_objectif");
 }
 
 /// Modale Options (2026-09-08, §9 du plan) — chrome pur (`panels::options_modal`), pas de rejeu de
@@ -1556,7 +2703,7 @@ fn panneau_options_ne_panique_pas() {
         // c'est-à-dire d'un détail d'implémentation du harnais. Seul le test est concerné : en
         // production, le curseur clignote normalement.
         ui.style_mut().visuals.text_cursor.blink = false;
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -1565,13 +2712,19 @@ fn panneau_options_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1582,8 +2735,14 @@ fn panneau_options_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: Some(&mut options_state),
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -1598,10 +2757,12 @@ fn panneau_options_ne_panique_pas() {
 /// l'action remontée à l'hôte (`OptionsModalAction`), et le rendu ne change pas d'un pixel selon la
 /// touche pressée.
 ///
-/// Ce qu'il verrouille, et pourquoi ça vaut un test : avant l'étape 1, `Échap` tombait dans le filet
-/// global des deux hôtes (`main.rs` / `bin/overlay-ui-x11.rs`, `event_loop.exit()`) et **fermait
-/// l'overlay entier** au lieu d'annuler la saisie — la modale étant la seule fenêtre overlay
-/// focalisable (§9.1 du plan), elle était aussi la seule à pouvoir déclencher ce filet.
+/// Ce qu'il verrouille, et pourquoi ça vaut un test : avant l'étape 1, `Échap` tombait dans le
+/// filet global des deux hôtes (`main.rs` / `bin/wakfu-companion-overlay-x11.rs`,
+/// `event_loop.exit()`) et **fermait l'overlay entier** au lieu d'annuler la saisie — la modale
+/// étant la seule fenêtre overlay focalisable (§9.1 du plan), elle était la première à déclencher
+/// ce filet. Le filet lui-même a disparu le 2026-09-17 : l'exclusion de cette fenêtre ne suffisait
+/// pas, la touche partant au bandeau resté au premier plan quand la modale s'ouvrait sans le focus.
 ///
 /// Le champ de chemin a le focus dès la première frame (`design::input::request_focus`), donc ces
 /// deux touches sont pressées **alors qu'un `TextEdit` est actif** : c'est exactement le cas où
@@ -1662,6 +2823,8 @@ fn modale_options_echap_annule_et_entree_valide() {
                 remote_icons: &remote_icons,
                 remote_icon_textures: &mut remote_icon_textures,
                 icons: &icons,
+                avatars: None,
+                game_servers: &Default::default(),
             },
         );
         if action != OptionsModalAction::None {
@@ -1669,8 +2832,7 @@ fn modale_options_echap_annule_et_entree_valide() {
         }
     });
 
-    // Frames de repos : aucune touche, aucune action. Vérifie au passage que le focus initial pris
-    // par le champ ne déclenche à lui seul rien du tout.
+    // Frames de repos : aucune touche, aucune action.
     harness.run();
     assert_eq!(actions.borrow_mut().drain(..).collect::<Vec<_>>(), vec![]);
 
@@ -1685,6 +2847,9 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // dans cet état, et personne ne l'a touchée : « Valider » emporte le réglage tel
                 // qu'il est, jamais un défaut recalculé au passage.
                 combat_always_visible: false,
+                // Et pour « Afficher le panneau de combat à droite de la fenêtre de jeu » : le
+                // panneau est à gauche dans cet état, il le reste.
+                combat_on_right: false,
                 // Même chose pour « Me prévenir quand un de mes personnages doit jouer » : décochée
                 // à l'ouverture, elle est emportée décochée.
                 turn_notification: false,
@@ -1694,11 +2859,28 @@ fn modale_options_echap_annule_et_entree_valide() {
                 features: overlay_ui::panels::feature_switch::FeatureToggles::default(),
                 // Et pour les deux cases « Couper le son des notifications » : jamais touchées,
                 // donc emportées levées.
-                mutes: overlay_ui::panels::sound_row::AlertMutes::default(),
+                mutes: overlay_ui::panels::notifications::AlertMutes::default(),
+                // Idem pour la ligne « Fermeture automatique des notifications de décompte » de
+                // la section « Suivi » : emportée telle qu'elle a été posée à l'ouverture.
+                countdown_toast: overlay_ui::panels::suivi_tab::CountdownToastSettings::default(),
+                // Idem pour les deux cases de complétion de la même section (2026-09-17) :
+                // jamais touchées, donc emportées actives — le défaut demandé.
+                completion: overlay_ui::panels::suivi_tab::CompletionSettings::default(),
+                // Idem pour la ligne « Reprendre la session après une pause » de la section
+                // « Recap » (2026-09-17).
+                recap_resume: overlay_ui::recap_session::ResumeSettings::default(),
                 // Idem pour les raccourcis : personne n'a ouvert l'onglet « Raccourcis », le
                 // brouillon est celui qu'on a posé à l'ouverture (les défauts ici).
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
+                // Et pour la case « Journal détaillé » de la section « Journal » (2026-09-18,
+                // constat C6 de `docs/analyse-rgpd.md`) : décochée à l'ouverture — c'est son
+                // défaut, et il n'y a aucune raison qu'un « Valider » la relève au passage.
+                verbose_log: false,
+                // Et pour la case « Lancer l'overlay au démarrage de l'ordinateur » : posée à
+                // `false` à l'ouverture de cet état de test, emportée telle quelle. Rien n'est
+                // écrit dans le système ici — c'est l'hôte qui le fait, sur cette valeur.
+                start_with_os: false,
             }
         )],
         "Entrée doit valider les réglages courants, comme le bouton « Valider » du pied de page"
@@ -1813,7 +2995,7 @@ fn modale_options_sur_damier_ne_panique_pas() {
             ligne += 1;
         }
 
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -1822,13 +3004,19 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 // Un état neuf par frame : aucune de ces planches n'ouvre la sélection
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -1839,14 +3027,168 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: Some(&mut options_state),
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
 
     harness.run();
     harness.snapshot("options_modale_sur_damier");
+}
+
+/// **La fenêtre Options voile le jeu** (2026-09-17, `RenderContent::veiled`) : rattachée à un
+/// client, sa fenêtre OS est celle du jeu — plus grande que la modale — et le rendu voile tout
+/// (`design::scrim`) puis centre la modale dedans, à sa taille habituelle. Ce test rend cette
+/// fenêtre à une taille de jeu plausible, sur un damier qui tient lieu de scène : on doit y voir
+/// le damier assombri partout, et la modale intacte au milieu.
+///
+/// Deux vérifications au-delà de la capture : Échap traverse le voile jusqu'à la modale (elle
+/// remonte `Cancel`, exactement comme sans voile), et un clic à côté d'elle est avalé — il ne
+/// produit aucune action, et surtout pas une fermeture : un vrai dialogue modal ne se ferme pas sur
+/// un clic à côté.
+#[test]
+fn modale_options_voilee_couvre_la_fenetre_de_jeu() {
+    const CASE: f32 = 40.0;
+    const SOMBRE: egui::Color32 = egui::Color32::from_rgb(0x24, 0x2E, 0x22);
+    const CLAIR: egui::Color32 = egui::Color32::from_rgb(0xC2, 0xAE, 0x84);
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let mut options_state = OptionsModalState {
+        suivi: Default::default(),
+        suivi_draft: None,
+        suivi_availability: Default::default(),
+        path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
+        error: None,
+        tab: OptionsTab::Parametres,
+        // Référence = ce qui est affiché, pour qu'Échap annule du premier coup au lieu d'ouvrir
+        // la garde de fermeture — voir `modale_options_echap_annule_et_entree_valide`.
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+
+    let mut harness = Harness::builder()
+        // Une fenêtre de jeu modeste, mais nettement plus grande que la modale (760 × 810) : le
+        // voile doit se voir sur ses quatre côtés.
+        .with_size(egui::Vec2::new(1100.0, 950.0))
+        .build_ui({
+            let actions = std::rc::Rc::clone(&actions);
+            move |ui| {
+                let ctx = ui.ctx().clone();
+                ui.style_mut().visuals.text_cursor.blink = false;
+                let rect = ui.max_rect();
+                let painter = ui.painter().clone();
+                let mut y = rect.top();
+                let mut ligne = 0;
+                while y < rect.bottom() {
+                    let mut x = rect.left();
+                    let mut colonne = 0;
+                    while x < rect.right() {
+                        let case =
+                            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(CASE, CASE))
+                                .intersect(rect);
+                        painter.rect_filled(
+                            case,
+                            0,
+                            if (ligne + colonne) % 2 == 0 {
+                                CLAIR
+                            } else {
+                                SOMBRE
+                            },
+                        );
+                        x += CASE;
+                        colonne += 1;
+                    }
+                    y += CASE;
+                    ligne += 1;
+                }
+
+                let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+                let outcome = paint_content(
+                    ui,
+                    RenderContent {
+                        kind: OverlayKind::Options,
+                        fight: None,
+                        portraits,
+                        combat_frame,
+                        icons,
+                        avatars: Some(avatars),
+                        game_servers: &Default::default(),
+                        combat_side: &mut combat_side,
+                        combat_metric: &mut combat_metric,
+                        watchlist: &[],
+                        watchlist_enabled: true,
+                        spells_enabled: true,
+                        combat_on_right: false,
+                        watchlist_selection: &mut Default::default(),
+                        watchlist_completions: &Default::default(),
+                        watchlist_reset: None,
+                        watchlist_toast: None,
+                        catalog: &catalog,
+                        catalog_stale: false,
+                        remote_icons: &remote_icon_store,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        auth_status: &auth_status,
+                        auth_command_tx: &auth_sink,
+                        interactive: true,
+                        shortcuts: &shortcuts,
+                        now,
+                        recap: &Default::default(),
+                        recap_cells: Default::default(),
+                        recap_chrome: Default::default(),
+                        combat_chrome: Default::default(),
+                        options: Some(&mut options_state),
+                        veiled: true,
+                        login: None,
+                        card_settings: None,
+                    },
+                );
+                if !matches!(outcome.options_action, OptionsModalAction::None) {
+                    actions.borrow_mut().push(outcome.options_action);
+                }
+            }
+        });
+
+    harness.run();
+    harness.snapshot("options_modale_voilee");
+
+    // Un clic dans le voile, loin de la modale : avalé, aucune action.
+    harness.remove_cursor();
+    harness.drag_at(egui::pos2(40.0, 40.0));
+    harness.drop_at(egui::pos2(40.0, 40.0));
+    harness.run();
+    assert!(
+        actions.borrow().is_empty(),
+        "un clic à côté de la modale doit être avalé par le voile, pas fermer la fenêtre"
+    );
+
+    // Échap atteint bien la modale à travers le voile.
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::Cancel],
+        "Échap doit annuler la modale, voilée ou non"
+    );
 }
 
 /// Rend l'onglet « Alertes » de la fenêtre Options dans un état donné, et le capture.
@@ -1862,14 +3204,47 @@ fn modale_options_sur_damier_ne_panique_pas() {
 /// **Un `Harness` par test, jamais plusieurs** : `egui_kittest` refuse que deux jeux de résultats
 /// de snapshot soient abandonnés séparément dans le même test (« Multiple SnapshotResults were
 /// dropped without being handled »), ce qui casserait la mise à jour groupée des images.
-fn capture_onglet_alertes(nom: &str, manual_close: bool) {
+fn capture_onglet_alertes(nom: &str) {
+    capture_onglet_alertes_selection(nom, false)
+}
+
+/// [`capture_onglet_alertes`], avec en plus le **mode sélection multiple** ouvert.
+///
+/// Trois objets ajoutés par le joueur, dont deux cochés : assez pour que le bouton porte
+/// « Supprimer (2) » plutôt que « Supprimer tout », et pour montrer côte à côte une tuile cochée,
+/// une tuile cochable décochée, et les dix objets par défaut — qui n'ont **aucune case**.
+fn capture_onglet_alertes_selection(nom: &str, select_mode: bool) {
     use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
 
     let mut profile = overlay_engine::AlertProfile::default();
     profile.add("Combinaison Lardante", Some(4242));
-    profile.manual_close = manual_close;
     // Un objet au son coupé dans la capture : c'est l'autre moitié de ce que la tuile dit.
     profile.toggle("Influence III", None);
+    if select_mode {
+        profile.add("Bois de Frêne", Some(1001));
+        profile.add("Pierre de Lune", Some(1002));
+    }
+
+    let cochees: Vec<String> = if select_mode {
+        profile
+            .sound_items
+            .iter()
+            .filter(|entry| !entry.is_default)
+            .take(2)
+            .map(|entry| {
+                format!(
+                    "{}::{}",
+                    entry.name,
+                    entry
+                        .catalog_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_default()
+                )
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let mut options_state = OptionsModalState {
         suivi: Default::default(),
@@ -1880,6 +3255,8 @@ fn capture_onglet_alertes(nom: &str, manual_close: bool) {
         tab: OptionsTab::Alertes,
         alerts: AlertsTabState {
             duration_input: "3,5".to_string(),
+            select_mode,
+            selected: cochees,
             ..Default::default()
         },
         alerts_draft: Some(profile),
@@ -1912,6 +3289,8 @@ fn capture_onglet_alertes(nom: &str, manual_close: bool) {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -1923,14 +3302,18 @@ fn capture_onglet_alertes(nom: &str, manual_close: bool) {
 /// existait, mais l'entrée de menu était désactivée et la liste ne se réglait que depuis le site.
 #[test]
 fn options_onglet_alertes_liste() {
-    capture_onglet_alertes("options_alertes_liste", false);
+    capture_onglet_alertes("options_alertes_liste");
 }
 
-/// Fermeture manuelle : le champ de durée se grise. La logique existait (`.enabled`), aucun rendu
-/// ne la montrait.
+/// **Sélection multiple** (2026-09-16) — la même mécanique qu'au Suivi, portée aux alertes.
+///
+/// Ce que cette planche verrouille, et qui est propre à cet onglet : **les dix objets par défaut
+/// n'ont pas de case à cocher**. Ils ne se retirent pas (règle 2 de la doc de module), cocher ce
+/// qui ne se retire pas promettrait une action qui n'existe pas — seuls les trois objets ajoutés
+/// par le joueur en portent une, dont deux cochées, d'où le « Supprimer (2) » du bouton.
 #[test]
-fn options_onglet_alertes_fermeture_manuelle() {
-    capture_onglet_alertes("options_alertes_fermeture_manuelle", true);
+fn options_onglet_alertes_selection_multiple() {
+    capture_onglet_alertes_selection("options_alertes_selection", true);
 }
 
 /// **L'onglet « Raccourcis »** (2026-09-13) — celui qui personnalise les raccourcis clavier
@@ -1981,6 +3364,8 @@ fn options_deconnexion_confirmee_et_echap_repond_non() {
                 remote_icons: &remote_icons,
                 remote_icon_textures: &mut remote_icon_textures,
                 icons: &icons,
+                avatars: None,
+                game_servers: &Default::default(),
             },
         );
         if action != OptionsModalAction::None {
@@ -2010,6 +3395,73 @@ fn options_deconnexion_confirmee_et_echap_repond_non() {
     );
 }
 
+/// **La section « Suivi » de l'onglet « Paramètres »** — le son, la fermeture de la carte, et les
+/// deux cases qui décident de ce que devient un suivi complété (2026-09-17).
+///
+/// Sa propre capture, parce qu'aucune autre ne la montre : `capture_parametres` s'arrête au haut
+/// de l'onglet, et les sections qui défilent (« Compte », « Mise à jour ») sont bien plus bas. Les
+/// deux cases « Supprimer les éléments suivis lorsqu'ils sont complétés » et « Activer l'animation
+/// de complétion » n'auraient donc été vérifiées nulle part.
+#[test]
+fn options_parametres_section_suivi() {
+    capture_section_suivi(
+        "options_parametres_section_suivi",
+        parametres_avec_notifications(),
+    );
+}
+
+/// **Retrait décoché : l'animation se grise** (2026-09-18, demande utilisateur — « l'option
+/// "Activer l'animation de complétion" est dépendante de l'option "Supprimer les éléments
+/// suivis" »). La case garde sa coche (elle vaudra de nouveau si le retrait est recoché) mais
+/// s'éteint, en retrait sous sa maîtresse comme le suivi des sorts sous le détail des combats.
+#[test]
+fn options_parametres_section_suivi_sans_retrait() {
+    let mut etat = parametres_avec_notifications();
+    etat.completion.remove = false;
+    capture_section_suivi("options_parametres_section_suivi_sans_retrait", etat);
+}
+
+fn capture_section_suivi(name: &str, options_state: panels::options_modal::OptionsModalState) {
+    // Voir `options_parametres_section_compte` : ce test peint sans passer par
+    // `Textures::get_or_load`, c'est `parametres_avec_notifications` qui pose le gel de version.
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui({
+            let mut options_state = options_state;
+            move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                ui.style_mut().visuals.text_cursor.blink = false;
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                panels::options_modal::show(
+                    ui,
+                    &mut options_state,
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+            }
+        });
+    harness.run();
+    // Assez pour passer « Recap » et « Combat » et poser la section « Suivi » entière à l'écran,
+    // ses deux cases comprises — sans aller jusqu'à « Alertes », qui n'est pas le sujet. **Réduit
+    // de 276 px le 2026-09-18** : la section « Recap » a perdu sa ligne d'aide et son bouton
+    // « Replacer au défaut » (148), « Combat » son bouton de rafraîchissement (128) — « Suivi »
+    // est remontée d'autant.
+    defile_les_parametres(&mut harness, 154.0);
+    harness.snapshot(name);
+}
+
 /// **La section « Compte » de l'onglet « Paramètres »** (2026-09-13) — la déconnexion, qui était
 /// jusque-là un raccourci global (`Ctrl+Alt+D`), devenue un bouton avec ce qu'il faut pour
 /// comprendre ce qu'il fait avant de le presser.
@@ -2019,24 +3471,13 @@ fn options_deconnexion_confirmee_et_echap_repond_non() {
 #[test]
 fn options_parametres_section_compte() {
     // Ce test peint sans passer par `Textures::get_or_load` (il construit son propre harnais) :
-    // il pose donc le gel de version lui-même. Sans cet appel, la bannière de la fenêtre porterait
-    // la version RÉELLE du moment — au petit bonheur de l'ordre d'exécution, puisque le gel est
-    // global au process et qu'un autre test du même binaire finit d'ordinaire par le poser. Vécu
-    // le 2026-09-14 : une référence régénérée test par test (`--test panels <nom>`) est revenue
-    // avec un vrai numéro de version, que le run suivant, complet, aurait rejeté.
-    overlay_ui::build_info::freeze_for_snapshots();
-    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
-
-    let mut options_state = OptionsModalState {
-        tab: OptionsTab::Parametres,
-        path_input: CHEMIN.to_string(),
-        account_connected: true,
-        initial: overlay_ui::panels::options_modal::OptionsInitial {
-            path: CHEMIN.to_string(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    // `parametres_avec_notifications` pose donc le gel de version lui-même. Sans lui, la bannière
+    // de la fenêtre porterait la version RÉELLE du moment — au petit bonheur de l'ordre
+    // d'exécution, puisque le gel est global au process. Vécu le 2026-09-14 : une référence
+    // régénérée test par test (`--test panels <nom>`) est revenue avec un vrai numéro de version,
+    // que le run suivant, complet, aurait rejeté.
+    let mut options_state = parametres_avec_notifications();
+    options_state.account_connected = true;
 
     let mut harness = Harness::builder()
         .with_size(egui::vec2(
@@ -2058,41 +3499,101 @@ fn options_parametres_section_compte() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
     harness.run();
+    // Cette section est passée sous le pli le 2026-09-15, quand les trois sections de
+    // notifications se sont posées au-dessus d'elle — voir [`defile_les_parametres`].
+    // **102 points de plus depuis le 2026-09-17** : la ligne d'aide et le bouton « Replacer au
+    // défaut » de la section « Recap » (bande déplaçable à la souris) l'ont repoussée d'autant.
+    // **128 de plus le même jour** : la ligne d'aide et le bouton « Rafraîchir le panneau de
+    // combat » en fin de section « Combat ».
+    // **45 encore** : la ligne d'aide du cadenas de la bande Récap, arrivée le même jour par une
+    // autre session. Sans cet ajustement, la section que ce test a pour objet de montrer sort du
+    // cadre par le bas — une référence régénérée sans le voir ne montrerait plus rien.
+    // **Puis 276 de moins le 2026-09-18** : l'entrée de déplacement de la bande Récap (148) et le
+    // bouton de rafraîchissement du combat (128) ont été retirés à la demande de l'utilisateur.
+    // **Et le même jour, plus de valeur à tenir à jour** : « Compte » est devenue la DERNIÈRE
+    // section de l'onglet (« Mise à jour » et les sorties sont parties dans « À propos »), un
+    // défilement bien au-delà de la hauteur du contenu sature donc exactement sur elle.
+    defile_les_parametres(&mut harness, 2000.0);
     harness.snapshot("options_parametres_compte");
 }
 
-/// **La section « Mise à jour »** de l'onglet « Paramètres » (2026-09-15, `docs/plan-mise-a-jour.md`
-/// §8.2), capturée dans l'état qui compte : une version disponible, le bouton or « Mettre à jour
-/// vers 0.21.0 », la ligne d'information avec le poids du téléchargement, la case d'installation
-/// automatique cochée. La version courante n'y est pas répétée (bannière), pas de « Notes de
-/// version » (décisions du mainteneur).
+/// **La section « Compte » quand le jeton est dans le fichier de repli** (constat C7 de
+/// `docs/analyse-rgpd.md`, 2026-09-19) : l'avis rouge « Le trousseau du système est indisponible :
+/// la session est conservée en clair dans … » s'intercale entre le texte d'information et « Se
+/// déconnecter ». L'état vient de `token_on_disk`, posé par l'hôte — jamais du disque de la machine
+/// qui rend la capture, sinon cette référence dépendrait de qui l'a produite (le poste de
+/// développement du mainteneur a précisément ce fichier, celui du CI non).
+///
+/// Le chemin affiché est celui de la machine de rendu (`token_file_location`), figé par le
+/// conteneur du CI : `~/.local/share/wakfu-companion-overlay/native-session@claude-dev.wakfu-companion.com.token`
+/// — suffixé par l'hôte parce qu'un build de test parle à dev (`token_store::slot`, un jeton par
+/// déploiement depuis le 2026-09-21 ; seule la prod garde le nom nu `native-session.token`).
 #[test]
-fn options_parametres_section_mise_a_jour() {
-    overlay_ui::build_info::freeze_for_snapshots();
-    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+fn options_parametres_section_compte_jeton_fichier() {
+    let mut options_state = parametres_avec_notifications();
+    options_state.account_connected = true;
+    options_state.token_on_disk = true;
 
-    let mut options_state = OptionsModalState {
-        tab: OptionsTab::Parametres,
-        path_input: CHEMIN.to_string(),
-        account_connected: true,
-        auto_update: true,
-        update: overlay_ui::update::UpdateStatus::Available {
-            version: "0.21.0".to_string(),
-            download_size: 3_100_000,
-            mandatory: false,
-            notes_url: None,
-            checked_at: std::time::Instant::now(),
-        },
-        initial: overlay_ui::panels::options_modal::OptionsInitial {
-            path: CHEMIN.to_string(),
-            auto_update: true,
-            ..Default::default()
-        },
-        ..Default::default()
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
+                },
+            );
+        });
+    harness.run();
+    defile_les_parametres(&mut harness, 2000.0);
+    harness.snapshot("options_parametres_compte_jeton_fichier");
+}
+
+/// **L'onglet « À propos », une mise à jour disponible** (section « Mise à jour », 2026-09-15,
+/// `docs/plan-mise-a-jour.md` §8.2 ; onglet créé le 2026-09-18), capturé dans l'état qui compte :
+/// une version disponible, le bouton or « Mettre à jour vers 0.21.0 », la ligne d'information avec
+/// le poids du téléchargement, la case d'installation automatique cochée. La version courante n'y
+/// est pas répétée (bannière), pas de « Notes de version » (décisions du mainteneur).
+///
+/// **Défilé jusqu'en bas** : depuis le soir du 2026-09-18, trois sections d'information (« Wakfu
+/// Companion », « Conditions d'utilisation de Wakfu », « Vos données » — voir
+/// `panels::a_propos_tab::SECTIONS`) précèdent « Mise à jour », qui a donc quitté le cadre. La
+/// capture garde la fin de l'onglet : la fin de « Vos données » avec ses deux liens, le bloc
+/// d'alerte et le bouton « Supprimer les données locales » qui la ferment (venus de « Compte » le
+/// 2026-09-21), la section « Mise à jour » entière, et la paire de sorties sous elle.
+#[test]
+fn options_a_propos_mise_a_jour() {
+    let mut options_state = parametres_avec_notifications();
+    options_state.tab = OptionsTab::APropos;
+    options_state.auto_update = true;
+    options_state.initial.auto_update = true;
+    options_state.update = overlay_ui::update::UpdateStatus::Available {
+        version: "0.21.0".to_string(),
+        download_size: 3_100_000,
+        mandatory: false,
+        notes_url: None,
+        checked_at: std::time::Instant::now(),
     };
 
     let mut harness = Harness::builder()
@@ -2115,11 +3616,15 @@ fn options_parametres_section_mise_a_jour() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
     harness.run();
-    harness.snapshot("options_parametres_mise_a_jour");
+    // Bien au-delà de la hauteur du contenu : le défilement se borne au bas de l'onglet.
+    defile_les_parametres(&mut harness, 2000.0);
+    harness.snapshot("options_a_propos_mise_a_jour");
 }
 
 /// **La confirmation de déconnexion** — l'autre moitié de la section « Compte ». Le bouton est la
@@ -2172,11 +3677,425 @@ fn options_deconnexion_confirmation() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
     harness.run();
     harness.snapshot("options_deconnexion_confirmation");
+}
+
+/// **« Supprimer les données locales » passe par une confirmation ; Échap y répond « Non »,
+/// « Oui » remonte l'effacement** (2026-09-18, second bouton de la section « Compte », constat C5
+/// de `docs/analyse-rgpd.md` §3.5).
+///
+/// Le contrat est celui de ses cinq voisines, à son maximum : l'action efface les dossiers de
+/// l'overlay ET arrête le programme (`local_data::Scope::Everything` puis `event_loop.exit()`,
+/// voir `main.rs::App::purge_local_data_and_quit`), il n'y a donc rien derrière à rattraper.
+/// `OptionsModalAction::PurgeLocalData` est la seule intention que le panneau produit — lui ne
+/// touche à aucun fichier, comme tous les panneaux de ce crate.
+#[test]
+fn options_effacement_confirme_et_echap_repond_non() {
+    use overlay_ui::design::tokens;
+
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let etat = || OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        // **Sans compte lié**, à la différence des autres tests de cette section : c'est l'état
+        // où le droit à l'effacement s'exerce, et le bouton doit y rester actif.
+        account_connected: false,
+        pending_purge: true,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let harnais = |options_state: OptionsModalState,
+                   actions: std::rc::Rc<std::cell::RefCell<Vec<OptionsModalAction>>>,
+                   confirmation_ouverte: std::rc::Rc<std::cell::Cell<bool>>| {
+        let mut options_state = options_state;
+        Harness::builder()
+            .with_size(egui::vec2(
+                panels::options_modal::WINDOW_SIZE.0,
+                panels::options_modal::WINDOW_SIZE.1,
+            ))
+            .build_ui(move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                let action = panels::options_modal::show(
+                    ui,
+                    &mut options_state,
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+                if action != OptionsModalAction::None {
+                    actions.borrow_mut().push(action);
+                }
+                confirmation_ouverte.set(options_state.pending_purge);
+            })
+    };
+
+    // 1. Échap répond « Non » : la boîte se ferme, rien ne remonte.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat(),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    assert!(ouverte.get(), "la confirmation s'est fermée seule");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!ouverte.get(), "Échap doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "Échap répond « Non » : rien n'est effacé, et la fenêtre derrière reste ouverte"
+    );
+
+    // 2. « Oui » remonte `PurgeLocalData` — et rien d'autre.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat(),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    // Même géométrie que les autres confirmations de cette fenêtre (voir
+    // `options_fermeture_overlay_confirmee_et_echap_repond_non`) : tokens, pas mesures.
+    let fenetre = egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ),
+    );
+    let crest_rise = tokens::CONFIRM_CREST_HEIGHT - tokens::CONFIRM_CREST_OVERLAP;
+    let total = crest_rise + tokens::CONFIRM_HEIGHT + tokens::CONFIRM_FOOT_HEIGHT;
+    let corps_gauche = fenetre.center().x - tokens::CONFIRM_WIDTH / 2.0;
+    let corps_haut = fenetre.center().y - total / 2.0 + crest_rise;
+    let oui = egui::pos2(
+        corps_gauche
+            + tokens::CONFIRM_BUTTONS_INSET
+            + tokens::CONFIRM_BUTTON_WIDTH
+            + tokens::CONFIRM_BUTTON_GAP
+            + tokens::CONFIRM_BUTTON_WIDTH / 2.0,
+        corps_haut + tokens::CONFIRM_BUTTONS_TOP + tokens::CONFIRM_BUTTON_HEIGHT / 2.0,
+    );
+    harness.drag_at(oui);
+    harness.drop_at(oui);
+    harness.run();
+    assert!(!ouverte.get(), "« Oui » doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::PurgeLocalData],
+        "« Oui » remonte l'effacement à l'hôte, et rien d'autre"
+    );
+}
+
+/// **« Fermer l'overlay » passe par une confirmation ; Échap y répond « Non », « Oui » arrête le
+/// programme** (2026-09-16, bouton en pied de l'onglet « Paramètres » ; dans « À propos » depuis
+/// le 2026-09-18).
+///
+/// Même contrat que la déconnexion : le bouton ne ferme jamais du premier clic (l'action arrête
+/// l'overlay, brouillon compris, « Annuler » ne la rattraperait pas), et l'Échap qui ferme la
+/// boîte ne doit pas être relu par le filet clavier de la fenêtre. La seconde moitié clique « Oui »
+/// à ses coordonnées calculées depuis les tokens de `design::confirm_dialog` — pas mesurées sur une
+/// capture — et attend `OptionsModalAction::Quit`, la seule intention que le panneau remonte à
+/// l'hôte (qui, lui, appelle `event_loop.exit()`).
+#[test]
+fn options_fermeture_overlay_confirmee_et_echap_repond_non() {
+    use overlay_ui::design::tokens;
+
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let etat = |pending_quit: bool| OptionsModalState {
+        tab: OptionsTab::APropos,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        pending_quit,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let harnais = |options_state: OptionsModalState,
+                   actions: std::rc::Rc<std::cell::RefCell<Vec<OptionsModalAction>>>,
+                   confirmation_ouverte: std::rc::Rc<std::cell::Cell<bool>>| {
+        let mut options_state = options_state;
+        Harness::builder()
+            .with_size(egui::vec2(
+                panels::options_modal::WINDOW_SIZE.0,
+                panels::options_modal::WINDOW_SIZE.1,
+            ))
+            .build_ui(move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                let action = panels::options_modal::show(
+                    ui,
+                    &mut options_state,
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+                if action != OptionsModalAction::None {
+                    actions.borrow_mut().push(action);
+                }
+                confirmation_ouverte.set(options_state.pending_quit);
+            })
+    };
+
+    // 1. Échap répond « Non » : la boîte se ferme, rien ne remonte, la fenêtre reste.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat(true),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    assert!(ouverte.get(), "la confirmation s'est fermée seule");
+    assert_eq!(actions.borrow_mut().drain(..).collect::<Vec<_>>(), vec![]);
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!ouverte.get(), "Échap doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "Échap répond « Non » : ni arrêt de l'overlay, ni fermeture de la fenêtre derrière"
+    );
+
+    // 2. « Oui » remonte `Quit` — et rien d'autre.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat(true),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    // Géométrie de `design::confirm_dialog` : l'ensemble crête + corps + pied est centré sur la
+    // fenêtre, « Non » puis « Oui » posés à `CONFIRM_BUTTONS_TOP` du haut du corps.
+    let fenetre = egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ),
+    );
+    let crest_rise = tokens::CONFIRM_CREST_HEIGHT - tokens::CONFIRM_CREST_OVERLAP;
+    let total = crest_rise + tokens::CONFIRM_HEIGHT + tokens::CONFIRM_FOOT_HEIGHT;
+    let corps_gauche = fenetre.center().x - tokens::CONFIRM_WIDTH / 2.0;
+    let corps_haut = fenetre.center().y - total / 2.0 + crest_rise;
+    let oui = egui::pos2(
+        corps_gauche
+            + tokens::CONFIRM_BUTTONS_INSET
+            + tokens::CONFIRM_BUTTON_WIDTH
+            + tokens::CONFIRM_BUTTON_GAP
+            + tokens::CONFIRM_BUTTON_WIDTH / 2.0,
+        corps_haut + tokens::CONFIRM_BUTTONS_TOP + tokens::CONFIRM_BUTTON_HEIGHT / 2.0,
+    );
+    harness.drag_at(oui);
+    harness.drop_at(oui);
+    harness.run();
+    assert!(!ouverte.get(), "« Oui » doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::Quit],
+        "« Oui » remonte l'arrêt de l'overlay à l'hôte, et rien d'autre"
+    );
+}
+
+/// **« Redémarrer l'overlay » passe par la même confirmation que « Fermer l'overlay »**
+/// (2026-09-17, bouton à gauche de son voisin, en pied de l'onglet « Paramètres » ; dans
+/// « À propos » depuis le 2026-09-18, où il a pris son libellé complet).
+///
+/// Même contrat que la fermeture, pour la même raison : l'action arrête le process (un neuf prend
+/// sa place, mais le combat affiché et le brouillon de la fenêtre partent avec l'ancien), et
+/// « Annuler » ne la rattraperait pas. Échap répond « Non » sans que le filet clavier de la fenêtre
+/// relise le même appui ; « Oui » remonte `OptionsModalAction::Restart` — la seule intention que le
+/// panneau produit, l'hôte étant seul à savoir relancer un exe (`overlay_ui::restart::relaunch`).
+#[test]
+fn options_redemarrage_confirme_et_echap_repond_non() {
+    use overlay_ui::design::tokens;
+
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+
+    let etat = OptionsModalState {
+        tab: OptionsTab::APropos,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        pending_restart: true,
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let harnais = |options_state: OptionsModalState,
+                   actions: std::rc::Rc<std::cell::RefCell<Vec<OptionsModalAction>>>,
+                   confirmation_ouverte: std::rc::Rc<std::cell::Cell<bool>>| {
+        let mut options_state = options_state;
+        Harness::builder()
+            .with_size(egui::vec2(
+                panels::options_modal::WINDOW_SIZE.0,
+                panels::options_modal::WINDOW_SIZE.1,
+            ))
+            .build_ui(move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                let action = panels::options_modal::show(
+                    ui,
+                    &mut options_state,
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+                if action != OptionsModalAction::None {
+                    actions.borrow_mut().push(action);
+                }
+                confirmation_ouverte.set(options_state.pending_restart);
+            })
+    };
+
+    // 1. Échap répond « Non » : la boîte se ferme, rien ne remonte, la fenêtre reste.
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat.clone(),
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    assert!(ouverte.get(), "la confirmation s'est fermée seule");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!ouverte.get(), "Échap doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![],
+        "Échap répond « Non » : ni redémarrage, ni fermeture de la fenêtre derrière"
+    );
+
+    // 2. « Oui » remonte `Restart` — et rien d'autre. Coordonnées calculées depuis les tokens de
+    // `design::confirm_dialog`, comme pour la confirmation de fermeture (même géométrie).
+    let actions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let ouverte = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut harness = harnais(
+        etat,
+        std::rc::Rc::clone(&actions),
+        std::rc::Rc::clone(&ouverte),
+    );
+    harness.run();
+    let fenetre = egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ),
+    );
+    let crest_rise = tokens::CONFIRM_CREST_HEIGHT - tokens::CONFIRM_CREST_OVERLAP;
+    let total = crest_rise + tokens::CONFIRM_HEIGHT + tokens::CONFIRM_FOOT_HEIGHT;
+    let corps_gauche = fenetre.center().x - tokens::CONFIRM_WIDTH / 2.0;
+    let corps_haut = fenetre.center().y - total / 2.0 + crest_rise;
+    let oui = egui::pos2(
+        corps_gauche
+            + tokens::CONFIRM_BUTTONS_INSET
+            + tokens::CONFIRM_BUTTON_WIDTH
+            + tokens::CONFIRM_BUTTON_GAP
+            + tokens::CONFIRM_BUTTON_WIDTH / 2.0,
+        corps_haut + tokens::CONFIRM_BUTTONS_TOP + tokens::CONFIRM_BUTTON_HEIGHT / 2.0,
+    );
+    harness.drag_at(oui);
+    harness.drop_at(oui);
+    harness.run();
+    assert!(!ouverte.get(), "« Oui » doit fermer la confirmation");
+    assert_eq!(
+        actions.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![OptionsModalAction::Restart],
+        "« Oui » remonte le redémarrage à l'hôte, et rien d'autre"
+    );
+}
+
+/// **L'onglet « À propos » à l'ouverture** (2026-09-18) : le haut de l'onglet, sans défilement —
+/// les sections d'information qui ouvrent l'onglet depuis le soir du 2026-09-18 (demande
+/// utilisateur : RGPD, CGU Wakfu et informations importantes du site/overlay, **avant** « Mise à
+/// jour » — voir `panels::a_propos_tab::SECTIONS`). « Wakfu Companion » (non-affiliation à
+/// Ankama, mention « WAKFU MMORPG : © 2012-2026 Ankama Studio » exigée par la licence des données
+/// — année figée par `build_info::freeze_for_snapshots`, 2026-09-21 —, liens « Site web » et
+/// « Code source ») puis « Conditions d'utilisation de Wakfu », dont
+/// le troisième bloc est le seul ton `Alert` de l'onglet ; « Vos données », « Mise à jour » et les
+/// sorties sont sous le pli, capturées par `options_a_propos_mise_a_jour`.
+///
+/// Ce que la capture garde : des blocs d'information à pleine largeur qui passent à la ligne sans
+/// mot coupé, la pastille de chacun sur sa première ligne, les liens alignés à gauche sur l'axe
+/// des contrôles et séparés de la gouttière du pied de page, la barre de défilement qui dit
+/// qu'il y a une suite — et, dans la barre du haut, sept onglets dont chacun tient son libellé.
+#[test]
+fn options_a_propos() {
+    let mut options_state = parametres_avec_notifications();
+    options_state.tab = OptionsTab::APropos;
+    options_state.account_connected = true;
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot("options_a_propos");
 }
 
 #[test]
@@ -2202,7 +4121,7 @@ fn options_onglet_raccourcis() {
         path_input: "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log".to_string(),
         shortcuts,
         raccourcis: RaccourcisTabState {
-            capturing: Some(ShortcutAction::Quit),
+            capturing: Some(ShortcutAction::Options),
             error: Some(panels::raccourcis_tab::MESSAGE_COMBINAISON_REFUSEE.to_string()),
             ..Default::default()
         },
@@ -2231,6 +4150,8 @@ fn options_onglet_raccourcis() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2284,6 +4205,8 @@ fn options_raccourcis_section_multicompte() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2397,6 +4320,8 @@ fn options_garde_de_fermeture_a_l_ecran() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2457,6 +4382,8 @@ fn options_garde_de_fermeture_au_clavier() {
                 remote_icons: &remote_icons,
                 remote_icon_textures: &mut remote_icon_textures,
                 icons: &icons,
+                avatars: None,
+                game_servers: &Default::default(),
             },
         );
         if action != OptionsModalAction::None {
@@ -2572,6 +4499,8 @@ fn options_croix_de_la_banniere_ferme_comme_annuler() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
             if action != OptionsModalAction::None {
@@ -2673,6 +4602,8 @@ fn survole_l_onglet_alertes(nom_capture: &str, x: f32, y: f32, couper: Option<&s
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2688,7 +4619,10 @@ fn survole_l_onglet_alertes(nom_capture: &str, x: f32, y: f32, couper: Option<&s
 ///
 /// **Les ordonnées de ce fichier suivent la mise en page** : la grille est descendue de 48 px le
 /// 2026-09-13, quand la phrase « Cliquez une tuile… » et la légende du pictogramme se sont posées
-/// sous le titre « Objets suivis ».
+/// sous le titre « Objets surveillés » ; puis remontée de 21 px le 2026-09-16, quand la légende
+/// est partie se fixer en pied de panneau (`alerts_tab::LEGEND_HEIGHT`). Le champ d'ajout, lui,
+/// est passé AVANT le titre le même jour : il remonte de 85 px (titre, phrase, légende et l'écart
+/// de section qui les suivait), voir [`CHAMP_ALERTES_Y`].
 ///
 /// Remplace, avec les deux tests suivants, les captures `..._infobulle_nom_elide` et
 /// `..._infobulle_nom_entier` : le nom ne se peint plus sous la tuile depuis la refonte du
@@ -2699,7 +4633,7 @@ fn options_alertes_survol_d_une_tuile_retirable() {
     survole_l_onglet_alertes(
         "options_alertes_survol_retirable",
         231.0,
-        578.0 + INTERRUPTEUR_Y,
+        442.0 + INTERRUPTEUR_Y,
         None,
     );
 }
@@ -2713,7 +4647,7 @@ fn options_alertes_survol_de_la_croix() {
     survole_l_onglet_alertes(
         "options_alertes_survol_croix",
         248.0,
-        561.0 + INTERRUPTEUR_Y,
+        425.0 + INTERRUPTEUR_Y,
         None,
     );
 }
@@ -2728,7 +4662,7 @@ fn options_alertes_survol_d_un_objet_par_defaut() {
     survole_l_onglet_alertes(
         "options_alertes_survol_par_defaut",
         79.0,
-        502.0 + INTERRUPTEUR_Y,
+        366.0 + INTERRUPTEUR_Y,
         None,
     );
 }
@@ -2805,6 +4739,8 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -2812,8 +4748,8 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
 
     // **Un clic RÉEL dans le champ**, pas un `request_focus` posé par le test : c'est le geste que
     // l'utilisateur fait, et c'est lui qui doit donner le focus. Le champ d'ajout est sous le titre
-    // « Objets suivis », pleine largeur du panneau.
-    let champ = egui::pos2(300.0, 441.0 + INTERRUPTEUR_Y);
+    // « Objets surveillés », pleine largeur du panneau.
+    let champ = egui::pos2(300.0, CHAMP_ALERTES_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -2837,14 +4773,14 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     // passent par le même `egui::Tooltip::for_enabled` (voir `Response::on_hover_ui` dans egui),
     // seul l'alignement diffère — et c'est lui qui envoyait le texte hors du cadre capturé. Cette
     // capture le prouve dans les deux sens : l'infobulle sort, et elle sort AU-DESSUS.
-    harness.hover_at(egui::pos2(68.0, 479.0 + INTERRUPTEUR_Y));
+    harness.hover_at(egui::pos2(68.0, CHAMP_ALERTES_Y + 38.0));
     harness.run();
     harness.snapshot("options_alertes_infobulle_filtre");
 
     // Première suggestion : « Pierre de dolomite » (tri alphabétique sur le nom normalisé). Le
     // panneau ouvre par sa BANDE DE FILTRES : la première rangée tombe en dessous, pas
     // immédiatement sous le champ.
-    let suggestion = egui::pos2(300.0, 510.0 + INTERRUPTEUR_Y);
+    let suggestion = egui::pos2(300.0, CHAMP_ALERTES_Y + 69.0);
     // **Survol d'abord, clic ensuite** : egui rattache un appui au widget que le pointeur
     // survolait, et le pointeur n'est nulle part tant qu'aucun mouvement ne l'a placé. Sans cette
     // frame de survol, l'appui tombe sur un widget inconnu et la rangée n'est jamais cliquée.
@@ -2925,12 +4861,14 @@ fn options_alertes_croix_efface_la_saisie() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
     harness.run();
 
-    let champ = egui::pos2(300.0, 443.0 + INTERRUPTEUR_Y);
+    let champ = egui::pos2(300.0, CHAMP_ALERTES_Y + 2.0);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -2943,7 +4881,7 @@ fn options_alertes_croix_efface_la_saisie() {
 
     // La croix : à 9 px du bord extérieur droit du champ, sur son axe — voir
     // `tokens::INPUT_CLEAR_INSET_RATIO`. Le champ s'arrête à x≈705 dans cette fenêtre.
-    let croix = egui::pos2(691.0, 443.0 + INTERRUPTEUR_Y);
+    let croix = egui::pos2(691.0, CHAMP_ALERTES_Y + 2.0);
     harness.hover_at(croix);
     harness.run();
     harness.drag_at(croix);
@@ -3034,12 +4972,14 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
     harness.run();
 
-    let champ = egui::pos2(300.0, 441.0 + INTERRUPTEUR_Y);
+    let champ = egui::pos2(300.0, CHAMP_ALERTES_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3061,7 +5001,7 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
     // Le pointeur SUR la poignée (colonne de droite du panneau, à mi-hauteur de la liste) : elle
     // prend la teinte des rangées survolées, sans s'élargir. egui ne passe en `hovered` que le
     // pointeur sur la poignée elle-même, pas seulement dans sa colonne.
-    harness.hover_at(egui::pos2(700.0, 608.0 + INTERRUPTEUR_Y));
+    harness.hover_at(egui::pos2(700.0, CHAMP_ALERTES_Y + 167.0));
     harness.run();
     harness.snapshot("options_alertes_poignee_survolee");
 
@@ -3193,6 +5133,8 @@ fn capture_onglet_suivi(
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -3237,6 +5179,19 @@ fn options_onglet_suivi_decompte() {
     capture_onglet_suivi(
         "options_suivi_decompte",
         overlay_ui::panels::suivi_tab::AddMode::Down,
+        false,
+        false,
+        None,
+    );
+}
+
+/// Mode objectif (2026-09-17) : le troisième bouton en or, et la même ligne « Quantité » qu'en
+/// décompte — la quantité est ici celle à ATTEINDRE, le compteur partant de zéro.
+#[test]
+fn options_onglet_suivi_objectif() {
+    capture_onglet_suivi(
+        "options_suivi_objectif",
+        overlay_ui::panels::suivi_tab::AddMode::Goal,
         false,
         false,
         None,
@@ -3295,7 +5250,7 @@ fn options_suivi_infobulle_de_bouton_au_dessus() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(252.0, 309.0 + INTERRUPTEUR_Y + SOURDINE_Y)),
+        Some(egui::pos2(252.0, 252.0 + INTERRUPTEUR_Y)),
     );
 }
 
@@ -3313,7 +5268,7 @@ fn options_suivi_infobulle_de_badge_sans_mention_alt() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(240.0, 355.0 + INTERRUPTEUR_Y + SOURDINE_Y)),
+        Some(egui::pos2(240.0, 298.0 + INTERRUPTEUR_Y)),
     );
 }
 
@@ -3443,12 +5398,74 @@ fn options_suivi_le_glisser_deposer_reordonne_comme_le_web() {
 /// et rien d'autre — le panneau met `item_spacing.y` à zéro (`design::panel`), chaque écart y est
 /// posé explicitement. Ces points désignent des TUILES, pas des pixels d'une image — s'ils ne
 /// suivaient pas, les planches d'infobulle et de déplacement resteraient vertes en cessant de
-/// montrer ce pour quoi elles existent. Puis de la case « Activer le Suivi » le même jour, voir
+/// montrer ce pour quoi elles existent. Puis de la case « Activer le suivi » le même jour, voir
 /// [`INTERRUPTEUR_Y`].
-const TUILE_0: egui::Pos2 = egui::pos2(79.0, 459.0 + INTERRUPTEUR_Y + SOURDINE_Y);
-const TUILE_2: egui::Pos2 = egui::pos2(231.0, 459.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+const TUILE_0: egui::Pos2 = egui::pos2(79.0, 402.0 + INTERRUPTEUR_Y);
+const TUILE_2: egui::Pos2 = egui::pos2(231.0, 402.0 + INTERRUPTEUR_Y);
 /// Un point de prise excentré dans la première tuile — voir [`capture_suivi_deplacement`].
-const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 442.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+const TUILE_0_PRISE: egui::Pos2 = egui::pos2(62.0, 385.0 + INTERRUPTEUR_Y);
+/// Le bouton icône « Suppression multiple », à droite de l'en-tête « Éléments suivis » — même
+/// repère vertical que les tuiles, un rang plus haut (`suivi_tab::LIST_HEADER_HEIGHT` et sa
+/// gouttière).
+const BOUTON_SELECTION: egui::Pos2 = egui::pos2(688.0, 353.0 + INTERRUPTEUR_Y);
+
+/// **Rien à supprimer, pas de bouton pour le faire.**
+///
+/// Avec une liste vide — l'état de départ de tout nouveau compte — le bouton « Suppression
+/// multiple » restait affiché et cliquable, ouvrant un mode de sélection sans rien à cocher
+/// (retour du 2026-09-16). Il n'apparaît plus qu'à partir d'une entrée suivie, comme il
+/// disparaissait déjà le temps que la liste descende du compte.
+///
+/// Le même point de l'écran est sondé dans les deux états : avec des entrées, le curseur y annonce
+/// un bouton et le clic ouvre la sélection ; sans entrée, ni l'un ni l'autre. Sans la première
+/// moitié, le test passerait aussi avec un repère posé à côté du bouton.
+#[test]
+fn options_suivi_pas_de_suppression_multiple_sur_liste_vide() {
+    use overlay_ui::panels::feature_switch::FeatureToggles;
+
+    let (mut harness, etat) = harnais_suivi(
+        overlay_ui::panels::suivi_tab::AddMode::Up,
+        FeatureToggles::default(),
+    );
+    harness.run();
+    harness.hover_at(BOUTON_SELECTION);
+    harness.run();
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand,
+        "avec des entrées suivies, le repère doit tomber sur le bouton « Suppression multiple »"
+    );
+    harness.drag_at(BOUTON_SELECTION);
+    harness.run();
+    harness.drop_at(BOUTON_SELECTION);
+    harness.run();
+    assert!(
+        etat.borrow().suivi.select_mode,
+        "avec des entrées suivies, le clic doit ouvrir la sélection multiple"
+    );
+
+    let (mut harness, etat) = harnais_suivi(
+        overlay_ui::panels::suivi_tab::AddMode::Up,
+        FeatureToggles::default(),
+    );
+    etat.borrow_mut().suivi_draft = Some(Vec::new());
+    harness.run();
+    harness.hover_at(BOUTON_SELECTION);
+    harness.run();
+    assert_ne!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand,
+        "liste vide : aucun bouton ne doit répondre à l'emplacement de « Suppression multiple »"
+    );
+    harness.drag_at(BOUTON_SELECTION);
+    harness.run();
+    harness.drop_at(BOUTON_SELECTION);
+    harness.run();
+    assert!(
+        !etat.borrow().suivi.select_mode,
+        "liste vide : le clic ne doit pas ouvrir la sélection multiple"
+    );
+}
 
 /// **Fonctionnalité coupée : le contenu de l'onglet ne répond plus** — l'autre moitié de la
 /// demande du 2026-09-15, celle qu'une capture ne peut pas montrer (`panels::feature_switch`).
@@ -3560,6 +5577,8 @@ fn harnais_suivi(
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -3579,7 +5598,7 @@ fn options_suivi_infobulle_de_tuile_sans_mode() {
         overlay_ui::panels::suivi_tab::AddMode::Down,
         false,
         false,
-        Some(egui::pos2(79.0, 505.0 + INTERRUPTEUR_Y + SOURDINE_Y)),
+        Some(egui::pos2(79.0, 448.0 + INTERRUPTEUR_Y)),
     );
 }
 
@@ -3593,20 +5612,8 @@ fn options_alertes_infobulle_d_une_tuile_coupee() {
     survole_l_onglet_alertes(
         "options_alertes_infobulle_tuile_coupee",
         459.0,
-        502.0 + INTERRUPTEUR_Y,
+        366.0 + INTERRUPTEUR_Y,
         Some("Influence III"),
-    );
-}
-
-/// **Le bouton de test du son, dans l'onglet Alertes** — même bascule que les boutons du Suivi, sur
-/// un `design::icon_button` cette fois : son infobulle sortait sous le glyphe.
-#[test]
-fn options_alertes_infobulle_du_test_de_son_au_dessus() {
-    survole_l_onglet_alertes(
-        "options_alertes_infobulle_test_son",
-        240.0,
-        252.0 + INTERRUPTEUR_Y,
-        None,
     );
 }
 
@@ -3679,15 +5686,16 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
     harness.run();
 
-    // Le champ est sous le bloc de formulaire, en mode incrémental (une seule ligne) — et sous la
-    // ligne « Tester le son de l'alerte », qui a tout descendu de 57 px le 2026-09-15 (voir
-    // [`TUILE_0`]), elle-même sous la case « Activer le Suivi » (voir [`INTERRUPTEUR_Y`]).
-    let champ = egui::pos2(300.0, 357.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+    // Le champ est sous le bloc de formulaire, en mode incrémental (une seule ligne), lui-même
+    // sous la case « Activer le suivi » (voir [`INTERRUPTEUR_Y`]).
+    let champ = egui::pos2(300.0, 300.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3706,7 +5714,7 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
     // Le panneau ouvre par sa bande de filtres, puis les rangées de 35 px.
     let rangee = egui::pos2(
         300.0,
-        357.0 + INTERRUPTEUR_Y + SOURDINE_Y + 25.0 + 38.0 + 35.0 * 2.0 + 17.0,
+        300.0 + INTERRUPTEUR_Y + 25.0 + 38.0 + 35.0 * 2.0 + 17.0,
     );
     harness.hover_at(rangee);
     harness.run();
@@ -3737,7 +5745,37 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
 #[test]
 fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     use overlay_engine::WatchlistMode;
-    use overlay_ui::panels::suivi_tab::{AddMode, SuiviAvailability, SuiviTabState};
+    use overlay_ui::panels::suivi_tab::AddMode;
+
+    let ajoutee = entree_ajoutee_depuis_le_formulaire(AddMode::Down);
+    assert_eq!(ajoutee.mode, WatchlistMode::Down);
+    assert_eq!(
+        ajoutee.countdown_target, 250,
+        "la cible du formulaire doit suivre l'entrée créée"
+    );
+    assert_eq!(ajoutee.count, 250, "un décompte part de sa cible");
+}
+
+/// Même règle en objectif (2026-09-17) : la quantité du formulaire devient la cible, mais le
+/// compteur part de zéro — il monte vers elle, c'est ce qui distingue ce mode du décompte.
+#[test]
+fn options_suivi_le_mode_objectif_part_de_zero_vers_la_quantite() {
+    use overlay_engine::WatchlistMode;
+    use overlay_ui::panels::suivi_tab::AddMode;
+
+    let ajoutee = entree_ajoutee_depuis_le_formulaire(AddMode::Goal);
+    assert_eq!(ajoutee.mode, WatchlistMode::Goal);
+    assert_eq!(ajoutee.countdown_target, 250);
+    assert_eq!(ajoutee.count, 0, "un objectif part de zéro");
+}
+
+/// Ouvre l'onglet Suivi avec le formulaire en `mode` et une quantité de 250, tape « tofu » dans le
+/// champ d'ajout, choisit le résultat, et renvoie l'entrée que le brouillon a reçue. Vérifie au
+/// passage que le formulaire revient à son défaut après l'ajout, comme `resetAddForm` côté web.
+fn entree_ajoutee_depuis_le_formulaire(
+    mode: overlay_ui::panels::suivi_tab::AddMode,
+) -> overlay_engine::WatchlistEntry {
+    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
 
     let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
         "items": [[201, "Plume de Tofu", "Tofu Feather", "Pluma", "Pena", 1201, 1, 0, 1]],
@@ -3746,7 +5784,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
 
     let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
         suivi: SuiviTabState {
-            mode: AddMode::Down,
+            mode,
             target: 250,
             ..Default::default()
         },
@@ -3783,6 +5821,8 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -3791,7 +5831,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     // Le bloc porte DEUX lignes en décompte : le champ descend d'autant, de la ligne « Tester le
     // son de l'alerte » posée au-dessus du formulaire (voir [`TUILE_0`]) et de la case « Activer le
     // Suivi » (voir [`INTERRUPTEUR_Y`]).
-    let champ = egui::pos2(300.0, 403.0 + INTERRUPTEUR_Y + SOURDINE_Y);
+    let champ = egui::pos2(300.0, 346.0 + INTERRUPTEUR_Y);
     harness.drag_at(champ);
     harness.run();
     harness.drop_at(champ);
@@ -3801,10 +5841,7 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
     }
     harness.run();
 
-    let rangee = egui::pos2(
-        300.0,
-        403.0 + INTERRUPTEUR_Y + SOURDINE_Y + 25.0 + 38.0 + 17.0,
-    );
+    let rangee = egui::pos2(300.0, 346.0 + INTERRUPTEUR_Y + 25.0 + 38.0 + 17.0);
     harness.hover_at(rangee);
     harness.run();
     harness.drag_at(rangee);
@@ -3818,13 +5855,9 @@ fn options_suivi_le_mode_du_formulaire_decide_de_l_entree() {
         1,
         "la sélection n'a rien ajouté au brouillon"
     );
-    assert_eq!(ajoutees[0].mode, WatchlistMode::Down);
-    assert_eq!(
-        ajoutees[0].countdown_target, 250,
-        "la cible du formulaire doit suivre l'entrée créée"
-    );
     // Le formulaire revient à son défaut après un ajout, comme `resetAddForm` côté web.
     assert_eq!(etat.borrow().suivi.target, 1);
+    ajoutees.into_iter().next().expect("une entrée ajoutée")
 }
 
 /// Curseur du jeu à la place du curseur système (voir `overlay_ui::cursor`) : ce que
@@ -3849,7 +5882,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -3858,11 +5891,17 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,
@@ -3873,8 +5912,14 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -3900,7 +5945,7 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
     // Bouton « Alliés » (main) : l'éclair d'abord, et un redessin réclamé AU PLUS TARD pour la
     // prochaine bascule (l'infobulle du switch en réclame un plus tôt encore, d'où `<=` et non
     // `==`) — `now` est figé dans ce harnais, la phase ne progresse donc pas d'une frame à l'autre.
-    harness.hover_at(egui::pos2(35.0, 71.0));
+    harness.hover_at(egui::pos2(31.0, 76.0));
     harness.run();
     assert!(
         same(&published(&harness), &images.flash),
@@ -3954,12 +5999,38 @@ fn capture_onglet_chat(
     availability: overlay_ui::panels::chat_tab::ChatAvailability,
     survol: Option<egui::Pos2>,
 ) {
+    capture_onglet_chat_selection(nom, draft, availability, survol, false)
+}
+
+/// [`capture_onglet_chat`], avec en plus le **mode sélection multiple** ouvert.
+///
+/// Les trois premières tuiles y sont cochées, comme au Suivi : c'est ce qui fait basculer le
+/// libellé du bouton de « Supprimer tout » à « Supprimer (3) ».
+fn capture_onglet_chat_selection(
+    nom: &str,
+    draft: Option<overlay_ui::panels::chat_tab::ChatDraft>,
+    availability: overlay_ui::panels::chat_tab::ChatAvailability,
+    survol: Option<egui::Pos2>,
+    select_mode: bool,
+) {
     use overlay_ui::panels::chat_tab::ChatTabState;
+
+    let cochees: Vec<String> = match (select_mode, draft.as_ref()) {
+        (true, Some(draft)) => draft
+            .filters
+            .iter()
+            .take(3)
+            .map(|f| format!("{}::{}", f.scope.label(), f.text))
+            .collect(),
+        _ => Vec::new(),
+    };
 
     let mut options_state = OptionsModalState {
         tab: OptionsTab::Chat,
         chat: ChatTabState {
             duration_input: "3,5".to_string(),
+            select_mode,
+            selected: cochees,
             ..Default::default()
         },
         chat_draft: draft,
@@ -3987,6 +6058,8 @@ fn capture_onglet_chat(
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -4024,11 +6097,14 @@ fn capture_onglet_coupe(nom: &str, tab: OptionsTab) {
     let mut options_state = OptionsModalState {
         tab,
         // Les trois coupées d'un coup : chaque planche ne montre que son onglet, et l'état
-        // « tout coupé » est de toute façon celui qu'on veut pouvoir regarder.
+        // « tout coupé » est de toute façon celui qu'on veut pouvoir regarder. Les deux
+        // interrupteurs de la section « Combat » restent actifs — ces planches-ci ne montrent que
+        // les trois onglets, jamais l'onglet « Paramètres ».
         features: FeatureToggles {
             suivi: false,
             alerts: false,
             chat: false,
+            ..Default::default()
         },
         suivi_draft: Some(entrees_de_suivi()),
         suivi_availability: SuiviAvailability::Ready,
@@ -4067,6 +6143,8 @@ fn capture_onglet_coupe(nom: &str, tab: OptionsTab) {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -4079,54 +6157,238 @@ fn options_onglet_suivi_desactive() {
     capture_onglet_coupe("options_suivi_desactive", OptionsTab::Suivi);
 }
 
-/// **Le son coupé, la fonctionnalité intacte** (2026-09-15, voir `panels::sound_row`) — la case
-/// « Couper le son des notifications » est cochée et, juste au-dessus, le bouton d'essai est
-/// GRISÉ : proposer d'écouter ce qu'on vient de faire taire serait une promesse que le jeu ne
-/// tiendra pas.
+/// **Le son coupé, la fonctionnalité intacte** (2026-09-15, voir `panels::notifications`) — les
+/// deux cases « Couper le son des notifications » des sections « Suivi » et « Chat » sont cochées
+/// et, juste au-dessus de chacune, le bouton d'essai est GRISÉ : proposer d'écouter ce qu'on vient
+/// de faire taire serait une promesse que le jeu ne tiendra pas.
 ///
 /// C'est là tout ce que cette planche verrouille, et c'est l'écart qu'on perdrait le plus
-/// facilement : le reste de l'onglet — formulaire, liste, tuiles — reste VIF, contrairement à
-/// `options_suivi_desactive` où la case « Activer le Suivi » estompe tout. Couper un son n'éteint
-/// pas la fonctionnalité.
-#[test]
-fn options_onglet_suivi_son_coupe() {
-    capture_onglet_son_coupe("options_suivi_son_coupe", OptionsTab::Suivi);
-}
-
-/// Le pendant pour l'onglet « Chat » — même case, même bouton grisé, même liste intacte.
-#[test]
-fn options_onglet_chat_son_coupe() {
-    capture_onglet_son_coupe("options_chat_son_coupe", OptionsTab::Chat);
-}
-
-/// Rend un onglet dont l'alerte est MUETTE, tout le reste étant actif — voir les deux tests
-/// ci-dessus. Calquée sur [`capture_onglet_coupe`], aux deux réglages près : `features` reste au
-/// défaut (« tout actif ») et ce sont les sourdines qui sont posées.
-fn capture_onglet_son_coupe(nom: &str, tab: OptionsTab) {
+/// facilement : le reste des sections — la fermeture automatique du Chat, la section « Alertes »
+/// — reste VIF, contrairement à `options_suivi_desactive` où la case « Activer le suivi » estompe
+/// tout son onglet. Couper un son n'éteint pas la fonctionnalité.
+///
+/// **Une seule planche depuis le 2026-09-15**, là où il en fallait deux (une par onglet) : les
+/// deux sourdines vivent désormais côte à côte dans « Paramètres ».
+/// **L'onglet « Paramètres » avec ses quatre sections de notification vivantes** — brouillons
+/// d'alertes et de chat descendus du compte, durées déjà tapées, tout allumé.
+///
+/// Sans brouillon, les lignes « Fermeture automatique des notifications » des sections
+/// « Alertes » et « Chat » se peindraient grisées (voir
+/// `panels::notifications::AutoClose::available`) et les planches ne montreraient pas ce qu'elles
+/// sont censées montrer. Celle du **Suivi** (2026-09-16) n'a rien à attendre : son réglage est
+/// local, sa ligne est toujours vive — seule sa durée tapée est posée ici, comme pour les deux
+/// autres.
+fn parametres_avec_notifications() -> OptionsModalState {
     overlay_ui::build_info::freeze_for_snapshots();
+    use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
     use overlay_ui::panels::chat_tab::ChatTabState;
-    use overlay_ui::panels::sound_row::AlertMutes;
-    use overlay_ui::panels::suivi_tab::SuiviAvailability;
 
-    let mut options_state = OptionsModalState {
-        tab,
-        // Les deux coupées d'un coup, même raison que `capture_onglet_coupe` : chaque planche ne
-        // montre que son onglet.
-        mutes: AlertMutes {
-            suivi: true,
-            chat: true,
-        },
-        suivi_draft: Some(entrees_de_suivi()),
-        suivi_availability: SuiviAvailability::Ready,
-        chat: ChatTabState {
+    const CHEMIN: &str = "/home/joueur/.config/zaap/gamesLogs/wakfu/wakfu.log";
+    let mut profile = overlay_engine::AlertProfile::default();
+    profile.add("Combinaison Lardante", Some(4242));
+
+    OptionsModalState {
+        tab: OptionsTab::Parametres,
+        path_input: CHEMIN.to_string(),
+        account_connected: true,
+        alerts: AlertsTabState {
             duration_input: "3,5".to_string(),
+            ..Default::default()
+        },
+        alerts_draft: Some(profile),
+        alerts_availability: AlertsAvailability::Ready,
+        chat: ChatTabState {
+            duration_input: "5".to_string(),
             ..Default::default()
         },
         chat_draft: Some(recherches_de_chat()),
         chat_availability: Default::default(),
+        suivi: overlay_ui::panels::suivi_tab::SuiviTabState {
+            duration_input: "3,5".to_string(),
+            ..Default::default()
+        },
+        initial: overlay_ui::panels::options_modal::OptionsInitial {
+            path: CHEMIN.to_string(),
+            ..Default::default()
+        },
         ..Default::default()
+    }
+}
+
+/// **Fait défiler le contenu de l'onglet « Paramètres »** de `points` vers le bas.
+///
+/// L'onglet porte sept sections depuis le 2026-09-15 et ne tient plus d'un écran : ce qui suit la
+/// section « Chat » — « Compte », « Mise à jour » — ne se capture qu'après un défilement (voir
+/// `panels::options_modal`, zone défilable « options-parametres »).
+///
+/// **La molette, pas un état interne d'egui** : c'est le geste réel, et il passe par le lissage du
+/// défilement — d'où les frames de repos, sans lesquelles la capture attraperait l'animation en
+/// cours de route.
+fn defile_les_parametres(harness: &mut Harness<'_>, points: f32) {
+    harness.event(egui::Event::PointerMoved(egui::pos2(380.0, 450.0)));
+    harness.run();
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -points),
+        // `Move` : la molette d'une souris n'a pas les phases d'un pavé tactile (voir la doc du
+        // champ côté egui).
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    // Une seule frame avec la molette, puis le pointeur repart AVANT les frames de repos : le
+    // contenu défile sous lui, et un bouton centré qui passerait dessous (« Se déconnecter »,
+    // « Fermer l'overlay », x = 380 comme lui) ouvrirait son infobulle — dont l'animation ne
+    // laisse jamais `Harness::run` se poser (« exceeded max_steps », vécu le 2026-09-16). Sans
+    // pointeur, le curseur du jeu (`overlay_ui::cursor`) ne reste pas non plus peint au milieu de
+    // la capture.
+    harness.step();
+    harness.event(egui::Event::PointerGone);
+    for _ in 0..12 {
+        harness.run();
+    }
+}
+
+/// **La case grisée ne répond plus au clic** — l'autre moitié de la dépendance « suivi des sorts →
+/// détail des combats » (2026-09-15), celle qu'une capture ne peut pas montrer.
+///
+/// Le test clique DEUX FOIS au même endroit : une fois le détail des combats actif, où la case
+/// doit basculer, une fois coupé, où elle ne doit plus bouger. La première moitié est ce qui
+/// empêche la seconde d'être une tautologie — un clic tombé à côté « ne changerait rien » tout
+/// aussi bien.
+///
+/// Coordonnées : mesurées sur `options_parametres_combat_coupe.png` (le harnais rend à 1 pixel par
+/// point, à la taille exacte de `WINDOW_SIZE`), au centre du carré de la case en retrait.
+#[test]
+fn options_parametres_la_case_des_sorts_suit_le_detail_des_combats() {
+    /// Centre de la case « Activer le suivi des sorts », deuxième ligne de la section « Combat ».
+    /// **Remontée de 16 px le 2026-09-16** : la section « Fichier » a quitté la tête de l'onglet
+    /// au profit de « Démarrage », plus courte d'autant (voir `options_modal::show`). **Puis
+    /// descendue de 93 px le soir même** : les trois cases « Afficher … » de la section « Recap »
+    /// (31 px par ligne) se sont glissées au-dessus — carré mesuré en y 374..393 sur la capture.
+    /// **Puis de 50 px le 2026-09-17** : la ligne « Reprendre la session après une pause de moins
+    /// de … min » (case + compteur, plus haute qu'une case nue) a rejoint la section « Recap » avec
+    /// la session du récap — carré mesuré en y 424..443.
+    /// **Puis de 102 px le 2026-09-17 (2)** : la bande Récap devenue déplaçable à la souris a
+    /// ajouté sous cette même section sa ligne d'aide (deux lignes de 23 px) et son bouton
+    /// « Replacer au défaut » (36 px), gouttières comprises — carré mesuré en y 526..545.
+    /// **Puis de 46 px le 2026-09-17 (3)** : le cadenas de la bande (verrouillée par défaut) a
+    /// allongé cette même ligne d'aide de deux lignes de 23 px.
+    /// **Puis remontée de 148 px le 2026-09-18** : ligne d'aide et bouton retirés de la section
+    /// « Recap » (la bande porte les siens) — la case retrouve son y du 2026-09-17 (1), 424..443.
+    const CASE_DES_SORTS: egui::Pos2 = egui::pos2(85.0, 434.0);
+
+    let clic = |detail_actif: bool| -> bool {
+        let mut etat = parametres_avec_notifications();
+        etat.features.combat = detail_actif;
+        let etat = std::rc::Rc::new(std::cell::RefCell::new(etat));
+        let vu = std::rc::Rc::clone(&etat);
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(
+                panels::options_modal::WINDOW_SIZE.0,
+                panels::options_modal::WINDOW_SIZE.1,
+            ))
+            .build_ui(move |ui| {
+                overlay_ui::style::apply(ui.ctx());
+                let icons = UiIcons::load(ui.ctx());
+                let remote_icons = RemoteIconStore::empty();
+                let mut remote_icon_textures = RemoteIconTextures::default();
+                let catalog = CatalogIndex::default();
+                panels::options_modal::show(
+                    ui,
+                    &mut vu.borrow_mut(),
+                    &mut panels::options_modal::OptionsModalContext {
+                        catalog: &catalog,
+                        remote_icons: &remote_icons,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        icons: &icons,
+                        avatars: None,
+                        game_servers: &Default::default(),
+                    },
+                );
+            });
+        harness.run();
+        assert!(
+            etat.borrow().features.spells,
+            "le suivi des sorts part coché, dans les deux cas"
+        );
+        harness.drag_at(CASE_DES_SORTS);
+        harness.drop_at(CASE_DES_SORTS);
+        harness.run();
+        let apres = etat.borrow().features.spells;
+        apres
     };
 
+    assert!(
+        !clic(true),
+        "détail des combats actif : le clic doit décocher le suivi des sorts"
+    );
+    assert!(
+        clic(false),
+        "détail des combats coupé : la case est grisée, le clic ne doit rien changer — et surtout \
+         pas faire perdre le réglage à qui rallume l'interrupteur"
+    );
+}
+
+/// **Le détail des combats coupé grise ce qu'il commande** — cases « Activer le suivi des sorts »
+/// et « Afficher le panneau de combat en dehors des combats » (2026-09-15, section « Combat » de
+/// l'onglet « Paramètres »).
+///
+/// Ce que la capture doit montrer : les deux cases estompées MAIS toujours cochées. Une case qui
+/// se décocherait en perdant son interrupteur ferait perdre le réglage à qui rallume — voir
+/// `FeatureToggles::spells_visible`, qui combine les deux au moment de peindre plutôt que d'écraser
+/// la valeur. La notification de tour, elle, reste vive : elle ne dépend pas du panneau.
+#[test]
+fn options_parametres_combat_coupe() {
+    let mut etat = parametres_avec_notifications();
+    etat.features.combat = false;
+    capture_parametres("options_parametres_combat_coupe", etat);
+}
+
+/// **Le récap coupé grise ses trois cases** — « Afficher la durée de la session », « Afficher
+/// les combats », « Afficher les challenges » (2026-09-16, tard, section « Recap » en tête de
+/// l'onglet « Paramètres »), estompées MAIS toujours cochées : même règle que le suivi des sorts
+/// sous le détail des combats, le réglage se retrouve tel quel en rallumant la bande. Ici, la
+/// case des combats est en plus décochée, pour montrer qu'une case grisée garde sa valeur.
+#[test]
+fn options_parametres_recap_coupe() {
+    let mut etat = parametres_avec_notifications();
+    etat.features.recap = false;
+    etat.features.recap_cells.fights = false;
+    capture_parametres("options_parametres_recap_coupe", etat);
+}
+
+#[test]
+fn options_parametres_son_coupe() {
+    let mut etat = parametres_avec_notifications();
+    etat.mutes = overlay_ui::panels::notifications::AlertMutes {
+        suivi: true,
+        chat: true,
+    };
+    capture_parametres("options_parametres_son_coupe", etat);
+}
+
+/// **Fermeture manuelle : le champ de durée se grise** — la logique existait (`.enabled`), aucun
+/// rendu ne la montrait. Posée sur les TROIS sections qui en ont une : Suivi (2026-09-16),
+/// Alertes et Chat.
+///
+/// Cette planche vivait dans l'onglet « Alertes » (`options_alertes_fermeture_manuelle`) jusqu'au
+/// 2026-09-15, où le bloc a déménagé dans « Paramètres » — voir `panels::notifications`.
+#[test]
+fn options_parametres_fermeture_manuelle() {
+    let mut etat = parametres_avec_notifications();
+    etat.countdown_toast.manual_close = true;
+    if let Some(profil) = etat.alerts_draft.as_mut() {
+        profil.manual_close = true;
+    }
+    if let Some(chat) = etat.chat_draft.as_mut() {
+        chat.toast.manual_close = true;
+    }
+    capture_parametres("options_parametres_fermeture_manuelle", etat);
+}
+
+/// Rend l'onglet « Paramètres » dans l'état qu'on lui donne, sans défilement — le haut de
+/// l'onglet, jusqu'à la section « Chat ». Calquée sur [`capture_onglet_coupe`].
+fn capture_parametres(nom: &str, mut options_state: OptionsModalState) {
     let mut harness = Harness::builder()
         .with_size(egui::vec2(
             panels::options_modal::WINDOW_SIZE.0,
@@ -4147,6 +6409,8 @@ fn capture_onglet_son_coupe(nom: &str, tab: OptionsTab) {
                     remote_icons: &remote_icons,
                     remote_icon_textures: &mut remote_icon_textures,
                     icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
                 },
             );
         });
@@ -4164,8 +6428,8 @@ fn options_onglet_chat_desactive() {
     capture_onglet_coupe("options_chat_desactive", OptionsTab::Chat);
 }
 
-/// **L'onglet « Chat »** : « Tester le son », fermeture automatique, formulaire canal → mot →
-/// « Ajouter », neuf recherches en tuiles à légende, quatre par rangée.
+/// **L'onglet « Chat »** : formulaire canal → mot → « Ajouter », puis le titre « Recherches » et
+/// neuf recherches en tuiles à légende, quatre par rangée.
 #[test]
 fn options_onglet_chat_recherches() {
     capture_onglet_chat(
@@ -4178,6 +6442,8 @@ fn options_onglet_chat_recherches() {
 
 /// Une tuile survolée : voile et croix de retrait, l'idiome des tuiles d'Alertes. La position
 /// vise le centre de la deuxième tuile (panneau à x ≈ 47, tuiles de ≈ 155 px et gouttière de 12).
+/// Descendue de 4 px le 2026-09-16 : le titre « Recherches » est passé entre le formulaire et la
+/// grille, et l'écart sous le formulaire est devenu un `SECTION_GAP` entier.
 #[test]
 fn options_onglet_chat_survol_d_une_tuile() {
     capture_onglet_chat(
@@ -4186,8 +6452,25 @@ fn options_onglet_chat_survol_d_une_tuile() {
         Default::default(),
         Some(egui::pos2(
             47.0 + 155.0 + 12.0 + 77.0,
-            470.0 + INTERRUPTEUR_Y,
+            320.0 + INTERRUPTEUR_Y,
         )),
+    );
+}
+
+/// **Sélection multiple** (2026-09-16) — la même mécanique qu'au Suivi, portée aux recherches :
+/// case à cocher au coin haut-DROIT de chaque tuile (le haut-gauche porte la légende), bordure
+/// rouge sur les cochées, et le bouton de suppression groupée en rouge dans la ligne du titre.
+///
+/// Ce que cette planche verrouille : la case ne mange pas la légende, et la croix de retrait ne
+/// s'affiche plus — elle est ce que la case remplace.
+#[test]
+fn options_onglet_chat_selection_multiple() {
+    capture_onglet_chat_selection(
+        "options_chat_selection",
+        Some(recherches_de_chat()),
+        Default::default(),
+        None,
+        true,
     );
 }
 
@@ -4260,7 +6543,7 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
 
     let mut harness = Harness::new_ui(move |ui| {
         let ctx = ui.ctx().clone();
-        let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
         paint_content(
             ui,
             RenderContent {
@@ -4269,11 +6552,17 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 portraits,
                 combat_frame,
                 icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
                 combat_side: &mut combat_side,
                 combat_metric: &mut combat_metric,
                 watchlist: &[],
                 watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
                 watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
                 catalog_stale: false,
@@ -4284,8 +6573,14 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 interactive: true,
                 shortcuts: &shortcuts,
                 now,
+                recap: &Default::default(),
+                recap_cells: Default::default(),
+                recap_chrome: Default::default(),
+                combat_chrome: Default::default(),
                 options: None,
+                veiled: false,
                 login: None,
+                card_settings: None,
             },
         );
     });
@@ -4358,11 +6653,36 @@ fn login_states() -> Vec<(&'static str, AuthStatus)> {
     ]
 }
 
+/// **La hauteur d'écran simulée** pour les captures de la Carte. Le volet « À propos » s'ouvre
+/// jusqu'à 80 % de la hauteur du moniteur (`panels::login::ABOUT_SCREEN_RATIO`) : figer celle-ci
+/// garde les références indépendantes de la machine qui les produit.
+const CARTE_MONITEUR: f32 = 1080.0;
+
+/// La hauteur du volet « À propos » ouvert — 80 % de [`CARTE_MONITEUR`].
+const CARTE_A_PROPOS_HAUTEUR: f32 = 864.0;
+
 /// Peint la fenêtre de connexion dans `auth_status`, sur une fenêtre de la hauteur qu'elle demande,
 /// et rend la hauteur mesurée (`LoginOutcome::content_height`) — la même que `main.rs` applique
 /// à la fenêtre OS.
 fn capture_login(nom: &str, auth_status: AuthStatus, height: f32) -> f32 {
     capture_login_with_update(nom, auth_status, Default::default(), height)
+}
+
+/// La carte dans son écran de **confirmation d'effacement des données locales** (2026-09-18,
+/// constat C5 de `docs/analyse-rgpd.md` §3.5) — un état de `LoginState`, pas d'`AuthStatus` :
+/// c'est le lien « Supprimer les données locales » de l'écran « non connecté » qui le lève.
+fn capture_login_purge_confirm(nom: &str, height: f32) -> f32 {
+    capture_login_card(
+        nom,
+        AuthStatus::Disconnected { failure: None },
+        Default::default(),
+        false,
+        true,
+        overlay_ui::panels::login::CardPanel::None,
+        None,
+        Some(true),
+        height,
+    )
 }
 
 /// Même capture, avec un état de mise à jour (`overlay_ui::update::UpdateStatus`) posé sur la
@@ -4373,6 +6693,87 @@ fn capture_login_with_update(
     update: overlay_ui::update::UpdateStatus,
     height: f32,
 ) -> f32 {
+    capture_login_card(
+        nom,
+        auth_status,
+        update,
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::None,
+        None,
+        Some(true),
+        height,
+    )
+}
+
+/// L'écran de **mise à jour manuelle** (2026-09-18) : la même carte, ouverte par l'entrée « Mise
+/// à jour » du menu de la zone de notification, compte lié (`AuthStatus::Connected` — c'est le
+/// cas nominal : sans compte, la fenêtre serait de toute façon là).
+fn capture_login_manual_update(
+    nom: &str,
+    update: overlay_ui::update::UpdateStatus,
+    height: f32,
+) -> f32 {
+    capture_login_card(
+        nom,
+        AuthStatus::Connected,
+        update,
+        true,
+        false,
+        overlay_ui::panels::login::CardPanel::None,
+        None,
+        Some(true),
+        height,
+    )
+}
+
+/// Le corps commun des quatre façades ci-dessus — `manual` pose `LoginState::manual_update`,
+/// `purge_confirm` l'écran de confirmation d'effacement des données locales.
+#[allow(clippy::too_many_arguments)]
+fn capture_login_card(
+    nom: &str,
+    auth_status: AuthStatus,
+    update: overlay_ui::update::UpdateStatus,
+    manual: bool,
+    purge_confirm: bool,
+    panel: overlay_ui::panels::login::CardPanel,
+    confirm: Option<overlay_ui::panels::login::CardConfirm>,
+    has_local_data: Option<bool>,
+    height: f32,
+) -> f32 {
+    let (mut harness, measured) = login_card_harness(
+        auth_status,
+        update,
+        manual,
+        purge_confirm,
+        panel,
+        confirm,
+        has_local_data,
+        None,
+        height,
+    );
+    harness.run();
+    harness.snapshot(nom);
+    measured.get()
+}
+
+/// Le harnais de la Carte, prêt à tourner mais sans capture — pour les tests qui vérifient
+/// qu'une frame ABOUTIT (voir `carte_volet_parametres_champs_inactifs`) sans figer de référence.
+/// `settings` : les réglages que l'hôte fournit au volet « Paramètres » ; `None` laisse le volet
+/// sur son défaut, comme `render_content` en l'absence de `card_settings`. Rend la hauteur mesurée
+/// (`LoginOutcome::content_height`) dans une cellule, relue après `Harness::run`.
+#[allow(clippy::too_many_arguments)]
+fn login_card_harness(
+    auth_status: AuthStatus,
+    update: overlay_ui::update::UpdateStatus,
+    manual: bool,
+    purge_confirm: bool,
+    panel: overlay_ui::panels::login::CardPanel,
+    confirm: Option<overlay_ui::panels::login::CardConfirm>,
+    has_local_data: Option<bool>,
+    mut settings: Option<overlay_ui::panels::login::CardSettings>,
+    height: f32,
+) -> (Harness<'static>, std::rc::Rc<std::cell::Cell<f32>>) {
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -4394,20 +6795,28 @@ fn capture_login_with_update(
         animate: false,
         loading: false,
         update,
+        manual_update: manual,
+        purge_confirm,
+        panel,
+        confirm,
+        settings_inputs: None,
+        check_floor_until: None,
+        monitor_height: CARTE_MONITEUR,
+        has_local_data,
     };
     let measured = Rc::new(Cell::new(0.0_f32));
     let measured_in = Rc::clone(&measured);
 
     // `Harness::new_ui` ajoute 8 px de marge autour du contenu : la fenêtre fait 400 px de large
     // comme en production, plus ces marges.
-    let mut harness = egui_kittest::Harness::builder()
+    let harness = egui_kittest::Harness::builder()
         .with_size(egui::Vec2::new(
             overlay_ui::panels::login::WINDOW_WIDTH + 16.0,
             height + 16.0,
         ))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
-            let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
+            let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
             let outcome = paint_content(
                 ui,
                 RenderContent {
@@ -4416,11 +6825,17 @@ fn capture_login_with_update(
                     portraits,
                     combat_frame,
                     icons,
+                    avatars: Some(avatars),
+                    game_servers: &Default::default(),
                     combat_side: &mut combat_side,
                     combat_metric: &mut combat_metric,
                     watchlist: &[],
                     watchlist_enabled: true,
+                    spells_enabled: true,
+                    combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
+                    watchlist_completions: &Default::default(),
+                    watchlist_reset: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,
@@ -4431,8 +6846,14 @@ fn capture_login_with_update(
                     interactive: true,
                     shortcuts: &shortcuts,
                     now,
+                    recap: &Default::default(),
+                    recap_cells: Default::default(),
+                    recap_chrome: Default::default(),
+                    combat_chrome: Default::default(),
                     options: None,
+                    veiled: false,
                     login: Some(&mut login_state),
+                    card_settings: settings.as_mut(),
                 },
             );
             if let Some(h) = outcome.login_height {
@@ -4440,9 +6861,7 @@ fn capture_login_with_update(
             }
         });
 
-    harness.run();
-    harness.snapshot(nom);
-    measured.get()
+    (harness, measured)
 }
 
 /// Une capture par état — **un harnais par test**, jamais plusieurs dans le même :
@@ -4467,24 +6886,171 @@ fn verifie_login(nom: &str, height: f32) {
 
 #[test]
 fn fenetre_de_connexion_non_connecte() {
-    verifie_login("login_non_connecte", 385.0);
+    verifie_login("login_non_connecte", CARTE_HAUTEUR);
+}
+
+/// L'écran de confirmation d'effacement, ouvert depuis le lien de l'écran « non connecté » — la
+/// seule interface qui reste quand aucun compte n'est lié (constat C5).
+#[test]
+fn fenetre_de_connexion_effacement_donnees() {
+    let measured = capture_login_purge_confirm("login_effacement", CARTE_HAUTEUR);
+    assert_eq!(measured, CARTE_HAUTEUR);
 }
 
 #[test]
 fn fenetre_de_connexion_appairage() {
-    verifie_login("login_appairage", 536.0);
+    verifie_login("login_appairage", CARTE_HAUTEUR);
 }
 
 #[test]
 fn fenetre_de_connexion_erreur() {
-    verifie_login("login_erreur", 443.0);
+    verifie_login("login_erreur", CARTE_HAUTEUR);
 }
 
 /// L'écran de chargement fait exactement la hauteur de l'écran « non connecté » (voir
-/// `panels::login::INITIAL_HEIGHT`) : le passage de l'un à l'autre ne redimensionne pas la fenêtre.
+/// `panels::login::CARD_HEIGHT`) : le passage de l'un à l'autre ne redimensionne pas la fenêtre.
 #[test]
 fn fenetre_de_connexion_chargement() {
-    verifie_login("login_chargement", 385.0);
+    verifie_login("login_chargement", CARTE_HAUTEUR);
+}
+
+/// **L'écran « non connecté » sans donnée locale** (2026-09-22) — le lien « Supprimer les données
+/// locales » disparaît : à la première ouverture, il proposerait d'effacer ce qui n'existe pas.
+/// Même hauteur que tous les autres écrans, c'est tout l'intérêt de la taille figée.
+#[test]
+fn fenetre_de_connexion_sans_donnees_locales() {
+    let measured = capture_login_card(
+        "login_sans_donnees",
+        AuthStatus::Disconnected { failure: None },
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::None,
+        None,
+        Some(false),
+        CARTE_HAUTEUR,
+    );
+    assert_eq!(measured, CARTE_HAUTEUR);
+}
+
+/// **La boîte de confirmation de la Carte** (2026-09-22) — le voile sur toute la fenêtre, le
+/// panneau au liseré animé, et l'écran du compte lisible derrière. C'est ce que l'entrée
+/// « Déconnecter » du menu de la zone de notification ouvre : elle envoyait la commande sans rien
+/// demander jusqu'à ce jour.
+#[test]
+fn carte_confirmation_deconnexion() {
+    let measured = capture_login_card(
+        "carte_confirmation",
+        AuthStatus::Connected,
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::None,
+        Some(overlay_ui::panels::login::CardConfirm::Disconnect),
+        Some(true),
+        CARTE_HAUTEUR,
+    );
+    assert_eq!(measured, CARTE_HAUTEUR);
+}
+
+/// **Le volet « Paramètres », compte lié** (2026-09-22) : les neuf sections dans l'ordre de
+/// l'onglet de la fenêtre Options, titres en italique gris, champs de durée sur la ligne de leur
+/// case, et « Retour » en bas.
+#[test]
+fn carte_volet_parametres() {
+    let measured = capture_login_card(
+        "carte_parametres",
+        AuthStatus::Connected,
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::Settings,
+        None,
+        Some(true),
+        CARTE_A_PROPOS_HAUTEUR,
+    );
+    assert_eq!(measured, CARTE_A_PROPOS_HAUTEUR);
+}
+
+/// **Le volet « Paramètres » sans compte lié** : Suivi, Alertes, Chat et Compte disparaissent —
+/// leurs réglages vivent sur le compte. Cinq sections restent, et la mise en page ne change pas.
+#[test]
+fn carte_volet_parametres_sans_compte() {
+    let measured = capture_login_card(
+        "carte_parametres_sans_compte",
+        AuthStatus::Disconnected { failure: None },
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::Settings,
+        None,
+        Some(true),
+        CARTE_A_PROPOS_HAUTEUR,
+    );
+    assert_eq!(measured, CARTE_A_PROPOS_HAUTEUR);
+}
+
+/// **Le volet « Paramètres » avec ses pas numériques inactifs** (2026-09-22, retour utilisateur :
+/// l'overlay passait en « ne répond pas » dès l'ouverture du volet) : « Reprendre après une pause
+/// de » décoché, les deux fermetures automatiques décochées, le profil d'alertes pas encore
+/// descendu. Le champ inactif résolvait sa police DEPUIS la fermeture de `fonts_mut` — un verrou
+/// réentrant sur le contexte egui, que rien ne rend : gel définitif en release, panique d'egui
+/// après dix secondes en debug. Les captures existantes, toutes cases cochées, ne passaient jamais
+/// par cette branche. Pas de référence ici : c'est la frame qui doit aboutir, et la hauteur qu'elle
+/// demande.
+#[test]
+fn carte_volet_parametres_champs_inactifs() {
+    let settings = overlay_ui::panels::login::CardSettings {
+        recap_resume: false,
+        suivi_auto_close: false,
+        alerts_available: false,
+        chat_auto_close: false,
+        ..Default::default()
+    };
+    let (mut harness, measured) = login_card_harness(
+        AuthStatus::Connected,
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::Settings,
+        None,
+        Some(true),
+        Some(settings),
+        CARTE_A_PROPOS_HAUTEUR,
+    );
+    harness.run();
+    assert_eq!(measured.get(), CARTE_A_PROPOS_HAUTEUR);
+}
+
+/// **L'écran « Compte connecté »** (2026-09-22) — il n'existait pas : `AuthStatus::Connected`
+/// tombait dans la branche « non connecté ». C'est l'écran que l'entrée « Déconnecter » du menu
+/// de la zone de notification ouvre, la boîte de confirmation par-dessus.
+#[test]
+fn carte_compte_connecte() {
+    let measured = capture_login("login_connecte", AuthStatus::Connected, CARTE_HAUTEUR);
+    assert_eq!(measured, CARTE_HAUTEUR);
+}
+
+/// **Le volet « À propos »** (2026-09-22) : l'en-tête replié, la Carte ouverte à 80 % de la
+/// hauteur de l'écran, le contenu de l'onglet « À propos » de la fenêtre Options dans le langage
+/// du site, et « Retour » collé au bas sans toucher la bordure.
+#[test]
+fn carte_volet_a_propos() {
+    let measured = capture_login_card(
+        "carte_a_propos",
+        AuthStatus::Disconnected { failure: None },
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::About,
+        None,
+        Some(true),
+        CARTE_A_PROPOS_HAUTEUR,
+    );
+    assert_eq!(
+        measured, CARTE_A_PROPOS_HAUTEUR,
+        "carte_a_propos : le volet mesure {measured} px — 80 % de {CARTE_MONITEUR} attendus"
+    );
 }
 
 // ── Mise à jour automatique (2026-09-15, docs/plan-mise-a-jour.md §8.1) ────────────────────────
@@ -4505,9 +7071,9 @@ fn fenetre_de_connexion_telechargement() {
             received: 4_200_000,
             total: 11_800_000,
         },
-        385.0,
+        CARTE_HAUTEUR,
     );
-    assert_eq!(measured, 385.0);
+    assert_eq!(measured, CARTE_HAUTEUR);
 }
 
 /// Une version disponible que l'on n'installe pas automatiquement : signalée sous le rouage,
@@ -4524,9 +7090,9 @@ fn fenetre_de_connexion_version_disponible() {
             notes_url: None,
             checked_at: std::time::Instant::now(),
         },
-        385.0,
+        CARTE_HAUTEUR,
     );
-    assert_eq!(measured, 385.0);
+    assert_eq!(measured, CARTE_HAUTEUR);
 }
 
 /// Mise à jour OBLIGATOIRE en échec : la carte passe au rouge, « MISE À JOUR REQUISE », le détail
@@ -4542,13 +7108,754 @@ fn fenetre_de_connexion_mise_a_jour_requise() {
             detail: "réseau : délai dépassé après 5 s".to_string(),
             mandatory: true,
         },
-        LOGIN_UPDATE_REQUIRED_HEIGHT,
+        CARTE_HAUTEUR,
     );
     assert_eq!(
-        measured, LOGIN_UPDATE_REQUIRED_HEIGHT,
+        measured, CARTE_HAUTEUR,
         "login_mise_a_jour_requise : la carte mesure {measured} px — reporter la valeur"
     );
 }
 
-/// Hauteur de l'écran « Mise à jour requise », mesurée par la carte elle-même.
-const LOGIN_UPDATE_REQUIRED_HEIGHT: f32 = 443.0;
+/// **La hauteur de la Carte**, la même pour tous ses écrans ordinaires depuis le 2026-09-22 —
+/// voir `panels::login::CARD_HEIGHT`. Les tests la vérifient un par un : une carte plus haute que
+/// sa fenêtre serait coupée en production, et c'est précisément ce qui arrivait au pied de la
+/// Carte au retour du volet « À propos ».
+const CARTE_HAUTEUR: f32 = overlay_ui::panels::login::CARD_HEIGHT;
+
+// ---------------------------------------------------------------------------------------------
+// Onglet « Personnages » (2026-09-16) — voir `panels::personnages_tab`.
+// ---------------------------------------------------------------------------------------------
+
+/// Le roster de démonstration : douze personnages sur le compte principal, deux comptes de plus.
+/// Les mêmes que les maquettes (`examples/personnages-mockups.rs`), pour que les planches se
+/// comparent d'un jet à l'autre.
+fn roster_de_demonstration() -> overlay_engine::Roster {
+    let personnages = [
+        ("Pugio Letalis", "sram", "m"),
+        ("Sagitta Lucis", "cra", "f"),
+        ("Ensis Orientalis", "iop", "m"),
+        ("Canis Furiosus", "ouginak", "m"),
+        ("Rota Metallica", "foggernaut", "f"),
+        ("Imago Speculi", "zobal", "f"),
+        ("Ignis Dolosus", "rogue", "m"),
+        ("Monstrum Amoris", "osamodas", "m"),
+        ("Bursa Auri", "enutrof", "m"),
+        ("Penicillus Vitae", "eniripsa", "f"),
+        ("Aegis Feminea", "feca", "f"),
+        ("Arbovenenum", "sadida", "m"),
+    ];
+    let characters: Vec<serde_json::Value> = personnages
+        .iter()
+        .map(|(name, class, gender)| {
+            serde_json::json!({ "name": name, "className": class, "gender": gender })
+        })
+        .collect();
+    overlay_engine::Roster::from_settings_json(&serde_json::json!({ "roster": [
+        { "id": "acc-1", "label": "", "isDefault": true, "gameServer": "pandora",
+          "characters": characters },
+        { "id": "acc-2", "label": "Mules", "gameServer": "rubilax", "characters": [] },
+        { "id": "acc-3", "label": "Métiers", "characters": [] },
+    ]}))
+}
+
+/// Les serveurs de jeu tels que `GET /api/v1/game-servers` les sert.
+fn serveurs_de_jeu() -> overlay_ui::game_servers::GameServers {
+    overlay_ui::game_servers::GameServers::from_json(&serde_json::json!([
+        { "code": "pandora", "label": "Pandora", "isActive": true },
+        { "code": "rubilax", "label": "Rubilax", "isActive": true },
+    ]))
+}
+
+/// Ce que la planche montre de l'onglet — le reste (compte affiché, mode, modales) vit dans l'état.
+struct PersonnagesPlanche {
+    roster: Option<overlay_engine::Roster>,
+    state: overlay_ui::panels::personnages_tab::PersonnagesTabState,
+    survol: Option<egui::Pos2>,
+}
+
+impl Default for PersonnagesPlanche {
+    fn default() -> Self {
+        Self {
+            roster: Some(roster_de_demonstration()),
+            state: Default::default(),
+            survol: None,
+        }
+    }
+}
+
+fn capture_onglet_personnages(nom: &str, planche: PersonnagesPlanche) {
+    use overlay_ui::panels::personnages_tab::PersonnagesAvailability;
+
+    let PersonnagesPlanche {
+        roster,
+        state,
+        survol,
+    } = planche;
+    let availability = if roster.is_some() {
+        PersonnagesAvailability::Ready
+    } else {
+        PersonnagesAvailability::Loading
+    };
+    let mut options_state = OptionsModalState {
+        tab: OptionsTab::Personnages,
+        personnages: state,
+        personnages_draft: roster,
+        personnages_availability: availability,
+        ..Default::default()
+    };
+    let servers = serveurs_de_jeu();
+
+    // Chargés UNE fois et gardés vivants entre les frames : un `TextureHandle` libère sa texture
+    // dès que son dernier exemplaire tombe, et la planche sortirait avec des tuiles vides.
+    let mut avatars: Option<AvatarAtlas> = None;
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            overlay_ui::build_info::freeze_for_snapshots();
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let avatars = avatars.get_or_insert_with(|| AvatarAtlas::load(ui.ctx()));
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: Some(avatars),
+                    game_servers: &servers,
+                },
+            );
+        });
+    // **`step` et non `run` quand le rouage tourne** : `run` attend que l'interface cesse de
+    // demander un redessin, et une animation ne cesse jamais (`Harness::run exceeded max_steps`).
+    // Deux pas suffisent à poser le rouage à une phase, et le harnais simule son horloge — la
+    // planche est donc reproductible.
+    if availability == PersonnagesAvailability::Loading {
+        harness.step();
+        harness.step();
+        harness.snapshot(nom);
+        return;
+    }
+    harness.run();
+    if let Some(pos) = survol {
+        harness.hover_at(pos);
+        // Deux tours : le premier ouvre l'infobulle, le second la peint à sa place définitive.
+        harness.run();
+        harness.run();
+    }
+    harness.snapshot(nom);
+}
+
+/// **L'écran au repos** : la ligne de compte, le titre « Personnages du compte » avec ses
+/// commandes, la tuile « + » en tête de grille et les douze bustes.
+#[test]
+fn options_onglet_personnages_liste() {
+    capture_onglet_personnages("options_personnages_liste", PersonnagesPlanche::default());
+}
+
+/// **Une tuile survolée** : le voile s'arrête au bandeau de nom, le crayon prend le centre du
+/// buste sur son socle, la croix reste nue au coin. Vise le centre de la deuxième tuile de la
+/// première rangée — la première étant la tuile « + ».
+#[test]
+fn options_onglet_personnages_survol() {
+    capture_onglet_personnages(
+        "options_personnages_survol",
+        PersonnagesPlanche {
+            survol: Some(egui::pos2(47.0 + 100.0 + 24.0 + 50.0, 395.0)),
+            ..Default::default()
+        },
+    );
+}
+
+/// **Sélection multiple** : la case à cocher remplace les badges de survol, la tuile « + »
+/// disparaît (le mode est exclusif), et le bouton de suppression groupée prend le libellé du
+/// nombre coché.
+#[test]
+fn options_onglet_personnages_selection() {
+    use overlay_ui::panels::personnages_tab::PersonnagesTabState;
+    capture_onglet_personnages(
+        "options_personnages_selection",
+        PersonnagesPlanche {
+            state: PersonnagesTabState {
+                select_mode: true,
+                selected: vec![
+                    "Sagitta Lucis".to_string(),
+                    "Rota Metallica".to_string(),
+                    "Monstrum Amoris".to_string(),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}
+
+/// **Aucun personnage** : le bloc d'information dit quoi faire, et la tuile « + » reste là.
+#[test]
+fn options_onglet_personnages_vide() {
+    capture_onglet_personnages(
+        "options_personnages_vide",
+        PersonnagesPlanche {
+            roster: Some(overlay_engine::Roster::from_settings_json(
+                &serde_json::json!({}),
+            )),
+            ..Default::default()
+        },
+    );
+}
+
+/// **Le roster pas encore descendu du compte** : le rouage, jamais une liste vide qui se lirait
+/// « vous n'avez déclaré personne ».
+#[test]
+fn options_onglet_personnages_chargement() {
+    capture_onglet_personnages(
+        "options_personnages_chargement",
+        PersonnagesPlanche {
+            roster: None,
+            ..Default::default()
+        },
+    );
+}
+
+/// **La modale « Personnage », vierge** : le champ de nom sans loupe, le switch ♂/♀ sur le
+/// masculin, la recherche de classe, et les dix-huit bustes en gris.
+#[test]
+fn options_onglet_personnages_modale() {
+    use overlay_ui::panels::personnages_tab::{CharacterEditor, PersonnagesTabState};
+    capture_onglet_personnages(
+        "options_personnages_modale",
+        PersonnagesPlanche {
+            state: PersonnagesTabState {
+                editor: Some(CharacterEditor {
+                    index: None,
+                    name: String::new(),
+                    search: String::new(),
+                    gender: overlay_engine::Gender::M,
+                    class: None,
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}
+
+/// **La même modale, en modification** : les trois champs pré-remplis, la classe retenue en
+/// couleur et cerclée d'or, et la recherche qui ne laisse passer qu'elle.
+#[test]
+fn options_onglet_personnages_modale_remplie() {
+    use overlay_ui::panels::personnages_tab::{CharacterEditor, PersonnagesTabState};
+    capture_onglet_personnages(
+        "options_personnages_modale_remplie",
+        PersonnagesPlanche {
+            state: PersonnagesTabState {
+                editor: Some(CharacterEditor {
+                    index: Some(1),
+                    name: "Sagitta Lucis".to_string(),
+                    // Trois caractères : le seuil du filtre, et « cra » doit trouver « Crâ ».
+                    search: "cra".to_string(),
+                    gender: overlay_engine::Gender::F,
+                    class: Some(8),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}
+
+/// **La modale de compte** : un libellé, un serveur de jeu, et l'aide qui dit à quoi il sert.
+#[test]
+fn options_onglet_personnages_modale_compte() {
+    use overlay_ui::panels::personnages_tab::{AccountEditor, PersonnagesTabState};
+    capture_onglet_personnages(
+        "options_personnages_modale_compte",
+        PersonnagesPlanche {
+            state: PersonnagesTabState {
+                account_editor: Some(AccountEditor {
+                    name: "Mules".to_string(),
+                    server: Some("pandora".to_string()),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}
+
+/// **La suppression d'un compte** : la question porte le nom ET le décompte de ce qu'elle emporte.
+#[test]
+fn options_onglet_personnages_suppression_compte() {
+    use overlay_ui::panels::personnages_tab::PersonnagesTabState;
+    // Six personnages déplacés sur « Mules » : la question doit porter le décompte de ce qu'elle
+    // emporte, et un compte vide ne le montrerait pas.
+    let mut roster = roster_de_demonstration();
+    let deplaces: Vec<_> = roster.accounts[0].characters.drain(..6).collect();
+    roster.accounts[1].characters = deplaces;
+    capture_onglet_personnages(
+        "options_personnages_suppression_compte",
+        PersonnagesPlanche {
+            roster: Some(roster),
+            state: PersonnagesTabState {
+                // Le compte « Mules », le seul que la corbeille accepte de retirer.
+                account: 1,
+                pending_account_removal: Some(1),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}
+
+/// **La rangée d'actions de la bande Récap** (2026-09-17, demande utilisateur) — bande
+/// DÉVERROUILLÉE et DÉPLACÉE : le cadenas ouvert et, à côté de lui, le glyphe de replacement que
+/// seul un déplacement fait apparaître. La pastille est posée hors du fond, en haut à gauche,
+/// dans la réserve d'infobulle de la fenêtre.
+#[test]
+fn bande_recap_deverrouillee_et_deplacee_montre_ses_deux_glyphes() {
+    capture_rangee_actions(
+        panels::recap::RecapChrome {
+            locked: false,
+            moved: true,
+            actions_below: false,
+        },
+        "recap_actions_deverrouille_deplace",
+    );
+}
+
+/// La même bande **verrouillée et jamais déplacée** : un seul glyphe, le cadenas fermé, et la
+/// pastille se resserre dessus — « les deux ne peuvent pas vivre en même temps », et il n'y a
+/// rien à replacer.
+#[test]
+fn bande_recap_verrouillee_ne_montre_que_son_cadenas() {
+    capture_rangee_actions(
+        panels::recap::RecapChrome::default(),
+        "recap_actions_verrouille",
+    );
+}
+
+/// La rangée **sous** le bloc (`RecapChrome::actions_below`) : ce que l'hôte demande quand la
+/// bande est posée si haut dans la fenêtre de jeu que sa rangée en sortirait — voir
+/// `recap_placement::actions_below`.
+#[test]
+fn bande_recap_collee_en_haut_descend_sa_rangee_d_actions() {
+    capture_rangee_actions(
+        panels::recap::RecapChrome {
+            locked: false,
+            moved: true,
+            actions_below: true,
+        },
+        "recap_actions_en_bas",
+    );
+}
+
+/// **Sans pointeur, pas de pastille** (2026-09-21, demande utilisateur : « afficher les icônes de
+/// verrouillage et de réinitialisation de position seulement lors du survol des overlays ») : la
+/// même bande que `recap_actions_deverrouille_deplace`, rendue sans que la souris y soit — rien
+/// au-dessus du bloc, la réserve d'infobulle reste vide.
+#[test]
+fn bande_recap_sans_pointeur_ne_montre_pas_sa_pastille() {
+    capture_rangee_actions_survolee(
+        panels::recap::RecapChrome {
+            locked: false,
+            moved: true,
+            actions_below: false,
+        },
+        "recap_actions_hors_survol",
+        false,
+    );
+}
+
+/// **Un point neutre de la bande, pour faire apparaître la pastille** (2026-09-21) : dans le fond,
+/// mais sur aucune case — chacune ouvre une infobulle — ni sur la pastille elle-même, dont le
+/// survol dorerait le glyphe. Le coin haut gauche du fond : 4 px sous la réserve d'infobulle
+/// (`RECAP_TOOLTIP_RESERVE`) et la marge du harnais, 4 px après le bord gauche, dans le
+/// rembourrage du bloc.
+const RECAP_SURVOL_NEUTRE: egui::Pos2 = egui::pos2(
+    8.0 + 4.0,
+    8.0 + overlay_ui::render_content::RECAP_TOOLTIP_RESERVE + 4.0,
+);
+
+/// Le bloc Récap d'une session ordinaire, rendu avec le `chrome` donné et **le pointeur sur la
+/// bande** — sans lui, la rangée d'actions n'existe pas (2026-09-21). Les trois tests de rangée
+/// ci-dessus ne diffèrent que par le `chrome`.
+fn capture_rangee_actions(chrome: panels::recap::RecapChrome, nom: &str) {
+    capture_rangee_actions_survolee(chrome, nom, true);
+}
+
+/// [`capture_rangee_actions`], avec ou sans pointeur sur la bande.
+fn capture_rangee_actions_survolee(chrome: panels::recap::RecapChrome, nom: &str, survol: bool) {
+    let snapshot = replay_real_log();
+
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: snapshot.totals.xp_gained / 1_000_000,
+            ..snapshot.totals
+        },
+        uptime: std::time::Duration::from_secs(5025),
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
+
+    let mut harness = Harness::new_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+        paint_content(
+            ui,
+            RenderContent {
+                kind: OverlayKind::Recap,
+                fight: None,
+                portraits,
+                combat_frame,
+                icons,
+                avatars: Some(avatars),
+                game_servers: &Default::default(),
+                combat_side: &mut combat_side,
+                combat_metric: &mut combat_metric,
+                watchlist: &[],
+                watchlist_enabled: true,
+                spells_enabled: true,
+                combat_on_right: false,
+                watchlist_selection: &mut Default::default(),
+                watchlist_completions: &Default::default(),
+                watchlist_reset: None,
+                watchlist_toast: None,
+                catalog: &catalog,
+                catalog_stale: false,
+                remote_icons: &remote_icon_store,
+                remote_icon_textures: &mut remote_icon_textures,
+                auth_status: &auth_status,
+                auth_command_tx: &auth_sink,
+                interactive: true,
+                shortcuts: &shortcuts,
+                now,
+                recap: &recap,
+                recap_cells: Default::default(),
+                recap_chrome: chrome,
+                combat_chrome: Default::default(),
+                options: None,
+                veiled: false,
+                login: None,
+                card_settings: None,
+            },
+        );
+    });
+
+    harness.run();
+    if survol {
+        harness.hover_at(RECAP_SURVOL_NEUTRE);
+        harness.run();
+    }
+    harness.snapshot(nom);
+}
+
+/// **Verrouillée, la bande ne bouge plus et ne le laisse pas croire** (2026-09-17, demande
+/// utilisateur : « si l'overlay est en mode lock, l'overlay ne peut plus être déplacé et la souris
+/// repasse en mode normal »).
+///
+/// Trois moitiés de la règle, qu'aucune capture ne montrerait :
+///
+/// 1. verrouillée, un appui-glissé sur le fond ne remonte RIEN, et le survol ne promet rien non
+///    plus — pas de croix fléchée du jeu, sur laquelle `Grab`/`Grabbing` retombent (voir
+///    `overlay_ui::cursor`) ;
+/// 2. le cadenas remonte sa bascule à l'hôte, qui seul tient le réglage et l'écrit ;
+/// 3. le glyphe de replacement n'existe QUE si la bande a été déplacée — au même pixel, sans
+///    déplacement, il n'y a rien à cliquer.
+#[test]
+fn bande_recap_verrouillee_ne_bouge_pas() {
+    let mut textures = Textures::new();
+    let mut combat_side = CombatSide::default();
+    let mut combat_metric = CombatMetric::default();
+    let remote_icon_store = RemoteIconStore::empty();
+    let mut remote_icon_textures = RemoteIconTextures::default();
+    let catalog = CatalogIndex::default();
+    let auth_status = AuthStatus::Connected;
+    let auth_sink = NoopAuthSink;
+    let shortcuts = ShortcutBindings::default();
+    let now = std::time::Instant::now();
+    let recap = panels::recap::RecapView {
+        totals: overlay_engine::SessionTotals {
+            xp_gained: 42_910,
+            kamas_gained: 128_400,
+            ..Default::default()
+        },
+        uptime: std::time::Duration::from_secs(5025),
+        started_at: "20:12".to_string(),
+        resumed: 0,
+    };
+    // Le chrome que l'hôte passerait — le test le change entre deux passes, comme l'hôte le
+    // ferait après un clic sur le cadenas.
+    let chrome = std::rc::Rc::new(std::cell::Cell::new(panels::recap::RecapChrome::default()));
+    let gestes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let bascules = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let replacements = std::rc::Rc::new(std::cell::Cell::new(0usize));
+
+    let mut harness = Harness::builder()
+        .with_size(egui::Vec2::new(
+            panels::recap::WIDTH + 16.0,
+            panels::recap::HEIGHT
+                + overlay_ui::render_content::RECAP_TOOLTIP_RESERVE
+                + overlay_ui::render_content::RECAP_ACTIONS_RESERVE
+                + 16.0,
+        ))
+        .build_ui({
+            let chrome = std::rc::Rc::clone(&chrome);
+            let gestes = std::rc::Rc::clone(&gestes);
+            let bascules = std::rc::Rc::clone(&bascules);
+            let replacements = std::rc::Rc::clone(&replacements);
+            move |ui| {
+                let ctx = ui.ctx().clone();
+                let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
+                let outcome = paint_content(
+                    ui,
+                    RenderContent {
+                        kind: OverlayKind::Recap,
+                        fight: None,
+                        portraits,
+                        combat_frame,
+                        icons,
+                        avatars: Some(avatars),
+                        game_servers: &Default::default(),
+                        combat_side: &mut combat_side,
+                        combat_metric: &mut combat_metric,
+                        watchlist: &[],
+                        watchlist_enabled: true,
+                        spells_enabled: true,
+                        combat_on_right: false,
+                        watchlist_selection: &mut Default::default(),
+                        watchlist_completions: &Default::default(),
+                        watchlist_reset: None,
+                        watchlist_toast: None,
+                        catalog: &catalog,
+                        catalog_stale: false,
+                        remote_icons: &remote_icon_store,
+                        remote_icon_textures: &mut remote_icon_textures,
+                        auth_status: &auth_status,
+                        auth_command_tx: &auth_sink,
+                        interactive: true,
+                        shortcuts: &shortcuts,
+                        now,
+                        recap: &recap,
+                        recap_cells: Default::default(),
+                        recap_chrome: chrome.get(),
+                        combat_chrome: Default::default(),
+                        options: None,
+                        veiled: false,
+                        login: None,
+                        card_settings: None,
+                    },
+                );
+                if outcome.recap_drag != panels::recap::RecapDrag::None {
+                    gestes.borrow_mut().push(outcome.recap_drag);
+                }
+                if outcome.recap_toggle_lock {
+                    bascules.set(bascules.get() + 1);
+                }
+                if outcome.recap_restore_requested {
+                    replacements.set(replacements.get() + 1);
+                }
+            }
+        });
+
+    // (1) Le fond, verrouillé : ni curseur ni geste.
+    let saisie = egui::pos2(118.0, 61.0);
+    harness.hover_at(saisie);
+    harness.run();
+    let images = overlay_ui::cursor::images();
+    assert!(
+        !harness
+            .output()
+            .platform_output
+            .cursor_image
+            .as_ref()
+            .is_some_and(|image| std::sync::Arc::ptr_eq(&image.rgba, &images.moving.rgba)),
+        "verrouillée, la bande ne doit pas annoncer qu'elle s'attrape"
+    );
+    press(&mut harness, saisie, true);
+    harness.run();
+    harness.event(egui::Event::PointerMoved(egui::pos2(160.0, 100.0)));
+    harness.run();
+    press(&mut harness, egui::pos2(160.0, 100.0), false);
+    harness.run();
+    assert!(
+        gestes.borrow().is_empty(),
+        "verrouillée, la bande ne doit remonter aucun geste : {:?}",
+        gestes.borrow()
+    );
+
+    // (2) Le cadenas, premier glyphe de la pastille : bande jamais déplacée, il est seul.
+    let cadenas = egui::pos2(19.0, 31.0);
+    harness.hover_at(cadenas);
+    harness.run();
+    press(&mut harness, cadenas, true);
+    harness.run();
+    press(&mut harness, cadenas, false);
+    harness.run();
+    assert_eq!(bascules.get(), 1, "le cadenas doit remonter sa bascule");
+
+    // (3) Le deuxième emplacement de la pastille n'existe pas tant que la bande n'a pas bougé…
+    let replacer = egui::pos2(39.0, 31.0);
+    harness.hover_at(replacer);
+    harness.run();
+    press(&mut harness, replacer, true);
+    harness.run();
+    press(&mut harness, replacer, false);
+    harness.run();
+    assert_eq!(
+        replacements.get(),
+        0,
+        "sans déplacement, il n'y a pas de glyphe de replacement à cliquer"
+    );
+
+    // … et il apparaît dès que l'hôte dit que la bande a une position à elle.
+    chrome.set(panels::recap::RecapChrome {
+        locked: false,
+        moved: true,
+        actions_below: false,
+    });
+    harness.hover_at(replacer);
+    harness.run();
+    press(&mut harness, replacer, true);
+    harness.run();
+    press(&mut harness, replacer, false);
+    harness.run();
+    assert_eq!(
+        replacements.get(),
+        1,
+        "déplacée, la bande doit offrir son retour à l'ancrage d'origine"
+    );
+    assert_eq!(
+        bascules.get(),
+        1,
+        "le glyphe de replacement n'est pas le cadenas"
+    );
+}
+
+// ── Écran de mise à jour manuelle (2026-09-18) ─────────────────────────────────────────────────
+//
+// Ce que montre la carte quand la recherche a été demandée depuis l'entrée « Mise à jour » du menu
+// de la zone de notification (`LoginState::manual_update`, voir `panels::login::
+// paint_manual_update`) : le rouage pendant la recherche, puis son verdict. Une capture par état,
+// un harnais par test, et la hauteur vérifiée comme pour tous les autres écrans de cette fenêtre.
+
+/// Recherche en cours : le rouage du jeu et « Recherche d'une mise à jour… » — exactement la
+/// composition de l'écran de chargement, même hauteur (`panels::login::INITIAL_HEIGHT`).
+#[test]
+fn ecran_mise_a_jour_recherche() {
+    let measured = capture_login_manual_update(
+        "login_maj_recherche",
+        overlay_ui::update::UpdateStatus::Checking,
+        CARTE_HAUTEUR,
+    );
+    assert_eq!(measured, CARTE_HAUTEUR);
+}
+
+/// Téléchargement lancé depuis cet écran : la jauge y reste, l'utilisateur suit la mise à jour là
+/// où il l'a demandée.
+#[test]
+fn ecran_mise_a_jour_telechargement() {
+    let measured = capture_login_manual_update(
+        "login_maj_telechargement",
+        overlay_ui::update::UpdateStatus::Downloading {
+            version: "0.21.0".to_string(),
+            received: 4_200_000,
+            total: 11_800_000,
+        },
+        CARTE_HAUTEUR,
+    );
+    assert_eq!(measured, CARTE_HAUTEUR);
+}
+
+/// Le verdict le plus fréquent : « Vous êtes déjà à jour », et de quoi refermer. La version citée
+/// est celle du build, figée à `0.0.0` par `freeze_for_snapshots`.
+#[test]
+fn ecran_mise_a_jour_a_jour() {
+    let measured = capture_login_manual_update(
+        "login_maj_a_jour",
+        overlay_ui::update::UpdateStatus::UpToDate {
+            checked_at: std::time::Instant::now(),
+        },
+        CARTE_HAUTEUR,
+    );
+    assert_eq!(
+        measured, CARTE_HAUTEUR,
+        "login_maj_a_jour : la carte mesure {measured} px — reporter la valeur"
+    );
+}
+
+/// Une version plus récente existe : l'utilisateur décide quand (« Mettre à jour maintenant » ou
+/// « Plus tard »).
+#[test]
+fn ecran_mise_a_jour_disponible() {
+    let measured = capture_login_manual_update(
+        "login_maj_disponible",
+        overlay_ui::update::UpdateStatus::Available {
+            version: "0.21.0".to_string(),
+            download_size: 11_800_000,
+            mandatory: false,
+            notes_url: None,
+            checked_at: std::time::Instant::now(),
+        },
+        CARTE_HAUTEUR,
+    );
+    assert_eq!(
+        measured, CARTE_HAUTEUR,
+        "login_maj_disponible : la carte mesure {measured} px — reporter la valeur"
+    );
+}
+
+/// Manifeste illisible (hors ligne, serveur muet) : la recherche n'a pas abouti.
+#[test]
+fn ecran_mise_a_jour_verification_impossible() {
+    let measured = capture_login_manual_update(
+        "login_maj_indisponible",
+        overlay_ui::update::UpdateStatus::Unavailable {
+            reason: "GET /latest.json — erreur réseau : délai dépassé après 10 s".to_string(),
+            checked_at: std::time::Instant::now(),
+        },
+        CARTE_HAUTEUR,
+    );
+    assert_eq!(
+        measured, CARTE_HAUTEUR,
+        "login_maj_indisponible : la carte mesure {measured} px — reporter la valeur"
+    );
+}
+
+/// Mise à jour NON obligatoire en échec : l'overlay continue avec sa version, l'écran le dit et
+/// propose de réessayer (l'échec d'une mise à jour **obligatoire**, lui, a son propre écran —
+/// voir `fenetre_de_connexion_mise_a_jour_requise`).
+#[test]
+fn ecran_mise_a_jour_echec() {
+    let measured = capture_login_manual_update(
+        "login_maj_echec",
+        overlay_ui::update::UpdateStatus::Failed {
+            headline: "Téléchargement interrompu".to_string(),
+            detail: "réseau : connexion réinitialisée après 4,2 Mo sur 11,8 Mo".to_string(),
+            mandatory: false,
+        },
+        CARTE_HAUTEUR,
+    );
+    assert_eq!(
+        measured, CARTE_HAUTEUR,
+        "login_maj_echec : la carte mesure {measured} px — reporter la valeur"
+    );
+}

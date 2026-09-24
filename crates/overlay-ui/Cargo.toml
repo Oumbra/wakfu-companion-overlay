@@ -3,7 +3,24 @@ name = "overlay-ui"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 description = "Fenetre overlay transparente (Windows, DirectComposition — voir S1) rendant les deux premiers panneaux de L2 (degats du combat en cours, recap de session) a partir d'overlay-engine/overlay-ingest."
+
+# **Nom des exécutables livrés** — `wakfu-companion-overlay.exe` sous Windows, et non le nom du
+# paquet.
+# Sans ce bloc, Cargo nomme le binaire d'après `[package] name` : l'utilisateur téléchargeait un
+# `overlay-ui.exe`, un nom de module interne qui ne dit ni le produit ni le jeu, et qui se perd dans
+# une liste de processus. Le nom des ASSETS de Release, lui, portait déjà le bon
+# (`wakfu-companion-overlay-{version}-windows-x86_64.exe.gz`, voir `.github/workflows/release.yml`).
+#
+# `src/bin/*.rs` reste découvert automatiquement à côté, et suit la même règle :
+# `wakfu-companion-overlay-x11` est le binaire Linux/X11 (§17.2 du plan), nommé d'après son fichier.
+# Seul `overlay-focus` garde un nom d'outil (gestionnaire du protocole `wakfu-companion:`, voir son
+# en-tête) : il est cherché PAR NOM par l'overlay (`turn_watch::notify`), le renommer casserait le
+# clic sur un toast de tour.
+[[bin]]
+name = "wakfu-companion-overlay"
+path = "src/main.rs"
 
 [dependencies]
 overlay-engine = { path = "../overlay-engine" }
@@ -12,6 +29,10 @@ overlay-sync = { path = "../overlay-sync" }
 overlay-platform = { path = "../overlay-platform" }
 
 arc-swap = "1"
+# Heure LOCALE du début de la session du Récap (« Session depuis 20:12 », `recap_session`) — même
+# dépendance et mêmes fonctionnalités que le moteur (`overlay_engine::log_time`), même raison : le
+# fuseau courant de la machine est délégué à l'OS, aucune base de fuseaux embarquée.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 crossbeam-channel = "0.5"
 ctrlc = "3"
 directories = "5"
@@ -56,9 +77,45 @@ windows = { version = "0.62.2", features = [
   "Win32_System_WinRT",
   "Win32_System_Registry",
   "Win32_System_Threading",
+  # `AttachConsole` — l'exe est fenêtré sans fenêtre (`windows_subsystem = "windows"`, voir
+  # `main.rs`) ; lancé depuis un terminal, il se rattache à la console de celui-ci pour que le
+  # journal reste lisible en développement (`logging::attach_parent_console`).
+  "Win32_System_Console",
   "Win32_System_LibraryLoader",
   "Win32_UI_Shell",
   "Foundation",
   "UI_Notifications",
   "Data_Xml_Dom",
 ] }
+
+# Icône et métadonnées de l'exécutable Windows (`build.rs`) — l'icône est celle de la zone de
+# notification et de la fenêtre, dérivée d'`assets/ui/logo-purple.png` au build plutôt que commitée
+# en `.ico` : une seule source de vérité pour le logo du projet.
+#
+# `[target.'cfg(windows)']` d'un bloc `build-dependencies` désigne la plateforme HÔTE (c'est là que
+# tourne `build.rs`) — pas la cible. C'est ce qu'on veut : on ne compile jamais le binaire Windows
+# ailleurs que sous Windows (`release.yml`, job `build-windows`), et `build.rs` revérifie la cible
+# (`CARGO_CFG_TARGET_OS`) avant de poser quoi que ce soit.
+[target.'cfg(windows)'.build-dependencies]
+# Compile la ressource `.rc` (icône + bloc de version) et la fait lier dans l'exe. Fork maintenu de
+# `winres`. `default-features = false` retire sa lecture de `[package.metadata.winresource]` (et
+# avec elle `toml`/`syn` du graphe de build) : les quelques propriétés posées le sont dans
+# `build.rs`, à côté de l'icône, plutôt qu'à deux endroits.
+winresource = { version = "0.1", default-features = false }
+# Décodage du PNG source, redimensionnement, encodage `.ico` multi-tailles. Mêmes fonctionnalités
+# que la dépendance applicative ci-dessus, plus `ico`.
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+# Icône de zone de notification et son menu (Options / Mise à jour / Déconnecter / Quitter —
+# 2026-09-18) : équivalent Linux/KDE de `tray-icon` ci-dessus, voir `overlay_ui::linux_tray`.
+# Implémente StatusNotifierItem (DBus) en pur Rust, sans GTK/libappindicator — `zbus` est déjà
+# dans l'arbre (tiré par `rfd` -> `ashpd`), aucune dépendance système supplémentaire à la
+# compilation. Feature `blocking` (API synchrone) a besoin d'un runtime async sous-jacent pour son
+# `compat::block_on` interne — `async-io` plutôt que `tokio` (défaut de la crate) : ce binaire n'a
+# par ailleurs aucun besoin de tokio.
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+# `geteuid` et `O_NOFOLLOW` pour le verrou d'instance unique (`single_instance`, audit de
+# sécurité du 2026-09-23) : propriétaire du dossier `$XDG_RUNTIME_DIR` vérifié, fichier de verrou
+# jamais ouvert à travers un lien symbolique. Déjà présent dans l'arbre de dépendances.
+libc = "0.2"

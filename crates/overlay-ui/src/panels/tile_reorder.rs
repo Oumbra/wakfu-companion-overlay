@@ -29,7 +29,7 @@
 //! les entrées (voir `overlay_engine::watchlist`) — demande à l'hôte d'écrire. [`reorder`] est là
 //! pour que les deux le fassent au même rang.
 
-use egui::{Rect, Vec2};
+use egui::Rect;
 
 use crate::design::{self, SlotFrame};
 
@@ -55,7 +55,7 @@ pub struct Tile {
     /// Rang dans la liste affichée.
     pub index: usize,
     /// Icône déjà résolue — la même que celle de la tuile, sinon le fantôme montrerait autre chose.
-    pub icon: egui::TextureId,
+    pub icon: egui::load::SizedTexture,
     /// Cadre de l'emplacement : c'est lui qui dit quelle entrée est en vol (rareté, ou neutre).
     pub frame: SlotFrame,
     /// Côté du carré.
@@ -86,8 +86,52 @@ impl Gesture {
 /// À appeler pour CHAQUE tuile réordonnable, après l'avoir peinte : c'est là que le fantôme se pose
 /// au-dessus d'elle, et la barre d'insertion sur elle.
 pub fn handle(ui: &egui::Ui, response: &egui::Response, tuile: Tile) -> Gesture {
+    let size = tuile.size;
+    let frame = tuile.frame;
+    let icon = tuile.icon;
+    handle_with(
+        ui,
+        response,
+        tuile.index,
+        design::tokens::ITEM_SLOT_ROUNDING,
+        |ui, _rect| {
+            ui.add(design::item_slot().size(size).frame(frame).icon(icon));
+        },
+        |ui, rect| {
+            // Sur le MÊME anneau que le cadre de l'emplacement, comme le liseré de sélection : il
+            // remplace visuellement la bordure de rareté le temps du survol.
+            let (anneau, rayon) = design::item_slot_border_ring(rect);
+            ui.painter().rect_stroke(
+                anneau,
+                rayon,
+                egui::Stroke::new(design::tokens::ITEM_SLOT_PLAIN_STROKE, DROP_MARKER),
+                egui::StrokeKind::Inside,
+            );
+        },
+    )
+}
+
+/// **Le même geste, pour une tuile qui n'est pas un emplacement carré** — l'onglet « Personnages »
+/// (2026-09-16), dont la carte fait 100 × 118 et porte un buste détouré avec son bandeau de nom.
+///
+/// [`handle`] en est l'appel spécialisé : tout ce qui fait le geste (charge utile, curseur, voile
+/// sur la place d'origine, dépôt) vit ici, seuls le fantôme et le liseré de destination changent
+/// d'un écran à l'autre — et ce sont précisément les deux choses qu'une tuile non carrée ne peut
+/// pas emprunter à `design::item_slot`.
+///
+/// - `ghost` peint le fantôme dans le `Ui` d'une couche `Order::Tooltip` : il alloue lui-même sa
+///   place (le `rect` reçu est celui de la tuile d'origine, pour les cotes).
+/// - `marker` peint le liseré « ta tuile viendra ici » sur la tuile visée.
+pub fn handle_with(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    index: usize,
+    rounding: impl Into<egui::CornerRadius>,
+    ghost_paint: impl FnOnce(&mut egui::Ui, Rect),
+    marker_paint: impl FnOnce(&egui::Ui, Rect),
+) -> Gesture {
     // Pose la charge utile à l'instant où le glissement démarre — sans effet les autres frames.
-    response.dnd_set_drag_payload(DragIndex(tuile.index));
+    response.dnd_set_drag_payload(DragIndex(index));
 
     // Lu APRÈS la pose : la tuile qui vient de partir se voit voilée dès la première frame du
     // geste, sans attendre la suivante.
@@ -113,11 +157,10 @@ pub fn handle(ui: &egui::Ui, response: &egui::Response, tuile: Tile) -> Gesture 
     ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
 
     let rect = response.rect;
-    if depuis == tuile.index {
+    if depuis == index {
         // La place d'origine s'efface derrière le fantôme, maintenant seul exemplaire de l'entrée.
-        ui.painter()
-            .rect_filled(rect, design::tokens::ITEM_SLOT_ROUNDING, DRAG_SOURCE_SCRIM);
-        ghost(ui, response.id, &tuile, rect);
+        ui.painter().rect_filled(rect, rounding, DRAG_SOURCE_SCRIM);
+        ghost(ui, response.id, rect, ghost_paint);
         return Gesture {
             dragged: Some(depuis),
             dropped: None,
@@ -125,7 +168,7 @@ pub fn handle(ui: &egui::Ui, response: &egui::Response, tuile: Tile) -> Gesture 
     }
 
     if response.dnd_hover_payload::<DragIndex>().is_some() {
-        marker(ui, rect);
+        marker_paint(ui, rect);
     }
     Gesture {
         dragged: Some(depuis),
@@ -141,7 +184,7 @@ pub fn handle(ui: &egui::Ui, response: &egui::Response, tuile: Tile) -> Gesture 
 /// Le web réduit le sien à l'icône sur un carré neutre parce que sa tuile réelle porte des éléments
 /// flottants (badge, croix) que la capture d'écran du navigateur emportait ; ici rien n'est
 /// capturé, l'emplacement est repeint — il garde donc son cadre, qui dit quelle entrée est en vol.
-fn ghost(ui: &egui::Ui, id: egui::Id, tuile: &Tile, rect: Rect) {
+fn ghost(ui: &egui::Ui, id: egui::Id, rect: Rect, paint: impl FnOnce(&mut egui::Ui, Rect)) {
     let Some(pointeur) = ui.ctx().pointer_interact_pos() else {
         return;
     };
@@ -153,7 +196,7 @@ fn ghost(ui: &egui::Ui, id: egui::Id, tuile: &Tile, rect: Rect) {
         .ctx()
         .input(|i| i.pointer.press_origin())
         .map(|origine| origine - rect.min)
-        .unwrap_or_else(|| Vec2::splat(tuile.size / 2.0));
+        .unwrap_or_else(|| rect.size() / 2.0);
     egui::Area::new(id.with("fantome"))
         .order(egui::Order::Tooltip)
         .fixed_pos(pointeur - prise)
@@ -162,39 +205,8 @@ fn ghost(ui: &egui::Ui, id: egui::Id, tuile: &Tile, rect: Rect) {
         .interactable(false)
         .show(ui.ctx(), |ui| {
             ui.set_opacity(DRAG_GHOST_OPACITY);
-            ui.add(
-                design::item_slot()
-                    .size(tuile.size)
-                    .frame(tuile.frame)
-                    .icon(tuile.icon),
-            );
+            paint(ui, rect);
         });
-}
-
-/// **Le liseré de la tuile visée** — « ta tuile viendra ici ».
-///
-/// Posé sur le MÊME anneau que le cadre de l'emplacement (`design::item_slot_border_ring`), comme
-/// le liseré de sélection : il remplace visuellement la bordure de rareté le temps du survol, il ne
-/// s'ajoute pas à côté d'elle.
-///
-/// **Une barre latérale d'abord, et pourquoi elle est partie** (13/09/2026, sur la première planche
-/// du bandeau) : la version initiale peignait un trait sur le bord vers lequel l'entrée allait —
-/// à droite en descendant, à gauche en remontant. Deux défauts, l'un fatal :
-///
-/// 1. **Rognée dans la bande in-game.** La fenêtre Suivi est dimensionnée à son contenu
-///    (`panels::watchlist::content_width`) : la dernière tuile touche son bord droit, et le trait
-///    qui s'y posait tombait hors de la zone de défilement — invisible précisément là où on visait.
-/// 2. **Redondante.** Dans les deux sens, l'entrée déplacée prend la PLACE de la tuile visée (celle
-///    -ci recule ou avance d'un rang, voir [`reorder`]) : le côté n'ajoutait qu'une nuance de plus
-///    à lire, là où le liseré dit la chose directement.
-fn marker(ui: &egui::Ui, rect: Rect) {
-    let (anneau, rayon) = design::item_slot_border_ring(rect);
-    ui.painter().rect_stroke(
-        anneau,
-        rayon,
-        egui::Stroke::new(design::tokens::ITEM_SLOT_PLAIN_STROKE, DROP_MARKER),
-        egui::StrokeKind::Inside,
-    );
 }
 
 /// Déplace l'élément de rang `depuis` au rang `vers` — **miroir exact de

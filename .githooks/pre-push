@@ -16,6 +16,65 @@ if [ ! -f "$repo_root/scripts/ci-local.sh" ]; then
   exit 0  # branche/état sans le script (ex. historique ancien) : ne jamais bloquer là-dessus.
 fi
 
+# ── Avertissement : du rendu changé, aucune référence régénérée ──────────────────────────────────
+#
+# Le mode de défaillance le plus coûteux du dépôt en septembre 2026, et de loin. Quatre changements
+# visuels successifs (retrait du replacement Récap, retrait du rafraîchissement, largeur des
+# onglets, onglet « À propos ») sont partis sans leurs références : SIX runs rouges d'affilée sur le
+# même gate, 65 captures périmées accumulées, et plus personne pour lire le verdict.
+#
+# AVERTISSEMENT, jamais un blocage : un refactor interne de `panels/` ne change souvent aucun pixel
+# (le `tile_button` partagé de 718b977, par exemple), et un hook qui se trompe une fois sur deux se
+# fait contourner systématiquement — c'est écrit plus haut à propos de sa lenteur, c'est vrai aussi
+# de ses faux positifs. Le verdict, lui, reste au CI.
+#
+# Ne regarde que ce qui PEINT : `panels/`, `design/`, les assets embarqués par `include_bytes!`, et
+# les quelques fichiers racine qui composent l'écran. `config.rs` ou `engine_thread.rs` n'y sont
+# pas.
+avertir_captures_non_regenerees() {
+  local zero='0000000000000000000000000000000000000000'
+  local local_ref local_sha remote_ref remote_sha fichiers='' lot
+
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue   # suppression d'une branche distante : rien à pousser.
+    if [ "$remote_sha" = "$zero" ]; then
+      # Branche neuve côté distant : tout ce qu'elle apporte de plus que les autres branches déjà
+      # publiées. Sans `--not --remotes`, ce serait l'historique entier du dépôt.
+      lot="$(git log --pretty=format: --name-only "$local_sha" --not --remotes 2> /dev/null)"
+    else
+      lot="$(git log --pretty=format: --name-only "$remote_sha..$local_sha" 2> /dev/null)"
+    fi
+    fichiers="$fichiers$lot"$'\n'
+  done
+
+  printf '%s' "$fichiers" | grep -qE \
+    '^(crates/overlay-ui/src/(panels|design)/|assets/|crates/overlay-ui/src/(render_content|ui_icons|portraits|style|frame|background|avatars)\.rs)' \
+    || return 0
+  printf '%s' "$fichiers" | grep -qE '^crates/overlay-testkit/tests/snapshots/' && return 0
+
+  cat >&2 <<'MSG'
+
+╭──────────────────────────────────────────────────────────────────────╮
+│ [pre-push] Du code de RENDU change, aucune référence de capture.     │
+│                                                                      │
+│ Si ce push modifie un pixel, le gate « overlay-testkit » du CI le    │
+│ verra et rougira. Les références ne se régénèrent QUE dans le rendu  │
+│ épinglé du CI :                                                      │
+│                                                                      │
+│   Actions → « Régénérer les captures (rendu du CI) » → Run workflow  │
+│                                                                      │
+│ Vérifier d'abord ce qui bouge, sans quitter le poste :               │
+│   bash scripts/ci-local.sh                                           │
+│                                                                      │
+│ Simple avertissement — le push continue.                             │
+╰──────────────────────────────────────────────────────────────────────╯
+MSG
+}
+
+# Avant les lints : l'avertissement doit rester lisible même quand un lint échoue juste après et
+# remplit l'écran de sa propre sortie.
+avertir_captures_non_regenerees
+
 printf '\033[1m[pre-push]\033[0m vérification des lints avant push (contournement : --no-verify)\n'
 if bash "$repo_root/scripts/ci-local.sh" --lint; then
   exit 0

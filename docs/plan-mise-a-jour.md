@@ -48,7 +48,7 @@ automatique.
 | `design::meter(ratio)` existe (jauge 0→1 du panneau Combat), `design::button`, `design::confirm_dialog`, `design::info_text`, `design::checkbox` aussi | `design/components/` | Aucun composant à créer pour la barre de progression ni pour la section Options. |
 | Fenêtre Options : onglet « Paramètres » = sections Fichier / Combat / Compte, motif « heading + info_text + bouton + confirm + `OptionsModalAction` traité par l'hôte » | `options_modal.rs:653-841` | La section « Mise à jour » suit exactement ce motif. |
 | Threads de fond nommés + `ArcSwap` + `EventLoopProxy<UserEvent>` + `backoff_delay` ; `UserEvent::{NewSnapshot, AuthStatusChanged, StartupProgress}` | `background.rs`, `render_content.rs:83-89` | Un `UserEvent::UpdateProgress` et un `spawn_update_thread` s'y ajoutent sans rien changer au modèle. |
-| Deux hôtes dupliquent la boucle d'événements : `main.rs` (Windows) et `bin/overlay-ui-x11.rs` (Linux) | — | Tout ce qui est partageable va dans la lib (`overlay_ui::background`, `startup`, `panels`), les deux hôtes ne font que brancher. |
+| Deux hôtes dupliquent la boucle d'événements : `main.rs` (Windows) et `bin/wakfu-companion-overlay-x11.rs` (Linux) | — | Tout ce qui est partageable va dans la lib (`overlay_ui::background`, `startup`, `panels`), les deux hôtes ne font que brancher. |
 | Le binaire sait déjà **se relancer avec un argument spécial** et sortir aussitôt (URI de focus) ; `logging::log_session_end` est appelé à chaque sortie | `main.rs:3159-3166` | Précédent pour un argument `--updated-from <version>` et pour une sortie propre avant relance. |
 | `build.rs` accepte `WAKFU_OVERLAY_COMMIT` en surcharge, prévu pour « une chaîne de release qui construit sans `.git/` » | `overlay-ui/build.rs:28-33` | Déjà prêt pour le CI de release. |
 | Déjà dans l'arbre de dépendances : `sha2` 0.10 et `flate2` 1.1 (directes), `semver` 1.0 (transitive), `rustls`/`ring` (via `ureq`) | `Cargo.lock` | Intégrité SHA-256 et gzip gratuits. Absents : `minisign`/ed25519 (pourtant nommés au §10 du plan), `zstd`, `bsdiff`. |
@@ -207,7 +207,8 @@ instant ; les sauts (`0.19.0` → `0.27.2`) sont normaux et sans conséquence.
 1. **`version`** — lit `[workspace.package] version` ; si le tag `v{version}` existe déjà, s'arrête
    (idempotent : un push sur `main` sans bump ne republie rien).
 2. **`build-windows`** / **`build-linux`** (parallèles) — `vendor-wgpu-hal`, cache, puis
-   `cargo build --release -p overlay-ui --bin overlay-ui` (Windows) et `--bin overlay-ui-x11`
+   `cargo build --release -p overlay-ui --bin wakfu-companion-overlay` (Windows) et
+   `--bin wakfu-companion-overlay-x11`
    (Linux), avec `WAKFU_OVERLAY_COMMIT=${{ github.sha }}`. Artefacts éphémères.
 3. **`publish`** — `cargo xtask dist` (nouvelle sous-commande de l'outillage existant) : télécharge
    les assets des 3 Releases précédentes (`gh release download`, jeton du job), décompresse,
@@ -313,6 +314,14 @@ lto = "fat"           # code mort inter-crates
 codegen-units = 1
 ```
 
+**Effet de bord constaté le lendemain (2026-09-16)** : `preview.{ps1,sh}` compilait en `--release`
+par défaut, et ce profil a fait passer la recompilation de `overlay-ui` après la moindre édition
+de quelques secondes à 5–10 min (`codegen-units = 1` monothread, LTO fat sur toute la chaîne).
+D'où le profil **`preview`** du `Cargo.toml` racine (`inherits = "release"`, `lto = false`,
+`codegen-units = 16`, `incremental = true`, `strip = false`), désormais le défaut des deux
+scripts de prévisualisation — `-Release`/`--release` redonne le vrai profil pour une vérification
+finale. Le binaire de Release lui-même n'est pas concerné : `release.yml` garde `--release`.
+
 ---
 
 ## 7. Côté overlay — architecture
@@ -331,7 +340,8 @@ overlay-ui
    ├─ startup::StartupProgress          + étape `update` (Checking → …), liste d'étapes typée
    ├─ panels::login                     liste des étapes + design::meter
    ├─ panels::options_modal             section « Mise à jour » (onglet Paramètres)
-   └─ main.rs / bin/overlay-ui-x11.rs   UserEvent::UpdateProgress, OptionsModalAction::InstallUpdate,
+   └─ main.rs / bin/wakfu-companion-overlay-x11.rs
+                                        UserEvent::UpdateProgress, OptionsModalAction::InstallUpdate,
                                         sortie propre + relance avec --updated-from
 ```
 
@@ -461,6 +471,11 @@ Aujourd'hui : logo, titre, séparateur, rouage 72 px, version. Demain, sous le r
 
 ### 8.2 Fenêtre Options › Paramètres, nouvelle section « Mise à jour »
 
+> **Déplacée dans l'onglet « À propos » le 2026-09-18** (`panels::a_propos_tab`, dernier onglet du
+> menu, avec les boutons « Redémarrer l'overlay » et « Fermer l'overlay ») — voir
+> `plan-architecture.md` §9.1 tervicies. La section elle-même est inchangée ; ce qui suit décrit son
+> contenu, et « Paramètres » y est à lire « À propos ».
+
 Après « Compte », même rythme (`SECTION_GAP`, `heading`, `info_text`, `INFO_GAP`, ligne de
 `ROW_HEIGHT`) :
 
@@ -501,11 +516,55 @@ Une vérification manuelle ne se lance pas si une est en cours (bouton désactiv
 (menu Options / Mise à jour / Déconnecter / Quitter, `App::install_tray`). Un clic lance la
 recherche (`UpdateCommand::Check { install_if_available: false }`, la même commande que le bouton
 « Recherche de mise à jour » de la fenêtre Options — même anti-rafale de 30 s, même refus pendant
-une opération en cours). Toujours active : une recherche ne dépend pas du compte. Le verdict se lit
-dans la section « Mise à jour » de la fenêtre Options ; le menu, lui, ne change pas de libellé.
+une opération en cours). Toujours active : une recherche ne dépend pas du compte.
 
 Non fait, à décider plus tard : un libellé qui suit l'état (« Mettre à jour vers X » quand une
 version est disponible, même action que le bouton) — une ligne dans `sync_tray_menu`.
+
+### 8.4 L'écran de mise à jour (2026-09-18)
+
+> **Demande de l'utilisateur** : « le clic sur *Mise à jour* dans le menu de notification doit
+> ouvrir le panneau de l'overlay, le même que le panneau de connexion/démarrage, avec le loader et
+> le message de recherche de mise à jour en cours ou le message "vous êtes [déjà] à jour" ».
+
+Jusque-là, ce clic cherchait **en silence** : le verdict ne se lisait que dans la section « Mise à
+jour » de la fenêtre Options (§8.2) ou dans le journal. Il ouvre désormais **la carte de connexion
+et de démarrage** (`panels::login`, 400 px, même logo, même anneau, même rouage) sur un écran
+dédié — `LoginState::manual_update`, peint par `panels::login::paint_manual_update`, ouvert par
+`App::open_manual_update_window` :
+
+| `UpdateStatus` | Corps de la carte |
+| --- | --- |
+| `Idle`, `Checking` | rouage + « Recherche d'une mise à jour… » |
+| `Downloading`, `Verifying`, `ReadyToInstall`, `Installing` | rouage + l'étape en cours, jauge et compteur pendant le téléchargement |
+| `UpToDate` | « Vous êtes déjà à jour » + la version en cours + « Fermer » |
+| `Available` | « Version X disponible » + la taille à télécharger + « Mettre à jour maintenant » et « Plus tard » |
+| `Unavailable` | « Vérification impossible » + le détail technique + « Réessayer » et « Fermer » |
+| `Failed` non obligatoire | « Mise à jour impossible » + `headline` + le détail technique + « Réessayer » et « Fermer » |
+
+Points de conception, tous vérifiables sur les captures (`login_maj_*`) :
+
+- **Seule exception à « compte lié = pas de fenêtre de connexion »** : `App::manual_update` fait
+  vivre cette fenêtre à côté des overlays de jeu (`sync_session_windows`), jusqu'à « Fermer ».
+  Compte non lié, la fenêtre est déjà là et change simplement d'écran.
+- **Il prime sur l'écran de chargement**, et pas l'inverse : un téléchargement lancé depuis cet
+  écran rebloque le démarrage (`StartupProgress::set_update_blocking`, même chemin que « Mettre à
+  jour vers X » de la fenêtre Options), donc les overlays de jeu se referment — l'avancement doit
+  rester là où l'utilisateur l'a demandé. Seule une mise à jour **obligatoire** en échec passe
+  devant (§8.1, écran « Mise à jour requise »).
+- **La croix de la fenêtre ferme cet écran, pas l'overlay** — même règle que la croix de la
+  fenêtre Options, et pour la même raison : c'est une des rares fenêtres focalisables.
+- **La commande envoyée est inchangée** : l'anti-rafale de 30 s du thread s'applique toujours, et
+  une demande refusée laisse simplement l'écran afficher le verdict déjà connu — ce qui est
+  exactement ce qu'on venait lui demander.
+- **Captures** : six références de plus dans `tests/panels.rs` (`login_maj_recherche`,
+  `login_maj_telechargement`, `login_maj_a_jour`, `login_maj_disponible`,
+  `login_maj_indisponible`, `login_maj_echec`), hauteur de carte vérifiée comme pour les autres
+  écrans de cette fenêtre, version figée par `freeze_for_snapshots`.
+
+Sous Linux (`bin/wakfu-companion-overlay-x11.rs`), la mécanique est portée à l'identique mais
+**rien ne l'ouvre** : cet hôte n'a pas de zone de notification (`tray-icon` y tire
+GTK/libappindicator). Le jour où un accès existe, il n'y a qu'à poser `App::manual_update`.
 
 ---
 
@@ -539,7 +598,7 @@ mémoire de la taille de l'exe source ; `qbsdiff` reste pure Rust.
 | 3 | Installation automatique au démarrage | **Oui par défaut**, désactivable dans Options. |
 | 4 | Différentiel dès le départ ou après mesure | **Après mesure** (recommandation retenue) — voir l'explication ci-dessous. |
 | 5 | Emplacement d'installation pour L6 | à acter avec l'installeur (`%LOCALAPPDATA%\Programs\…` recommandé, sans UAC). |
-| 6 | `DEFAULT_BASE_URL` | **Un binaire de Release vise toujours la prod, jamais `claude-dev`.** `claude-dev` n'est disponible qu'en local via le script de preview. Conséquence : la première Release attend le déploiement de l'appairage natif en prod ; d'ici là, `release.yml` peut être en place mais la Release publiée n'est pas distribuée. Le binaire compile la base URL de prod par défaut, `WAKFU_COMPANION_API_URL` reste la surcharge de dev. |
+| 6 | `DEFAULT_BASE_URL` | **Un binaire de Release vise toujours la prod, jamais `claude-dev`.** `claude-dev` n'est disponible qu'en local via le script de preview. Conséquence : la première Release attend le déploiement de l'appairage natif en prod ; d'ici là, `release.yml` peut être en place mais la Release publiée n'est pas distribuée. Le binaire compile la base URL de prod par défaut, `WAKFU_COMPANION_API_URL` reste la surcharge de dev. **Précisé le 2026-09-17** : le défaut compilé suit le **profil** (`crates/overlay-sync/build.rs`) — `release` → prod, `preview`/debug/tests → dev — après qu'un `target/preview/overlay-ui.exe` lancé hors du script de preview (donc sans la variable) a visé la prod avec un jeton dev et bouclé sur un 401. La règle « un binaire de Release vise toujours la prod » est inchangée ; c'est le binaire qui la porte, plus le script. |
 | 7 | « Bundle moteur mis à jour sans nouvelle version du binaire » | **Retiré** (recommandation retenue) — voir l'explication ci-dessous. |
 
 **Décision 4, ce que les deux options voulaient dire.** « Dès le départ » : on écrit tout de suite
@@ -580,7 +639,7 @@ version ». L'écran de chargement est à retravailler dans une itération dédi
 
 | Phase | Contenu | Livrable vérifiable | Dépôt |
 | --- | --- | --- | --- |
-| **0 — Préalables** ✅ (2026-09-15, sauf la paire de clés, à la charge du mainteneur) | `[profile.release]` ; `DEFAULT_BASE_URL` → prod (décision 6) ; paire `minisign` + secrets ; `CLAUDE.md`/§11 corrigés (décisions 1 et 7) | **Mesuré** sur `overlay-ui-x11` (Linux x86_64, session cloud) : sans profil **49,4 Mo brut / 18,0 Mo gzip**, avec `strip`+LTO+`codegen-units=1` **28,9 Mo brut / 14,0 Mo gzip** (−41 % brut, −22 % gzip ; compilation release 4 min 40 → 6 min 38). L'exe Windows sera du même ordre. | overlay |
+| **0 — Préalables** ✅ (2026-09-15, sauf la paire de clés, à la charge du mainteneur) | `[profile.release]` ; `DEFAULT_BASE_URL` → prod (décision 6) ; paire `minisign` + secrets ; `CLAUDE.md`/§11 corrigés (décisions 1 et 7) | **Mesuré** sur `wakfu-companion-overlay-x11` (Linux x86_64, session cloud) : sans profil **49,4 Mo brut / 18,0 Mo gzip**, avec `strip`+LTO+`codegen-units=1` **28,9 Mo brut / 14,0 Mo gzip** (−41 % brut, −22 % gzip ; compilation release 4 min 40 → 6 min 38). L'exe Windows sera du même ordre. | overlay |
 | **1 — Publication** ✅ outillage (2026-09-15) — première Release à la prochaine fusion sur `main` | `release.yml` ; `xtask dist` (gzip, SHA-256, `latest.json`, signature + revérification par `wakfu-overlay.pub`, mesure du delta) ; première Release `v0.x` | un exe Windows et un binaire Linux téléchargeables depuis `releases/latest`, manifeste signé vérifiable avec `minisign -V` | overlay |
 | **2 — Client** ✅ code (2026-09-15) — validation bout en bout en attente de la première Release | `overlay_sync::update` (`manifest`/`download`/`apply`, 13 tests dont un serveur HTTP local) ; `background::spawn_update_thread` ; `StartupProgress` (étape « vérification », drapeau « mise à jour en cours » qui suspend le garde-fou) ; écran de chargement : ligne d'état + jauge sous le rouage, écran « Mise à jour requise » ; section Options « Mise à jour » (ligne d'info, case `auto_update`, bouton unique) ; `--updated-from` ; captures (4 nouvelles, 2 régénérées) | **Fait ici** : `cargo check` des deux binaires (X11 natif, Windows via `x86_64-pc-windows-gnu`), 220 tests `overlay-ui`, 33 `overlay-sync`, gate de captures vert (67). **Reste à faire sur une vraie machine** : installer une version N-1 et vérifier qu'elle se met à jour et se relance en N — impossible sans Release publiée, et `self-replace` sous Windows n'a pas été exercé depuis ce conteneur Linux. | overlay |
 | **3 — Différentiel** | `xtask dist` génère 3 deltas ; `apply.rs` applique `qbsdiff` quand `fromSha256` correspond | même test qu'en 2 avec le journal montrant « delta 3,1 Mo appliqué » ; repli asset complet vérifié sur un exe modifié | overlay |

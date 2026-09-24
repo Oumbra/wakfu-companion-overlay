@@ -17,6 +17,16 @@ pub const MAX_BATCH_LINES: usize = 2000;
 /// la doc de `Tailer::identity_prefix` pour pourquoi. Quelques dizaines d'octets suffisent (une
 /// ligne de log typique), coût négligeable face au reste d'un `poll()`.
 const IDENTITY_PREFIX_LEN: usize = 64;
+/// Plafond d'une ligne encore incomplète gardée entre deux `poll()` — une vraie ligne de
+/// `wakfu.log` tient en quelques centaines d'octets (résumé d'échange compris).
+const MAX_PARTIAL_LINE_BYTES: usize = 1024 * 1024;
+/// Taille d'une tranche lue par `poll()` (audit de sécurité du 2026-09-23, O7). Le reliquat du
+/// fichier n'est plus lu d'un bloc : chaque tranche est découpée en lignes avant de lire la
+/// suivante, si bien qu'en plus des lignes produites, la mémoire ne porte jamais qu'une tranche et
+/// un reliquat de ligne — au lieu de quatre copies du reliquat entier (tampon de lecture, tampon
+/// `pending`, lignes, puis lots recopiés), soit plus de 400 Mo pour un `wakfu.log` de 100 Mo face
+/// au budget de 300 Mo.
+const READ_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
 /// Un lot de lignes complètes fraîchement lues, dans l'ordre du fichier.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +111,7 @@ impl Tailer {
             || len < self.offset
             || (self.identity.is_some() && prefix_changed);
         if rotated {
-            tracing::info!(path = %self.path.display(), "rotation/troncature détectée, relecture depuis le début");
+            tracing::info!(path = %crate::privacy::redact_path(&self.path), "rotation/troncature détectée, relecture depuis le début");
             self.offset = 0;
             self.pending.clear();
             self.caught_up = false;
@@ -120,42 +130,84 @@ impl Tailer {
         let was_caught_up = self.caught_up;
 
         file.seek(SeekFrom::Start(self.offset))?;
-        let mut buf = Vec::with_capacity((len - self.offset) as usize);
-        file.read_to_end(&mut buf)?;
-        self.offset = len;
-        // On vient de lire tout ce qui existait au moment de ce `poll()` : qu'il en ressorte des
-        // lignes complètes ou seulement un reliquat partiel, on est désormais à jour. Repasser à
+        // On lit tout ce qui existait au moment de ce `poll()` (`len`), PAR TRANCHES bornées (voir
+        // `READ_CHUNK_BYTES`) : chaque tranche est découpée en lignes, déplacées directement dans
+        // les lots, avant de lire la suivante. Ce qu'un écrivain ajoute entre-temps sera lu au
+        // prochain appel — `offset` n'avance que des octets effectivement lus.
+        let is_initial_load = !was_caught_up;
+        let mut batches = Vec::new();
+        let mut current = Vec::new();
+        let mut chunk = vec![0u8; READ_CHUNK_BYTES.min((len - self.offset) as usize)];
+        while self.offset < len {
+            let want = READ_CHUNK_BYTES.min((len - self.offset) as usize);
+            let read = file.read(&mut chunk[..want])?;
+            if read == 0 {
+                break; // fichier raccourci entre-temps : la rotation se verra au prochain appel
+            }
+            self.offset += read as u64;
+            self.pending.extend_from_slice(&chunk[..read]);
+            self.split_pending(&mut current, &mut batches, is_initial_load);
+        }
+        drop(chunk);
+        // Tout ce qui existait au début de ce `poll()` a été lu : qu'il en ressorte des lignes
+        // complètes ou seulement un reliquat partiel, on est désormais à jour. Repasser à
         // `false` n'arrive qu'au prochain appel, s'il détecte une rotation (plus haut). Sans ce
         // flag posé ici (et pas seulement dans la branche `len == self.offset` ci-dessus), une
         // ligne ajoutée en direct juste après le rattrapage initial restait à tort étiquetée
-        // rattrapage — observé en conditions réelles via `overlay-app` sur un vrai `wakfu.log`.
+        // rattrapage — observé en conditions réelles sur un vrai `wakfu.log` (harnais L1, depuis retiré).
         self.caught_up = true;
-        self.pending.extend_from_slice(&buf);
 
-        let mut lines = Vec::new();
-        while let Some(pos) = self.pending.iter().position(|&b| b == b'\n') {
-            let mut raw: Vec<u8> = self.pending.drain(..=pos).collect();
-            raw.pop(); // '\n'
+        if !current.is_empty() {
+            batches.push(LineBatch {
+                lines: current,
+                is_initial_load,
+            });
+        }
+        // Vide si tout le contenu lu n'était qu'un reliquat de ligne incomplète.
+        Ok(batches)
+    }
+
+    /// Découpe les lignes complètes de `pending` et les déplace dans `current`, qui part dans
+    /// `batches` à chaque [`MAX_BATCH_LINES`] lignes ; le reliquat sans `\n` reste dans `pending`.
+    fn split_pending(
+        &mut self,
+        current: &mut Vec<String>,
+        batches: &mut Vec<LineBatch>,
+        is_initial_load: bool,
+    ) {
+        // Découpage en UNE passe, puis un seul `drain` du consommé : l'ancien `drain(..=pos)` par
+        // ligne recopiait toute la fin du tampon à chaque ligne — quadratique, 49 s pour un
+        // rattrapage de 16 Mo (audit de sécurité du 2026-09-23 ; le contenu du chat, écrit par des
+        // tiers, suffit à gonfler le fichier).
+        let mut consumed = 0;
+        while let Some(rel) = self.pending[consumed..].iter().position(|&b| b == b'\n') {
+            let end = consumed + rel;
+            let mut raw = &self.pending[consumed..end];
             if raw.last() == Some(&b'\r') {
-                raw.pop(); // CRLF éventuel
+                raw = &raw[..raw.len() - 1]; // CRLF éventuel
             }
             // Décodage UTF-8 strict avec remplacement (§5.2) : une ligne corrompue ne doit jamais
             // interrompre l'ingestion des suivantes.
-            lines.push(String::from_utf8_lossy(&raw).into_owned());
+            current.push(String::from_utf8_lossy(raw).into_owned());
+            if current.len() == MAX_BATCH_LINES {
+                batches.push(LineBatch {
+                    lines: std::mem::take(current),
+                    is_initial_load,
+                });
+            }
+            consumed = end + 1;
         }
-
-        if lines.is_empty() {
-            // Tout le contenu lu n'était qu'un reliquat de ligne incomplète : rien à publier.
-            return Ok(Vec::new());
+        self.pending.drain(..consumed);
+        if self.pending.len() > MAX_PARTIAL_LINE_BYTES {
+            // Reliquat sans fin de ligne démesuré (fichier corrompu, ou autre chose qu'un journal) :
+            // abandonné plutôt que gardé en mémoire indéfiniment. La suite de cette « ligne », quand
+            // son `\n` arrivera, sera un fragment sans en-tête que le parseur ignore.
+            tracing::warn!(
+                bytes = self.pending.len(),
+                "ligne incomplète démesurée abandonnée"
+            );
+            self.pending.clear();
+            self.pending.shrink_to_fit();
         }
-
-        let is_initial_load = !was_caught_up;
-        Ok(lines
-            .chunks(MAX_BATCH_LINES)
-            .map(|chunk| LineBatch {
-                lines: chunk.to_vec(),
-                is_initial_load,
-            })
-            .collect())
     }
 }

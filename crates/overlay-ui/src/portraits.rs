@@ -175,7 +175,10 @@ fn load_portrait(
     (color, grey)
 }
 
-fn load_rgba(
+/// `pub(crate)` : `crate::avatars` charge ses 36 bustes exactement de la même façon — deux
+/// implémentations du même chargement finiraient par diverger sur le filtrage ou le nom de
+/// texture, et c'est le genre d'écart qui ne se voit qu'en zoom sur une capture.
+pub(crate) fn load_rgba(
     ctx: &egui::Context,
     name: &str,
     (width, height): (u32, u32),
@@ -189,7 +192,7 @@ fn load_rgba(
 /// Luminance Rec. 601 (mêmes coefficients que `image::imageops::grayscale`, appliqués ici à la
 /// main pour garder le canal alpha d'origine — `grayscale` de la crate `image` renvoie une
 /// `GrayImage` sans alpha, qui perdrait la transparence des 4 coins du portrait).
-fn to_grayscale(decoded: &image::RgbaImage) -> image::RgbaImage {
+pub(crate) fn to_grayscale(decoded: &image::RgbaImage) -> image::RgbaImage {
     let mut out = decoded.clone();
     for pixel in out.pixels_mut() {
         let [r, g, b, _a] = pixel.0;

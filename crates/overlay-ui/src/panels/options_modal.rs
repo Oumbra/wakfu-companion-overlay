@@ -1,14 +1,23 @@
-//! Modale "Options" — voir §9.1 du plan d'architecture. Ouverte par le bouton "Options" du carré
-//! de contrôle (`panels::watchlist::control_button_row`) ou le raccourci global `Ctrl+Shift+O`
-//! (voir `main.rs`/`bin/overlay-ui-x11.rs`). L'onglet "Paramètres" expose les réglages LOCAUX de
-//! l'overlay : le chemin de `wakfu.log` à suivre, et la section « Combat » — l'affichage du
-//! panneau de combat en dehors des combats (2026-09-13) et la notification de tour (2026-09-14).
-//! Tous sont persistés par `config::OverlayConfig`, jamais sur le compte — contrairement aux
-//! onglets "Suivi" et "Alertes".
+//! Modale "Options" — voir §9.1 du plan d'architecture. Ouverte par le bouton "Options" du carré de
+//! contrôle (`panels::watchlist::control_button_row`) ou le raccourci global `Ctrl+Shift+O` (voir
+//! `main.rs`/`bin/wakfu-companion-overlay-x11.rs`). L'onglet "Paramètres" expose les réglages
+//! LOCAUX de l'overlay : le lancement avec l'ordinateur (2026-09-16), le chemin de `wakfu.log` à
+//! suivre, et la section « Combat » — le détail des combats et le suivi des sorts (2026-09-15),
+//! l'affichage du panneau de combat en dehors des combats (2026-09-13) et la notification de tour
+//! (2026-09-14). Tous sont persistés par `config::OverlayConfig`, jamais sur le compte —
+//! contrairement aux onglets "Suivi" et "Alertes".
+//!
+//! **Une exception à cette persistance** : « Lancer l'overlay au démarrage de l'ordinateur » ne
+//! vit pas dans `config.toml` mais dans le système lui-même (clé `Run` sous Windows, fichier
+//! `.desktop` sous Linux), parce qu'il s'y désactive aussi sans passer par cette fenêtre — voir
+//! `crate::autostart`.
 //!
 //! **Interrupteurs de fonctionnalité (2026-09-15, §9.1 duodecies)** : les onglets "Suivi",
 //! "Alertes" et "Chat" s'ouvrent chacun sur une case « Activer … » (`panels::feature_switch`) qui
-//! grise et rend inerte tout le reste de leur écran quand elle est décochée. Elles voyagent
+//! grise et rend inerte tout le reste de leur écran quand elle est décochée ; la section
+//! « Combat » de cet onglet-ci en porte deux de plus — « Activer le détail des combats », qui
+//! commande le panneau Combat entier, et « Activer le suivi des sorts », qui commande son bloc de
+//! sorts et dépend de la première. Elles voyagent
 //! ensemble dans [`OptionsModalState::features`], sont un brouillon comme le reste de la fenêtre,
 //! et sont persistées en LOCAL (`config::OverlayConfig::features`) malgré leur place dans des
 //! onglets qui, eux, règlent le compte : ce qu'on accepte de voir par-dessus son jeu dépend de la
@@ -67,20 +76,25 @@
 //! reste ici, `MODAL_BODY_TINT`), et les deux angles BAS sont désormais portés par l'alpha de la
 //! texture, plus par un `corner_radius`.
 //!
-//! **Pas de validation filesystem ICI** : cette fonction ne fait que peindre et renvoyer l'INTENTION
-//! de l'utilisateur (`OptionsModalAction`) — c'est l'appelant (`main.rs`/`bin/overlay-ui-x11.rs`,
-//! qui seuls savent comment déclencher un dialogue de fichier natif et parler au thread Engine) qui
-//! valide via `overlay_ingest::discovery::validate_log_path` et alimente [`OptionsModalState::error`]
-//! en retour pour le prochain redessin.
+//! **Pas de validation filesystem ICI** : cette fonction ne fait que peindre et renvoyer
+//! l'INTENTION de l'utilisateur (`OptionsModalAction`) — c'est l'appelant
+//! (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`, qui seuls savent comment déclencher un dialogue
+//! de fichier natif et parler au thread Engine) qui valide via
+//! `overlay_ingest::discovery::validate_log_path` et alimente [`OptionsModalState::error`] en
+//! retour pour le prochain redessin.
 
-use overlay_sync::update::{self, UpdateStatus};
+use overlay_sync::update::UpdateStatus;
 
 use crate::design::{self, ButtonSize, ButtonVariant};
-use crate::panels::alerts_tab::{self, AlertsTabAction, AlertsTabContext, AlertsTabState};
-use crate::panels::chat_tab::{self, ChatAvailability, ChatDraft, ChatTabAction, ChatTabState};
+use crate::panels::alerts_tab::{self, AlertsTabContext, AlertsTabState};
+use crate::panels::chat_tab::{self, ChatAvailability, ChatDraft, ChatTabState};
 use crate::panels::feature_switch::FeatureToggles;
-use crate::panels::sound_row::AlertMutes;
-use crate::panels::{raccourcis_tab, recipe_dialog, suivi_tab};
+use crate::panels::notifications::{self, AlertMutes};
+use crate::panels::personnages_tab::{
+    self, PersonnagesAvailability, PersonnagesTabContext, PersonnagesTabState,
+};
+use crate::panels::{a_propos_tab, raccourcis_tab, recipe_dialog, suivi_tab};
+use crate::recap_session::{self, ResumeSettings};
 use crate::shortcuts::ShortcutBindings;
 
 /// Taille de la fenêtre OS dédiée à cette modale (voir `main.rs::create_overlay_window`, cas
@@ -153,6 +167,22 @@ const FIELD_HEIGHT: f32 = design::InputSize::Standard.height();
 /// décoration qu'on pourrait resserrer.
 const SECTION_GAP: f32 = 17.0;
 
+/// Côté des boutons du pas « minutes » de la reprise du Récap — celui d'une ligne de
+/// notification moins un liseré de chaque côté, pour que le pas tienne dans sa ligne sans la
+/// toucher ; le jeu règle son pas de 24 à 32 px selon l'interface, 28 est dedans.
+const RESUME_STEPPER_SIZE: f32 = 28.0;
+
+/// Texte de la section « Journal » — ce que l'overlay écrit chez l'utilisateur, et ce que la case
+/// ajoute. Sorti en constante pour être vérifiable par un test, comme les blocs de
+/// `a_propos_tab::SECTIONS` (la section y est née le 2026-09-18, ici depuis le 2026-09-21).
+pub const JOURNAL_INFO: &str = "L'overlay tient un journal technique sur cet ordinateur : les 14 \
+                                derniers jours, jamais envoyé nulle part. Il ne contient ni le nom \
+                                de vos personnages, ni ceux des autres joueurs, ni le contenu du \
+                                chat.";
+
+/// Largeur du champ du même pas — quatre chiffres (« 1440 ») et leurs marges.
+const RESUME_FIELD_WIDTH: f32 = 56.0;
+
 /// Onglet affiché par la modale.
 ///
 /// Onglet affiché par la modale — **quatre entrées câblées sur cinq** depuis le 2026-09-13.
@@ -176,7 +206,7 @@ const SECTION_GAP: f32 = 17.0;
 /// la composition de la liste suivie, « Options » y sert donc à autre chose : le chemin de
 /// `wakfu.log`). Chacun a un raccourci global qui le double (`Ctrl+Shift+A`/`Ctrl+Shift+O`) et doit
 /// mener au MÊME endroit — l'un et l'autre passent l'onglet à `App::open_options_modal`
-/// (`main.rs`/`bin/overlay-ui-x11.rs`) explicitement, sans jamais s'en remettre à
+/// (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`) explicitement, sans jamais s'en remettre à
 /// [`OptionsTab::default`] : un bouton et son raccourci qui atterriraient sur deux onglets
 /// différents serait le bug exact corrigé ce jour-là (retour utilisateur explicite).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,6 +225,10 @@ pub enum OptionsTab {
     Raccourcis,
     /// Le chemin de `wakfu.log`. Ce fut l'onglet d'ouverture tant qu'il était le seul câblé.
     Parametres,
+    /// Le programme lui-même — ce qu'il est, ce qu'il fait des données, sa mise à jour, son
+    /// redémarrage, son arrêt (`panels::a_propos_tab`). **En dernier**, demande utilisateur du
+    /// 2026-09-18 : ce qu'on règle une fois, ou jamais, ferme le menu.
+    APropos,
 }
 
 impl Default for OptionsTab {
@@ -210,7 +244,7 @@ impl Default for OptionsTab {
 }
 
 /// État mutable de la modale, propriété de la fenêtre OS qui l'affiche (voir
-/// `main.rs`/`bin/overlay-ui-x11.rs`, nouveau champ `OverlayWindow` réservé au cas
+/// `main.rs`/`bin/wakfu-companion-overlay-x11.rs`, nouveau champ `OverlayWindow` réservé au cas
 /// `OverlayKind::Options`) — persiste d'une frame à l'autre, contrairement à [`OptionsModalAction`]
 /// qui ne vit que le temps d'un `show`.
 #[derive(Debug, Default, Clone)]
@@ -232,6 +266,11 @@ pub struct OptionsModalState {
     /// combat_always_visible`) et prise en compte seulement à « Valider », comme le chemin de log
     /// et les deux brouillons (§5.1 du plan).
     pub combat_always_visible: bool,
+    /// Le panneau Combat est-il posé à droite de la fenêtre de jeu ? — case à cocher de la section
+    /// « Combat » (2026-09-17), même mécanique de brouillon que la case ci-dessus : initialisée par
+    /// l'hôte au réglage en vigueur (`config::OverlayConfig::combat_on_right`), prise en compte
+    /// seulement à « Valider ».
+    pub combat_on_right: bool,
     /// Prévenir par une notification du système qu'un personnage du joueur doit jouer ? — case à
     /// cocher de la section « Combat » de l'onglet « Paramètres » (2026-09-14), même mécanique de
     /// brouillon que la case ci-dessus : initialisée par l'hôte au réglage en vigueur
@@ -240,19 +279,20 @@ pub struct OptionsModalState {
     /// Couper le son de la notification de tour ? — case sous la précédente, dont elle dépend
     /// (`config::OverlayConfig::turn_notification_muted`), même mécanique de brouillon.
     pub turn_notification_muted: bool,
-    /// **Les trois interrupteurs de fonctionnalité** — cases « Activer le Suivi » / « Activer les
-    /// alertes » / « Activer la recherche », tout en haut de leur onglet respectif
-    /// (`panels::feature_switch`, 2026-09-15). Même mécanique de brouillon que les cases
-    /// ci-dessus : initialisés par l'hôte au réglage en vigueur (`config::OverlayConfig::
-    /// features`), pris en compte seulement à « Valider ».
+    /// **Les interrupteurs de fonctionnalité** — cases « Activer le suivi » / « Activer les
+    /// alertes » / « Activer la recherche », tout en haut de leur onglet respectif, et depuis le
+    /// 2026-09-15 « Activer le détail des combats » / « Activer le suivi des sorts », en tête de
+    /// la section « Combat » de cet onglet-ci (`panels::feature_switch`). Même mécanique de
+    /// brouillon que les cases ci-dessus : initialisés par l'hôte au réglage en vigueur
+    /// (`config::OverlayConfig::features`), pris en compte seulement à « Valider ».
     ///
     /// **`Default` vaut ici « tout actif »**, et non `false` comme pour un `bool` nu : c'est
     /// [`FeatureToggles`] qui le garantit, pour que `OptionsModalState::default()` — utilisé par
-    /// les tests et le harnais de rendu — n'ouvre jamais une fenêtre dont les trois onglets
-    /// seraient grisés.
+    /// les tests et le harnais de rendu — n'ouvre jamais une fenêtre dont les onglets seraient
+    /// grisés ni un panneau de combat éteint.
     pub features: FeatureToggles,
     /// **Les deux sourdines** — cases « Couper le son des notifications » des onglets « Suivi » et
-    /// « Chat », sous leur ligne « Tester le son de l'alerte » (`panels::sound_row`, 2026-09-15).
+    /// « Chat », sous leur ligne « Tester le son de l'alerte » (`panels::notifications`, 2026-09-15).
     /// Même mécanique de brouillon que les cases ci-dessus : initialisées par l'hôte au réglage en
     /// vigueur (`config::OverlayConfig::alert_mutes`), prises en compte seulement à « Valider ».
     ///
@@ -260,6 +300,25 @@ pub struct OptionsModalState {
     /// l'alerte continue de s'afficher — c'est le demi-pas entre « tout actif » et une
     /// fonctionnalité éteinte.
     pub mutes: AlertMutes,
+    /// **La fermeture automatique de la carte de décompte** — ligne « Fermeture automatique des
+    /// notifications de décompte » de la section « Suivi » (2026-09-16, voir
+    /// [`suivi_tab::CountdownToastSettings`]).
+    ///
+    /// Réglage LOCAL, jamais descendu du compte : il ne passe donc pas par un brouillon
+    /// `Option<…>` comme celui des alertes ou du chat — il est posé par l'hôte au réglage en
+    /// vigueur (`config::OverlayConfig::countdown_toast`) et pris en compte à « Valider », comme
+    /// [`Self::mutes`] et [`Self::features`].
+    pub countdown_toast: suivi_tab::CountdownToastSettings,
+    /// **Ce que devient un suivi complété** — les deux cases « Supprimer les éléments suivis
+    /// lorsqu'ils sont complétés » et « Activer l'animation de complétion » de la même section
+    /// (2026-09-17, voir [`suivi_tab::CompletionSettings`]). Réglage LOCAL, même trajet que
+    /// [`Self::countdown_toast`].
+    pub completion: suivi_tab::CompletionSettings,
+    /// **La reprise de la session du Récap** — ligne « Reprendre la session après une pause de
+    /// moins de … min » de la section « Recap » (2026-09-17, voir
+    /// [`crate::recap_session::ResumeSettings`]). Réglage LOCAL, même trajet que
+    /// [`Self::countdown_toast`] : posé par l'hôte à la valeur en vigueur, emporté à « Valider ».
+    pub recap_resume: ResumeSettings,
     /// Ce que l'onglet « Suivi » garde entre deux frames — saisie, mode, quantité, sélection
     /// multiple, fenêtre de recette ouverte. **Pas la liste** : celle-ci est le brouillon ci-dessous.
     pub suivi: suivi_tab::SuiviTabState,
@@ -301,6 +360,14 @@ pub struct OptionsModalState {
     /// compte n'a pas répondu.
     pub chat_draft: Option<ChatDraft>,
     pub chat_availability: ChatAvailability,
+    /// Le compte affiché, les modales ouvertes, le mode de suppression multiple — voir
+    /// `panels::personnages_tab`.
+    pub personnages: PersonnagesTabState,
+    /// **Le brouillon du roster** — même principe que `alerts_draft` : une copie de ce que le
+    /// compte porte, modifiée librement, renvoyée seulement à « Valider ». `None` tant que le
+    /// compte n'a pas répondu, et l'onglet affiche alors son rouage.
+    pub personnages_draft: Option<overlay_engine::Roster>,
+    pub personnages_availability: PersonnagesAvailability,
     /// **L'état de référence**, figé à l'ouverture : le chemin de log et le profil d'alerte tels
     /// qu'ils étaient avant que l'utilisateur ne touche à quoi que ce soit.
     ///
@@ -309,13 +376,26 @@ pub struct OptionsModalState {
     /// modale ne pourrait comparer qu'à elle-même.
     pub initial: OptionsInitial,
     /// Un compte est-il connecté ? — posé par l'hôte à l'ouverture (lui seul connaît
-    /// `AuthStatus`). Décide si le bouton « Déconnecter » de l'onglet « Paramètres » est actif : le
+    /// `AuthStatus`). Décide si le bouton « Se déconnecter » de l'onglet « Paramètres » est actif : le
     /// presser sans compte lié ne ferait rien de visible, mieux vaut que ça se voie avant le clic.
     pub account_connected: bool,
+    /// Le jeton de session est dans le **fichier de repli** plutôt que dans le trousseau du
+    /// système (`overlay_sync::token_store::token_file_in_use`) — posé par l'hôte à l'ouverture,
+    /// comme [`Self::account_connected`], et jamais lu par le panneau lui-même : une capture du
+    /// harnais ne doit pas dépendre de ce que le disque de la machine contient (constat C7,
+    /// 2026-09-19). Affiche l'avis [`token_file_notice`] dans la section « Compte ».
+    pub token_on_disk: bool,
     /// La confirmation de déconnexion est ouverte — voir la section « Compte » de [`show`]. Un
     /// champ distinct de [`Self::pending_close`] : les deux boîtes posent des questions
     /// différentes, et une seule peut être ouverte à la fois (voir `show`).
     pub pending_disconnect: bool,
+    /// La confirmation d'**effacement des données locales** est ouverte — bouton « Supprimer les
+    /// données locales » sous « Vos données » de l'onglet « À propos » (2026-09-18, constat C5 de
+    /// `docs/analyse-rgpd.md` §3.5 ; dans « Compte » jusqu'au 2026-09-21). Sixième boîte exclusive
+    /// avec les cinq autres (voir `show`) :
+    /// elle efface les dossiers de l'overlay ET arrête le programme, c'est la plus irréversible
+    /// des six.
+    pub pending_purge: bool,
     /// Où en est la mise à jour automatique — copié par l'hôte depuis l'état publié par le
     /// thread de mise à jour AVANT chaque rendu (jamais figé à l'ouverture : une vérification
     /// lancée depuis cette fenêtre doit s'y voir aboutir). Décide de la ligne d'information et
@@ -325,10 +405,30 @@ pub struct OptionsModalState {
     /// jour », même mécanique de brouillon que les autres cases : initialisée par l'hôte au
     /// réglage en vigueur (`config::OverlayConfig::auto_update`), prise en compte à « Valider ».
     pub auto_update: bool,
+    /// **Journal détaillé ?** — case de la section « Journal » de l'onglet « À propos »
+    /// (2026-09-18, constat C6 de `docs/analyse-rgpd.md`). Brouillon comme ses voisines ;
+    /// l'hôte l'applique à chaud à « Valider » (`logging::set_verbose`) et le persiste
+    /// (`config::OverlayConfig::verbose_log`).
+    pub verbose_log: bool,
+    /// **Lancer l'overlay au démarrage de l'ordinateur ?** — case unique de la section
+    /// « Démarrage » (2026-09-16). Brouillon comme ses voisines, à une différence près : l'état
+    /// dont elle part et celui qu'elle repose ne sont PAS dans `config.toml` mais dans le système
+    /// (clé `Run` sous Windows, fichier `.desktop` sous Linux) — voir `crate::autostart`, qui dit
+    /// pourquoi.
+    pub start_with_os: bool,
     /// La confirmation d'installation est ouverte, pour cette version — « Mettre à jour vers X »
     /// ferme l'overlay de jeu le temps de l'installation, ce qui mérite un « oui » explicite.
     /// Troisième boîte exclusive avec les deux autres (voir `show`).
     pub pending_install: Option<String>,
+    /// La confirmation de fermeture de l'OVERLAY est ouverte — bouton « Fermer l'overlay », tout
+    /// en bas de l'onglet « Paramètres » (2026-09-16). Quatrième boîte exclusive avec les trois
+    /// autres (voir `show`) : elle ne ferme pas cette fenêtre, elle arrête le programme.
+    pub pending_quit: bool,
+    /// La confirmation de REDÉMARRAGE est ouverte — bouton « Redémarrer », à gauche de « Fermer
+    /// l'overlay » (2026-09-17). Cinquième boîte exclusive avec les quatre autres (voir `show`) :
+    /// elle arrête le programme comme sa voisine, à ceci près qu'un nouveau process prend sa
+    /// place.
+    pub pending_restart: bool,
     /// Une confirmation d'abandon est ouverte — voir [`OptionsModalState::is_dirty`].
     ///
     /// Posée par le clic sur « Annuler », par la croix de la bannière (2026-09-13), par Échap, **ou
@@ -346,26 +446,42 @@ pub struct OptionsInitial {
     /// abandonne, et leur comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
     pub suivi: Option<Vec<overlay_engine::WatchlistEntry>>,
     pub chat: Option<ChatDraft>,
+    /// Le roster tel qu'il était à l'ouverture — c'est lui que « Annuler » abandonne, et sa
+    /// comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
+    pub personnages: Option<overlay_engine::Roster>,
     /// L'affichage permanent du panneau Combat tel qu'il était à l'ouverture — une case cochée
     /// puis décochée revient donc à « aucune modification », et la garde de fermeture ne s'ouvre
     /// pas pour rien.
     pub combat_always_visible: bool,
+    /// Le côté du panneau Combat tel qu'il était à l'ouverture — même rôle que le champ ci-dessus.
+    pub combat_on_right: bool,
     /// La notification de tour telle qu'elle était à l'ouverture — même rôle que le champ
     /// ci-dessus.
     pub turn_notification: bool,
     /// Le son coupé tel qu'il était à l'ouverture — même rôle.
     pub turn_notification_muted: bool,
-    /// Les trois interrupteurs tels qu'ils étaient à l'ouverture — même rôle que les champs
-    /// ci-dessus : c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
+    /// Les interrupteurs tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
+    /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub features: FeatureToggles,
     /// Les deux sourdines telles qu'elles étaient à l'ouverture — même rôle que les champs
     /// ci-dessus.
     pub mutes: AlertMutes,
+    /// La fermeture de la carte de décompte telle qu'elle était à l'ouverture — même rôle.
+    pub countdown_toast: suivi_tab::CountdownToastSettings,
+    /// Les deux réglages de complétion tels qu'ils étaient à l'ouverture — même rôle.
+    pub completion: suivi_tab::CompletionSettings,
+    /// La reprise de la session du Récap telle qu'elle était à l'ouverture — même rôle.
+    pub recap_resume: ResumeSettings,
     /// Les raccourcis tels qu'ils étaient à l'ouverture — même rôle que les champs ci-dessus :
     /// c'est leur comparaison au brouillon qui décide si fermer demande confirmation.
     pub shortcuts: ShortcutBindings,
     /// La mise à jour automatique telle qu'elle était à l'ouverture — même rôle.
     pub auto_update: bool,
+    /// Le journal détaillé tel qu'il était à l'ouverture — même rôle.
+    pub verbose_log: bool,
+    /// Le démarrage avec l'ordinateur tel qu'il était à l'ouverture — même rôle. Lu dans le
+    /// système par l'hôte (`crate::autostart::is_enabled`), pas dans la config.
+    pub start_with_os: bool,
 }
 
 impl OptionsModalState {
@@ -384,12 +500,18 @@ impl OptionsModalState {
         OptionsCommit {
             path: self.path_input.clone(),
             combat_always_visible: self.combat_always_visible,
+            combat_on_right: self.combat_on_right,
             turn_notification: self.turn_notification,
             turn_notification_muted: self.turn_notification_muted,
             features: self.features,
             mutes: self.mutes,
+            countdown_toast: self.countdown_toast,
+            completion: self.completion,
+            recap_resume: self.recap_resume,
             shortcuts: self.shortcuts.clone(),
             auto_update: self.auto_update,
+            verbose_log: self.verbose_log,
+            start_with_os: self.start_with_os,
         }
     }
 
@@ -421,22 +543,33 @@ impl OptionsModalState {
     pub fn is_dirty(&self) -> bool {
         self.path_input.trim() != self.initial.path.trim()
             || self.combat_always_visible != self.initial.combat_always_visible
+            || self.combat_on_right != self.initial.combat_on_right
             || self.turn_notification != self.initial.turn_notification
             || self.turn_notification_muted != self.initial.turn_notification_muted
             || self.features != self.initial.features
             || self.mutes != self.initial.mutes
+            || self.countdown_toast != self.initial.countdown_toast
+            || self.completion != self.initial.completion
+            || self.recap_resume != self.initial.recap_resume
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.chat_draft != self.initial.chat
+            || self.personnages_draft != self.initial.personnages
             || self.shortcuts != self.initial.shortcuts
             || self.auto_update != self.initial.auto_update
+            || self.verbose_log != self.initial.verbose_log
+            || self.start_with_os != self.initial.start_with_os
     }
 }
 
 /// Ce que l'utilisateur vient de demander CETTE frame — `None` la plupart du temps (aucun bouton
 /// cliqué). Voir doc de module : ne porte aucune garantie de validité, c'est à l'appelant de
 /// vérifier avant d'agir.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+///
+/// **`PartialEq` seul, plus `Eq`** depuis le 2026-09-16 : [`OptionsCommit`] porte désormais une
+/// durée en secondes (voir sa doc), et un `f32` n'est pas `Eq`. Personne n'en avait besoin — les
+/// comparaisons de cette fenêtre, tests compris, se font toutes à `==`.
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum OptionsModalAction {
     #[default]
     None,
@@ -447,15 +580,19 @@ pub enum OptionsModalAction {
     /// Les réglages de l'onglet « Paramètres » tels qu'ils sont à l'instant du clic — voir
     /// [`OptionsCommit`].
     Validate(OptionsCommit),
-    /// Jouer le son d'alerte, depuis l'onglet « Alertes » — l'appelant seul a le périphérique
-    /// audio (`alert_sound::play_loot_alert`).
+    /// Jouer le son de ramassage, depuis la ligne « Tester le son des notifications » de la
+    /// section « Alertes » — l'appelant seul a le périphérique audio
+    /// (`alert_sound::play_loot_alert`).
     TestAlertSound,
-    /// « Tester le son » de l'onglet « Chat » : jouer le son de recherche
+    /// Le bouton d'essai de la section « Chat » : jouer le son de recherche
     /// (`alert_sound::play_chat_alert`).
     TestChatSound,
-    /// « Tester le son » de l'onglet « Suivi » : jouer le son du décompte arrivé à 0
+    /// Le bouton d'essai de la section « Suivi » : jouer le son du décompte arrivé à 0
     /// (`alert_sound::play_countdown_alert`).
     TestCountdownSound,
+    /// Le bouton d'essai de la section « Combat » : jouer le son de la notification de tour
+    /// (`alert_sound::play_turn_alert`).
+    TestTurnSound,
     /// Déconnecter le compte, depuis la section « Compte » de l'onglet « Paramètres »
     /// (**confirmée**, voir `show`) — l'appelant seul parle au thread Auth
     /// (`main.rs::App::disconnect_account`) et sait refermer cette fenêtre derrière.
@@ -464,6 +601,17 @@ pub enum OptionsModalAction {
     /// raccourcis, ce que cette action déclenche ne passe pas par « Valider » et ne se rattrape pas
     /// par « Annuler ».
     Disconnect,
+    /// **« Supprimer les données locales »**, depuis « Vos données » de l'onglet « À propos »
+    /// (**confirmée**, voir `show`) — 2026-09-18, constat C5 de `docs/analyse-rgpd.md` §3.5 : le droit à l'effacement
+    /// (RGPD art. 17) exercé depuis l'overlay.
+    ///
+    /// L'hôte efface les deux racines de dossiers, le jeton du trousseau, l'inscription au
+    /// démarrage de l'ordinateur et les clés de registre (`local_data::Scope::Everything`), puis
+    /// **arrête le programme** comme [`Self::Quit`] : les threads qui écrivent ces fichiers
+    /// tiennent leur contenu en mémoire, et la seule façon de garantir que rien ne réécrit derrière
+    /// est de ne plus tourner. Immédiat et sans retour, plus encore que `Disconnect` — il faudra
+    /// relancer l'overlay, réappairer le compte et reposer le chemin de `wakfu.log`.
+    PurgeLocalData,
     /// Résoudre les ingrédients de cet objet, depuis l'onglet « Suivi » — l'appelant seul a le
     /// réseau (`overlay_sync::client::fetch_item_detail`, sur un thread).
     ResolveRecipe(i64),
@@ -471,12 +619,37 @@ pub enum OptionsModalAction {
     /// à jour une vérification sans installation (`background::UpdateCommand::Check`). Immédiat,
     /// comme `Disconnect` — mais sans rien à confirmer, il ne change rien à la machine.
     CheckUpdate,
+    /// Un lien des sections d'information de l'onglet « À propos » (2026-09-18 : site, code
+    /// source, CGU de Wakfu, politique de confidentialité, conditions d'utilisation) : ouvrir
+    /// cette URL dans le navigateur. **Le rendu la traduit en `RenderOutcome::open_url`**
+    /// (`render_content`), le seul chemin par lequel une page s'ouvre — aucun panneau n'appelle
+    /// `open::that` lui-même, les captures de non-régression cliquent réellement sur ces boutons.
+    /// Les hôtes n'ont donc rien à en faire quand elle leur parvient ; ils l'ignorent.
+    OpenUrl(String),
     /// « Mettre à jour vers X », **confirmé** : l'hôte referme cette fenêtre et les overlays de
     /// jeu, repasse par l'écran de chargement et laisse le thread de mise à jour télécharger,
     /// mettre en place, puis installe et relance (`App::install_update_if_ready`). Immédiat et
     /// sans retour : ce que cette fenêtre avait en brouillon est abandonné, comme à la
     /// déconnexion.
     InstallUpdate,
+    /// « Fermer l'overlay », **confirmé** (bouton en pied de l'onglet « Paramètres », 2026-09-16) :
+    /// l'hôte arrête le programme — le même chemin que l'entrée « Quitter » de la zone de
+    /// notification (`logging::log_session_end` puis `event_loop.exit()`). Depuis le retrait du
+    /// raccourci « Quitter l'overlay » (2026-09-17), ce bouton et cette entrée sont les deux seules
+    /// sorties propres hors terminal. Immédiat
+    /// et sans retour, comme `Disconnect` : ce que cette fenêtre avait en brouillon est perdu, et
+    /// c'est ce que la confirmation rattrape.
+    Quit,
+    /// « Redémarrer », **confirmé** (bouton en pied de l'onglet « Paramètres », à gauche de
+    /// « Fermer l'overlay », 2026-09-17) : l'hôte relance l'exe courant avec les mêmes arguments,
+    /// puis s'arrête comme pour [`Self::Quit`] — un seul overlay reste donc à l'écran, le neuf.
+    ///
+    /// **Pourquoi une sortie de plus** : recharger le catalogue, reprendre un `wakfu.log` qui a
+    /// tourné ou repartir d'un moteur propre demandait jusqu'ici de fermer l'overlay PUIS de le
+    /// relancer à la main — geste que rien, dans l'overlay, ne proposait. Immédiat et sans retour
+    /// comme `Quit` : le brouillon de cette fenêtre part avec le process, et c'est ce que la
+    /// confirmation rattrape.
+    Restart,
 }
 
 /// Ce que « Valider » emporte de l'onglet « Paramètres ».
@@ -488,25 +661,48 @@ pub enum OptionsModalAction {
 /// Ne porte aucune garantie de validité (voir doc de module) : `path` est le texte BRUT du champ,
 /// pas un `PathBuf` vérifié — c'est l'hôte qui tranche, via
 /// `overlay_ingest::discovery::validate_log_path`.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+///
+/// **`PartialEq` seul, plus `Eq`** : `countdown_toast` porte une durée en secondes, et un `f32`
+/// n'est pas `Eq` — voir [`OptionsModalAction`], qui perd le sien pour la même raison.
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct OptionsCommit {
     /// Chemin brut tel que tapé/affiché dans le champ au moment du clic.
     pub path: String,
     /// État de la case « Afficher le panneau de combat en dehors des combats ».
     pub combat_always_visible: bool,
+    /// État de la case « Afficher le panneau de combat à droite de la fenêtre de jeu » — ce que
+    /// l'hôte persiste (`config::OverlayConfig::combat_on_right`), applique à l'ancrage de la
+    /// fenêtre (`main.rs::App::anchor_position`) et transmet au rendu
+    /// (`render_content::RenderContent::combat_on_right`).
+    pub combat_on_right: bool,
     /// État de la case « Me prévenir quand un de mes personnages doit jouer ».
     pub turn_notification: bool,
     /// État de la case « Couper le son des notifications » — emporté tel quel même si la case
     /// au-dessus est décochée (il ne fait alors rien, et sera retrouvé si on la recoche).
     pub turn_notification_muted: bool,
-    /// État des trois cases « Activer … » (`panels::feature_switch`) — ce que l'hôte persiste
+    /// État des cases « Activer … » (`panels::feature_switch`) — ce que l'hôte persiste
     /// (`config::OverlayConfig::set_features`) et transmet au thread Engine
-    /// (`engine_thread::EngineCommand::SetFeatures`).
+    /// (`engine_thread::EngineCommand::SetFeatures`). Les deux dernières (détail des combats,
+    /// suivi des sorts) ne concernent pas le moteur : c'est l'hôte qui montre ou masque la
+    /// fenêtre Combat (`panels::combat::should_show`) et le panneau qui peint ou non son bloc de
+    /// sorts.
     pub features: FeatureToggles,
-    /// État des deux cases « Couper le son des notifications » (`panels::sound_row`) — ce que
+    /// État des deux cases « Couper le son des notifications » (`panels::notifications`) — ce que
     /// l'hôte persiste (`config::OverlayConfig::set_alert_mutes`) et transmet au thread Engine
     /// (`engine_thread::EngineCommand::SetAlertMutes`).
     pub mutes: AlertMutes,
+    /// La durée d'affichage de la carte de décompte et sa fermeture manuelle
+    /// (`panels::suivi_tab::CountdownToastSettings`) — ce que l'hôte persiste
+    /// (`config::OverlayConfig::set_countdown_toast`) et transmet au thread Engine
+    /// (`engine_thread::EngineCommand::SetCountdownToast`).
+    pub countdown_toast: suivi_tab::CountdownToastSettings,
+    /// Ce que devient un suivi complété — même trajet que `countdown_toast` : enregistré dans la
+    /// config locale (`config::OverlayConfig::set_completion`) et gardé en vigueur par l'hôte.
+    pub completion: suivi_tab::CompletionSettings,
+    /// La reprise de la session du Récap ([`crate::recap_session::ResumeSettings`]) — ce que
+    /// l'hôte persiste (`config::OverlayConfig::set_recap_resume`) et pose sur sa session
+    /// (`recap_session::RecapSession::set_resume_settings`).
+    pub recap_resume: ResumeSettings,
     /// Les raccourcis tels qu'ils sont dans le brouillon au moment du clic — déjà garantis SANS
     /// DOUBLON (la validation est refusée sur place sinon, voir `show`), mais pas garantis
     /// enregistrables : c'est l'OS qui tranche, et l'hôte qui encaisse un refus
@@ -516,6 +712,13 @@ pub struct OptionsCommit {
     /// l'hôte persiste (`config::OverlayConfig::auto_update`) ; il ne s'applique qu'au prochain
     /// lancement.
     pub auto_update: bool,
+    /// État de la case « Journal détaillé » — ce que l'hôte applique à chaud
+    /// (`logging::set_verbose`) et persiste (`config::OverlayConfig::verbose_log`).
+    pub verbose_log: bool,
+    /// État de la case « Lancer l'overlay au démarrage de l'ordinateur » — ce que l'hôte pose
+    /// dans le SYSTÈME (`crate::autostart::apply`), et nulle part ailleurs : ce réglage n'a pas
+    /// de ligne dans `config.toml`, voir la doc de module de `crate::autostart`.
+    pub start_with_os: bool,
 }
 
 /// Ce que la modale doit recevoir de l'hôte pour peindre ses onglets.
@@ -529,11 +732,27 @@ pub struct OptionsModalContext<'a> {
     pub remote_icon_textures: &'a mut crate::remote_icons::RemoteIconTextures,
     /// Repli quand l'icône d'un objet n'est pas encore descendue.
     pub icons: &'a crate::ui_icons::UiIcons,
+    /// Les bustes de classe de l'onglet « Personnages » — **chargés seulement pour la fenêtre
+    /// Options** (voir `crate::avatars`, doc de module), donc `None` partout ailleurs. Cet onglet
+    /// attend alors, comme il attend le roster : peindre des tuiles sans buste serait pire.
+    pub avatars: Option<&'a crate::avatars::AvatarAtlas>,
+    /// Les serveurs de jeu proposés au compte — vide tant que la liste n'est pas descendue, ce qui
+    /// n'empêche ni d'afficher ni de garder celui que le compte porte déjà.
+    pub game_servers: &'a crate::game_servers::GameServers,
 }
 
-/// Clé mémoire « le focus initial a déjà été donné » — voir [`show`].
-fn focus_given_id() -> egui::Id {
-    egui::Id::new("options-modal-focus-initial")
+/// L'avis de la section « Compte » quand le jeton de session est dans le fichier de repli plutôt
+/// que dans le trousseau du système (`overlay_sync::token_store::token_file_in_use`) — `None` dans
+/// le cas normal, et rien n'est affiché. Sorti en fonction pour être vérifiable par un test.
+pub fn token_file_notice(in_use: bool) -> Option<String> {
+    in_use.then(|| {
+        format!(
+            "Le trousseau du système est indisponible : la session est conservée en clair dans \
+             {}. Elle est lisible par tout programme qui s'exécute sous votre compte — se \
+             déconnecter la supprime.",
+            overlay_sync::token_store::token_file_location().display()
+        )
+    })
 }
 
 /// Peint la modale dans TOUT le rectangle disponible de `ui` (fenêtre OS dédiée, voir doc de
@@ -553,23 +772,17 @@ pub fn show(
     // même Échap et rouvrait la garde. La boîte semblait ne jamais se fermer. Attrapé par
     // `options_garde_de_fermeture_au_clavier`.
     //
-    // **Deux dialogues possibles, jamais en même temps** : la garde de fermeture et, depuis le
-    // 2026-09-13, la confirmation de déconnexion (section « Compte » de l'onglet « Paramètres »).
-    // Elles s'excluent par construction (voir leur `else if` plus bas) ; la capture ci-dessus vaut
-    // pour l'une comme pour l'autre — c'est le double appui d'Échap qu'elle empêche.
-    let dialogue_a_l_entree =
-        state.pending_close || state.pending_disconnect || state.pending_install.is_some();
-
-    // Première frame de CETTE modale ? Sert au focus initial du champ de chemin (voir plus bas).
-    // Le drapeau vit dans la mémoire egui du contexte, qui est neuf à chaque ouverture : la modale
-    // a sa propre fenêtre OS, créée à l'ouverture et détruite à la fermeture (voir
-    // `main.rs::open_options_modal` / `PostRedraw::CloseOptions`). Rouvrir la modale redonne donc
-    // bien le focus, refermer et rouvrir n'en garde aucune trace.
-    let first_frame = !ui.data_mut(|d| {
-        let seen = d.get_temp::<bool>(focus_given_id()).unwrap_or(false);
-        d.insert_temp(focus_given_id(), true);
-        seen
-    });
+    // **Plusieurs dialogues possibles, jamais en même temps** : la garde de fermeture, depuis le
+    // 2026-09-13 la confirmation de déconnexion (section « Compte » de l'onglet « Paramètres »),
+    // puis celles d'installation d'une mise à jour, de fermeture de l'overlay et — depuis le
+    // 2026-09-17 — de redémarrage. Ils s'excluent par construction (voir leur `else if` plus bas) ;
+    // la capture ci-dessus vaut pour tous — c'est le double appui d'Échap qu'elle empêche.
+    let dialogue_a_l_entree = state.pending_close
+        || state.pending_disconnect
+        || state.pending_purge
+        || state.pending_install.is_some()
+        || state.pending_quit
+        || state.pending_restart;
 
     // Tout le décor de la fenêtre — `design::window` depuis le 2026-09-10 (lot 1 de
     // `docs/plan-composants-ui.md`). Il vivait ici, dans une fonction `chrome()` de ce panneau,
@@ -588,9 +801,9 @@ pub fn show(
         .log_name("options")
         .show(ui);
 
-    // « Personnages » est le dernier onglet sans contenu porté. Il reste affiché désactivé plutôt
-    // que masqué — un onglet qui apparaît est un changement de mise en page, pas un changement
-    // d'état.
+    // Les sept onglets sont tous câblés — « Personnages » a reçu son contenu le 2026-09-16
+    // (`panels::personnages_tab`), et avec lui la dernière entrée grisée du menu ; « À propos »
+    // est arrivé le 2026-09-18 avec ce qu'il a retiré au pied de « Paramètres ».
     chrome.tabs(
         ui,
         design::tabs(&mut state.tab)
@@ -598,9 +811,9 @@ pub fn show(
             .entry(OptionsTab::Alertes, "Alertes")
             .entry(OptionsTab::Chat, "Chat")
             .entry(OptionsTab::Personnages, "Personnages")
-            .enabled(false)
             .entry(OptionsTab::Raccourcis, "Raccourcis")
             .entry(OptionsTab::Parametres, "Paramètres")
+            .entry(OptionsTab::APropos, "À propos")
             .log_name("options-onglets"),
     );
 
@@ -629,8 +842,6 @@ pub fn show(
     // Un seul panneau de section, deux contenus — c'est l'onglet qui décide. Le focus initial du
     // champ de chemin ne se donne qu'à la première frame de la fenêtre : ouverte sur « Alertes »
     // (le défaut d'`OptionsTab`), elle ne le donne donc à personne, et « Paramètres » se clique.
-    let mut alerts_action = AlertsTabAction::None;
-    let mut chat_action = ChatTabAction::None;
     let mut suivi_action = suivi_tab::SuiviTabAction::None;
     design::panel().show(ui, chrome.content, |ui, panel| {
         if state.tab == OptionsTab::Chat {
@@ -639,7 +850,7 @@ pub fn show(
             let mut vide = ChatDraft::default();
             let availability = state.chat_availability;
             let draft = state.chat_draft.as_mut().unwrap_or(&mut vide);
-            chat_action = chat_tab::show(
+            chat_tab::show(
                 ui,
                 panel,
                 &mut state.chat,
@@ -647,7 +858,6 @@ pub fn show(
                     draft,
                     availability,
                     enabled: &mut state.features.chat,
-                    muted: &mut state.mutes.chat,
                 },
             );
             return;
@@ -671,7 +881,6 @@ pub fn show(
                     icons: ctx.icons,
                     availability,
                     enabled: &mut state.features.suivi,
-                    muted: &mut state.mutes.suivi,
                 },
             );
             return;
@@ -683,7 +892,7 @@ pub fn show(
             let mut vide = overlay_engine::AlertProfile::default();
             let availability = state.alerts_availability;
             let profile = state.alerts_draft.as_mut().unwrap_or(&mut vide);
-            alerts_action = alerts_tab::show(
+            alerts_tab::show(
                 ui,
                 panel,
                 &mut state.alerts,
@@ -700,269 +909,739 @@ pub fn show(
             );
             return;
         }
+        if state.tab == OptionsTab::Personnages {
+            // Même arbitrage que pour les alertes et le chat : tant que le roster n'est pas
+            // descendu du compte, l'onglet affiche son rouage. Un roster vide servi en attendant se
+            // lirait comme « vous n'avez déclaré personne ».
+            //
+            // **Les bustes comptent autant que le roster** : sans eux, chaque tuile tomberait sur
+            // le portrait générique et la grille de classes ne dirait plus rien. Leur absence est
+            // donc une attente, pas un repli (voir `OptionsModalContext::avatars`).
+            let mut vide = overlay_engine::Roster::default();
+            let disponible = state.personnages_draft.is_some() && ctx.avatars.is_some();
+            let roster = state.personnages_draft.as_mut().unwrap_or(&mut vide);
+            if let Some(avatars) = ctx.avatars {
+                personnages_tab::show(
+                    ui,
+                    panel,
+                    &mut state.personnages,
+                    &mut PersonnagesTabContext {
+                        roster,
+                        servers: ctx.game_servers,
+                        avatars,
+                        icons: ctx.icons,
+                        availability: if disponible {
+                            PersonnagesAvailability::Ready
+                        } else {
+                            PersonnagesAvailability::Loading
+                        },
+                        window,
+                    },
+                );
+            }
+            return;
+        }
         if state.tab == OptionsTab::Raccourcis {
             raccourcis_tab::show(ui, panel, &mut state.raccourcis, &mut state.shortcuts);
             return;
         }
-        let inner_width = ui.max_rect().width();
-        ui.add(design::heading("Fichier"));
-
-        // Le champ et le bouton partagent une ligne : le bouton prend sa largeur naturelle
-        // (libellé + marges du design system, voir `Button::desired_size`) et le champ occupe tout
-        // le reste. C'est le bouton qui commande, pas l'inverse — une largeur figée pour lui
-        // désaccorderait le couple dès que le libellé ou la fenêtre changent.
-        let browse = design::button("Parcourir")
-            .variant(ButtonVariant::Secondary)
-            .size(ButtonSize::Height(ROW_HEIGHT))
-            .log_name("options-parcourir");
-        let browse_width = browse.desired_size(ui).x;
-        let row_rect = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-        // Plancher à zéro : si la ligne devenait plus étroite que le bouton, un rectangle de
-        // largeur négative serait inversé par egui et peint n'importe où. Zéro le rend invisible,
-        // ce qui se voit sur une capture — c'est la règle du contrat de composant.
-        let field_width = (row_rect.width() - browse_width - FIELD_TO_BROWSE_GAP).max(0.0);
-        // Le champ garde sa hauteur native (25px) et se centre sur la ligne, que le bouton fixe à
-        // 36 : le jeu compose réellement des lignes où le champ est plus bas que ce qui
-        // l'accompagne (voir `design::components::input`), et la règle du design system est que la
-        // hauteur d'un composant est celle de sa référence — pas celle de son voisin.
-        let field_rect = egui::Rect::from_center_size(
-            egui::pos2(row_rect.left() + field_width / 2.0, row_rect.center().y),
-            egui::vec2(field_width, FIELD_HEIGHT),
-        );
-        let browse_rect = egui::Rect::from_min_size(
-            egui::pos2(row_rect.right() - browse_width, row_rect.top()),
-            egui::vec2(browse_width, ROW_HEIGHT),
-        );
-        // Focus initial dans le champ à l'ouverture : la modale est la SEULE fenêtre overlay
-        // focalisable (§9.1 du plan, `WS_EX_NOACTIVATE` délibérément omis pour elle), et son unique
-        // réglage est ce champ — devoir cliquer dedans avant de pouvoir taper n'a aucune raison
-        // d'être. Une seule frame, sinon le champ reprendrait le focus indéfiniment.
-        ui.put(
-            field_rect,
-            design::input(&mut state.path_input)
-                .placeholder("Chemin vers wakfu.log")
-                .width(field_width)
-                // Un chemin se retape rarement à partir de l'ancien : la croix vide d'un geste.
-                .clearable(true)
-                // Le champ porte l'alerte en même temps que le message ci-dessous : celui-ci est
-                // sous le bouton « Parcourir » et hors du regard de qui vient de taper.
-                .error(state.error.is_some())
-                .request_focus(first_frame)
-                .log_name("options-chemin"),
-        );
-
-        if ui.put(browse_rect, browse).clicked() {
-            action = OptionsModalAction::Browse;
+        if state.tab == OptionsTab::APropos {
+            // L'onglet ne confirme rien : il remonte une intention, et c'est ici que s'ouvre la
+            // boîte qui convient — les quatre s'excluent par le `else if` des dialogues, plus bas.
+            match a_propos_tab::show(
+                ui,
+                panel,
+                &mut a_propos_tab::AProposTabContext {
+                    update: &state.update,
+                    auto_update: &mut state.auto_update,
+                    api_override: overlay_sync::client::base_url_override(),
+                },
+            ) {
+                a_propos_tab::AProposTabAction::None => {}
+                a_propos_tab::AProposTabAction::OpenUrl(url) => {
+                    action = OptionsModalAction::OpenUrl(url)
+                }
+                a_propos_tab::AProposTabAction::CheckUpdate => {
+                    action = OptionsModalAction::CheckUpdate
+                }
+                a_propos_tab::AProposTabAction::Install(version) => {
+                    state.pending_install = Some(version)
+                }
+                a_propos_tab::AProposTabAction::Restart => state.pending_restart = true,
+                a_propos_tab::AProposTabAction::Quit => state.pending_quit = true,
+                a_propos_tab::AProposTabAction::PurgeLocalData => state.pending_purge = true,
+            }
+            return;
         }
-
-        // Message d'erreur — `design::info_text` au ton alerte depuis le 2026-09-10. C'était le
-        // dernier texte de la modale à échapper au design system : un `ui.label` à la police
-        // proportionnelle d'egui, au corps 13 arbitraire, sans pastille ni interligne relevé. Son
-        // rouge (`#e06055`) n'appartenait à aucune capture ; celui du composant est le rouge mesuré
-        // du bouton « Annuler ».
-        if let Some(err) = &state.error {
-            ui.add_space(INFO_GAP);
+        // **Tout l'onglet défile** depuis le 2026-09-15 : il portait quatre sections, il en a
+        // porté jusqu'à huit — « Démarrage », « Combat », une section de notifications par
+        // fonctionnalité (`panels::notifications`), « Fichier », « Mise à jour » et « Compte ». La
+        // dernière tombait hors de la fenêtre sans que rien ne le dise, et agrandir la fenêtre pour
+        // suivre chaque réglage ajouté n'est pas une option : c'est une fenêtre posée par-dessus un
+        // jeu.
+        //
+        // **L'ordre des sections** (remanié le 2026-09-16, puis le 2026-09-21) va de ce qu'on
+        // règle souvent à ce qu'on règle une fois : l'affichage d'abord — « Recap » puis
+        // « Combat » —, les notifications ensuite, et les sections de maintenance à la fin —
+        // « Démarrage », « Fichier » (le chemin de `wakfu.log`, que la découverte automatique
+        // trouve seule dans l'immense majorité des cas), « Journal », « Compte ». « Mise à jour »
+        // et les deux sorties de l'overlay, qui fermaient l'onglet, sont parties dans « À propos »
+        // le 2026-09-18 (`panels::a_propos_tab`) : elles concernent le programme, pas ce qu'il
+        // affiche. « Journal » a fait le chemin inverse le 2026-09-21, et « Supprimer les données
+        // locales » a quitté « Compte » pour « Vos données », le même jour.
+        panel.scroll_area(ui, "options-parametres", |ui, width| {
+            // La largeur utile vient de la zone défilable : la réserve de barre y est déjà
+            // déduite (voir `design::PanelZones::scroll_area`).
+            let inner_width = width;
+            // **Section « Recap »** (2026-09-16) — l'interrupteur de la bande XP / Kamas /
+            // Combats / Challenges / Durée posée en haut à gauche de la fenêtre de jeu
+            // (`panels::recap`).
+            //
+            // Créée « après la section Combat » puis **remontée en tête de l'onglet** le même jour
+            // (demande utilisateur : « déplace la section Recap en premier ») : c'est la bande
+            // qu'on a sous les yeux toute la session, avant même le premier combat.
+            //
+            // Une section à part plutôt qu'une ligne de plus sous « Combat » parce que c'est une
+            // autre fonctionnalité — le récap compte la session entière, pas le combat en cours.
+            // Créée avec sa seule case d'activation, elle a reçu le soir même les réglages
+            // annoncés (« quels chiffres montrer ») : trois cases « Afficher … » en retrait sous
+            // l'interrupteur (demande utilisateur : « options pour afficher la durée de la
+            // session, pour afficher les combats (victoire / défaite), pour afficher les
+            // challenges (réussi / échoué) »). Kamas et XP n'ont pas de case : ce sont les deux
+            // chiffres pour lesquels la bande existe (voir `panels::recap::RecapCells`).
+            //
+            // Pas de `feature_switch::show` ici : cette fonction grise TOUT ce qui est peint
+            // ensuite dans le `Ui`, ce qui emporterait tout l'onglet — c'est un outil d'onglet
+            // entier, pas de section. Même raison que pour les deux cases de la section « Combat »
+            // en dessous.
+            ui.add(design::heading("Recap"));
             ui.add(
-                design::info_text(err)
-                    .tone(design::InfoTone::Alert)
-                    .width(inner_width)
-                    .log_name("options-erreur"),
+                design::checkbox(&mut state.features.recap, "Activer le récap de session")
+                    .tooltip(
+                        "La bande XP, kamas, combats, challenges et durée, en haut à gauche de la \
+                         fenêtre de jeu. Décochée, elle ne s'affiche plus ; les chiffres continuent \
+                         d'être comptés.",
+                    )
+                    .log_name("options-recap-actif"),
             );
-        }
+            // Les trois cases facultatives de la bande, sous leur interrupteur et en retrait —
+            // même géométrie que le suivi des sorts sous le détail des combats : la case commence
+            // là où commence le LIBELLÉ de celle du dessus. Grisées sans changer de valeur quand
+            // la bande est coupée : on les retrouve telles quelles en la rallumant.
+            let recap_on = state.features.recap;
+            for (value, label, tooltip, log_name) in [
+                (
+                    &mut state.features.recap_cells.duration,
+                    "Afficher la durée de la session",
+                    "Le chrono de la session, sur la dernière ligne de la bande. Décoché, la \
+                     bande perd cette ligne — le glyphe de remise à zéro reste.",
+                    "options-recap-duree",
+                ),
+                (
+                    &mut state.features.recap_cells.fights,
+                    "Afficher les combats (victoires / défaites)",
+                    "Le nombre de combats gagnés et perdus depuis le début de la session. \
+                     Décoché, la case disparaît de la bande, qui se resserre.",
+                    "options-recap-combats",
+                ),
+                (
+                    &mut state.features.recap_cells.challenges,
+                    "Afficher les challenges (réussis / échoués)",
+                    "Le nombre de challenges réussis et échoués depuis le début de la session. \
+                     Décoché, la case disparaît de la bande, qui se resserre.",
+                    "options-recap-challenges",
+                ),
+            ] {
+                ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+                ui.horizontal(|ui| {
+                    ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
+                    ui.add(
+                        design::checkbox(value, label)
+                            .enabled(recap_on)
+                            .tooltip(tooltip)
+                            .log_name(log_name),
+                    );
+                });
+            }
+            // **La reprise après une pause** (2026-09-17, voir `crate::recap_session`) : une
+            // case et un pas numérique en minutes sur la même ligne — la forme de la ligne
+            // « Fermeture automatique » des sections de notification, avec le pas du jeu à la
+            // place du champ libre : des minutes rondes, pas une durée à virgule. Le pas suit la
+            // case, comme le champ de durée suit la sienne là-bas : décoché, il n'y a plus de
+            // tolérance à régler.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.allocate_ui_with_layout(
+                egui::vec2(inner_width, notifications::ROW_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add(
+                        design::checkbox(
+                            &mut state.recap_resume.enabled,
+                            "Reprendre la session après une pause de moins de",
+                        )
+                        .tooltip(
+                            "Fenêtre de jeu fermée puis rouverte dans ce délai : le chrono et \
+                             les compteurs continuent. Décochée, chaque retour dans le jeu \
+                             repart de zéro.",
+                        )
+                        .log_name("options-recap-reprise"),
+                    );
+                    ui.add_space(notifications::CONTROL_GAP);
+                    ui.add(
+                        design::stepper(&mut state.recap_resume.minutes)
+                            .range(
+                                recap_session::MIN_RESUME_MINUTES
+                                    ..=recap_session::MAX_RESUME_MINUTES,
+                            )
+                            .step(recap_session::RESUME_STEP_MINUTES)
+                            .size(RESUME_STEPPER_SIZE)
+                            .field_width(RESUME_FIELD_WIDTH)
+                            .enabled(state.recap_resume.enabled)
+                            .log_name("options-recap-reprise-minutes"),
+                    );
+                    ui.add_space(design::tokens::CHECKBOX_LABEL_GAP);
+                    ui.label(
+                        egui::RichText::new("min")
+                            .color(notifications::SUBDUED)
+                            .size(notifications::BODY_FONT_SIZE),
+                    );
+                },
+            );
+            // **Rien sur le déplacement de la bande ici** (2026-09-18, demande utilisateur) : la
+            // ligne d'aide et le bouton « Replacer au défaut » qui suivaient ont été retirés. La
+            // bande porte elle-même son cadenas et son bouton de retour (`panels::recap`, rangée
+            // d'actions) — le geste et sa sortie de secours vivent au même endroit, sur le jeu.
 
-        // **Section « Combat »** (2026-09-14) — tout ce que l'overlay fait autour d'un combat,
-        // en un seul endroit.
-        //
-        // Elle s'appelait « Affichage » et ne portait qu'une case, qui parlait déjà du panneau de
-        // COMBAT ; la notification de tour arrivée le même jour en aurait fait une deuxième
-        // section sur le même sujet. **Fusionnées sur décision de l'utilisateur** le 2026-09-14 :
-        // « déplace la case Affichage dans la section Combat ». « Affichage » disparaît donc, elle
-        // n'avait rien d'autre à porter.
-        //
-        // Les deux réglages vivent dans la config LOCALE (`config::OverlayConfig`), pas sur le
-        // compte, pour deux raisons voisines : ce qu'on accepte de voir par-dessus son jeu dépend
-        // de l'écran qu'on a devant soi, et une notification du système — le seul effet de
-        // l'overlay qui sorte de l'écran de jeu — dépend de la machine (démon de notifications
-        // présent ou non, téléphone apparié…). Jamais du joueur.
-        //
-        // Les deux cases sont des brouillons comme le reste de cette fenêtre : elles basculent
-        // librement, et seul « Valider » l'emporte (voir `OptionsCommit`). Leur retour
-        // (`changed()`) n'est donc pas lu — il n'y a rien à déclencher à la bascule.
-        //
-        // Ordre : l'affichage permanent d'abord (ce qu'on voit en dehors d'un combat), la
-        // notification ensuite (ce qui arrive pendant) — du plus passif au plus intrusif.
-        ui.add_space(SECTION_GAP);
-        ui.add(design::heading("Combat"));
-        ui.add(
-            design::checkbox(
-                &mut state.combat_always_visible,
-                "Afficher le panneau de combat en dehors des combats",
-            )
-            .tooltip(
-                "Décoché, le panneau de combat n'apparaît qu'au début d'un combat et se referme \
-                 quand il est terminé.",
-            )
-            .log_name("options-combat-toujours-visible"),
-        );
-        // **L'interligne des lignes d'option** (2026-09-14) — voir `tokens::CHECKBOX_ROW_GAP` : le
-        // jeu laisse 11px entre deux cases, pas zéro. Posé ici et pas dans `design::checkbox`
-        // parce que le relevé le range du côté de la mise en page, et parce qu'un écart porté par
-        // le composant s'ajouterait au `SECTION_GAP` qui suit la dernière ligne d'un bloc.
-        ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
-        ui.add(
-            design::checkbox(
-                &mut state.turn_notification,
-                "Me prévenir quand un de mes personnages doit jouer",
-            )
-            .tooltip(
-                "Une notification du système annonce le personnage dont c'est le tour, uniquement \
-                 si sa fenêtre de jeu n'est pas celle que vous avez sous les yeux.",
-            )
-            .log_name("options-notification-de-tour"),
-        );
-        // **Le son, sous la notification et en retrait** (demande du 2026-09-14) : la case ne
-        // vaut que si la notification est active — grisée sinon, sans changer de valeur (un son
-        // coupé le reste si on désactive puis réactive la notification). Sa case commence là où
-        // commence le LIBELLÉ de la case du dessus (case + écart, voir `design::checkbox`) : la
-        // première version reprenait le retrait titre → contrôle (7 px), jugé trop faible au
-        // rendu — « aligner la partie gauche avec le début du m d'en haut ».
-        ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
-        ui.horizontal(|ui| {
-            ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
+            // **Section « Combat »** (2026-09-14) — tout ce que l'overlay fait autour d'un combat,
+            // en un seul endroit.
+            //
+            // Elle s'appelait « Affichage » et ne portait qu'une case, qui parlait déjà du panneau de
+            // COMBAT ; la notification de tour arrivée le même jour en aurait fait une deuxième
+            // section sur le même sujet. **Fusionnées sur décision de l'utilisateur** le 2026-09-14 :
+            // « déplace la case Affichage dans la section Combat ». « Affichage » disparaît donc, elle
+            // n'avait rien d'autre à porter.
+            //
+            // Les deux réglages vivent dans la config LOCALE (`config::OverlayConfig`), pas sur le
+            // compte, pour deux raisons voisines : ce qu'on accepte de voir par-dessus son jeu dépend
+            // de l'écran qu'on a devant soi, et une notification du système — le seul effet de
+            // l'overlay qui sorte de l'écran de jeu — dépend de la machine (démon de notifications
+            // présent ou non, téléphone apparié…). Jamais du joueur.
+            //
+            // Les deux cases sont des brouillons comme le reste de cette fenêtre : elles basculent
+            // librement, et seul « Valider » l'emporte (voir `OptionsCommit`). Leur retour
+            // (`changed()`) n'est donc pas lu — il n'y a rien à déclencher à la bascule.
+            //
+            // Ordre : l'affichage permanent d'abord (ce qu'on voit en dehors d'un combat), la
+            // notification ensuite (ce qui arrive pendant) — du plus passif au plus intrusif.
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Combat"));
+            // **Les deux interrupteurs de la section** (2026-09-15) — « Activer le détail des
+            // combats » commande le panneau Combat tout entier, « Activer le suivi des sorts »
+            // commande son bloc « ligne de sorts » et DÉPEND du premier (demande utilisateur
+            // explicite). Ils vivent dans `state.features` avec les trois cases d'onglet
+            // (`panels::feature_switch::FeatureToggles`) : même nature — couper une
+            // fonctionnalité sans rien détruire — et même chemin jusqu'à l'hôte, donc même
+            // véhicule. Ce qui les distingue est qu'il n'y a pas d'onglet « Combat » à griser :
+            // ce sont deux cases ordinaires en tête de section, pas un appel à
+            // `feature_switch::show`.
+            //
+            // **En tête, avant les réglages qu'ils commandent** : c'est la place qu'occupe déjà
+            // l'interrupteur d'un onglet, et la seule qui se lise — une case maîtresse après les
+            // réglages qu'elle éteint ferait chercher pourquoi ceux-ci sont grisés.
+            ui.add(
+                design::checkbox(&mut state.features.combat, "Activer le détail des combats")
+                    .tooltip(
+                        "Décoché, le panneau de combat ne s'affiche plus du tout. Les combats \
+                         continuent d'être mesurés et envoyés à votre historique.",
+                    )
+                    .log_name("options-combat-actif"),
+            );
+            // Le suivi des sorts, sous son interrupteur et en retrait — même géométrie que la
+            // sourdine sous la notification de tour (voir plus bas) : la case commence là où
+            // commence le LIBELLÉ de celle du dessus. Grisée sans changer de valeur quand le
+            // détail des combats est coupé : on la retrouve telle quelle en le rallumant
+            // (`FeatureToggles::spells_visible` combine les deux au moment de peindre).
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.horizontal(|ui| {
+                ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
+                ui.add(
+                    design::checkbox(&mut state.features.spells, "Activer le suivi des sorts")
+                        .enabled(state.features.combat)
+                        .tooltip(
+                            "Les sorts lancés au dernier tour, sous les barres du panneau de \
+                             combat. Décoché, le panneau garde ses portraits et ses barres.",
+                        )
+                        .log_name("options-combat-sorts"),
+                );
+            });
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
             ui.add(
                 design::checkbox(
-                    &mut state.turn_notification_muted,
-                    "Couper le son des notifications",
+                    &mut state.combat_always_visible,
+                    "Afficher le panneau de combat en dehors des combats",
                 )
-                .enabled(state.turn_notification)
-                .tooltip("La notification s'affiche sans jouer de son.")
-                .log_name("options-notification-de-tour-sans-son"),
+                // Sans panneau de combat, il n'y a rien à garder affiché : la case est grisée,
+                // valeur conservée, comme le suivi des sorts au-dessus. Pas de retrait en
+                // revanche — elle réglait déjà l'encombrement à l'écran avant l'arrivée de
+                // l'interrupteur, et la déplacer d'un cran ferait croire à un réglage nouveau.
+                .enabled(state.features.combat)
+                .tooltip(
+                    "Décoché, le panneau de combat n'apparaît qu'au début d'un combat et se referme \
+                     quand il est terminé.",
+                )
+                .log_name("options-combat-toujours-visible"),
             );
-        });
-
-        // **Section « Compte »** (2026-09-13) — la déconnexion, qui était jusque-là un raccourci
-        // global (`Ctrl+Alt+D`, voir `crate::shortcuts`). Demande utilisateur : en faire un bouton,
-        // ici, avec de quoi comprendre ce qu'il fait avant de le presser.
-        //
-        // **Ce bouton n'est PAS un brouillon**, contrairement à tout le reste de cette fenêtre : il
-        // agit tout de suite (l'hôte efface le jeton et l'overlay revient à son écran de
-        // connexion), et « Annuler » ne le rattraperait pas. C'est précisément ce qui justifie la
-        // confirmation qu'il ouvre — là où l'onglet « Alertes » a pu retirer la sienne, son retrait
-        // d'objet étant annulable jusqu'à « Valider » (voir `alerts_tab`, règle 4).
-        ui.add_space(SECTION_GAP);
-        ui.add(design::heading("Compte"));
-        ui.add(
-            design::info_text(
-                "L'overlay ne fonctionne qu'avec un compte connecté : c'est lui qui porte la liste \
-                 suivie, les alertes et l'historique synchronisé. Vous déconnecter ramène l'overlay \
-                 à son écran de connexion, et il faudra réappairer l'application pour le réutiliser.",
-            )
-            .tone(design::InfoTone::Info)
-            .width(inner_width)
-            .log_name("options-compte-info"),
-        );
-        ui.add_space(INFO_GAP);
-        // **Rouge et centré** (demande utilisateur, 2026-09-13), là où ce bouton était secondaire
-        // et aligné à gauche comme les réglages au-dessus. Les deux vont ensemble : c'est la seule
-        // action de cette fenêtre qui échappe à « Annuler », et noyée dans la colonne des réglages
-        // elle ne se distinguait pas d'un champ de plus. La couleur avertit, la confirmation
-        // rattrape le geste — l'une ne remplace pas l'autre.
-        //
-        // La texture `Danger` est native en **36 px**, soit exactement `ROW_HEIGHT` : ni dégradé
-        // étiré ni embout à la mauvaise échelle (voir `design::ButtonVariant::textures`).
-        //
-        // **Largeur naturelle**, jamais figée — même règle que la ligne de recherche de l'onglet
-        // « Raccourcis » : une largeur en dur écrête le libellé dès que la police ou le mot
-        // changent, ce qui s'est déjà vu (« Réinitialise »).
-        let disconnect = design::button("Déconnecter")
-            .variant(ButtonVariant::Danger)
-            .size(ButtonSize::Height(ROW_HEIGHT))
-            .enabled(state.account_connected)
-            .tooltip(if state.account_connected {
-                "Effacer la session enregistrée et revenir à l'écran de connexion"
-            } else {
-                "Aucun compte connecté"
-            })
-            .log_name("options-deconnecter");
-        let disconnect_size = disconnect.desired_size(ui);
-        let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-        if ui
-            .put(
-                egui::Rect::from_center_size(row.center(), disconnect_size),
-                disconnect,
-            )
-            .clicked()
-        {
-            state.pending_disconnect = true;
-        }
-
-        // **Section « Mise à jour »** (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décisions du
-        // mainteneur) : la version courante n'est PAS rappelée ici, la bannière de la fenêtre la
-        // porte déjà. Une ligne d'information (dernière vérification, version disponible et son
-        // poids), la case d'installation automatique, et UN bouton dont le libellé suit l'état :
-        // « Recherche de mise à jour » → « Recherche… » → « Mettre à jour vers X » /
-        // « Réessayer ». Pas de bouton « Notes de version » pour l'instant (aucune note n'est
-        // rédigée aujourd'hui). L'habillage du bouton de recherche est à revoir avec le design
-        // system, plus tard.
-        //
-        // Comme « Déconnecter », « Mettre à jour » n'est PAS un brouillon : il ferme l'overlay
-        // de jeu le temps de l'installation — d'où sa confirmation. « Recherche », lui, ne touche
-        // à rien.
-        ui.add_space(SECTION_GAP);
-        ui.add(design::heading("Mise à jour"));
-        let (info, tone) = update_info_line(&state.update, std::time::Instant::now());
-        ui.add(
-            design::info_text(info)
-                .tone(tone)
-                .width(inner_width)
-                .log_name("options-mise-a-jour-info"),
-        );
-        ui.add_space(INFO_GAP);
-        ui.add(
-            design::checkbox(
-                &mut state.auto_update,
-                "Installer automatiquement les mises à jour au démarrage",
-            )
-            .tooltip(
-                "Au lancement, une version plus récente est téléchargée et installée avant \
-                 d'ouvrir l'overlay. Décochée, elle est seulement signalée ici.",
-            )
-            .log_name("options-mise-a-jour-auto"),
-        );
-        ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
-        let button_spec = update_button(&state.update);
-        let update_button = design::button(button_spec.label)
-            .variant(button_spec.variant)
-            .size(ButtonSize::Height(ROW_HEIGHT))
-            .enabled(button_spec.enabled)
-            .tooltip(button_spec.tooltip)
-            .log_name("options-mise-a-jour-bouton");
-        let update_size = update_button.desired_size(ui);
-        let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-        if ui
-            .put(
-                egui::Rect::from_center_size(row.center(), update_size),
-                update_button,
-            )
-            .clicked()
-        {
-            match &state.update {
-                UpdateStatus::Available { version, .. } => {
-                    state.pending_install = Some(version.clone());
+            // **Le côté du panneau** (2026-09-17) — « permettre à l'utilisateur d'afficher
+            // l'overlay combat à droite plutôt qu'à gauche ». Juste sous l'affichage permanent :
+            // les deux règlent la même chose, la place que le panneau prend à l'écran (quand il
+            // est là, puis où il est), et les deux se lisent sans rien connaître du reste.
+            //
+            // Cocher la case ne déplace pas seulement la fenêtre : toute l'interface du panneau
+            // est retournée en miroir vertical (voir `crate::mirror`), sinon elle s'ouvrirait vers
+            // le bord de l'écran au lieu de s'ouvrir vers le jeu. Les portraits, les images de
+            // monstre, les icônes et les images de sort, eux, restent à l'endroit — c'est la
+            // raison d'être de ce module.
+            //
+            // Grisée sans changer de valeur quand le détail des combats est coupé, comme ses deux
+            // voisines : sans panneau, il n'y a pas de côté à choisir.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.add(
+                design::checkbox(
+                    &mut state.combat_on_right,
+                    "Afficher le panneau de combat à droite de la fenêtre de jeu",
+                )
+                .enabled(state.features.combat)
+                .tooltip(
+                    "Le panneau se colle au bord droit du jeu, et toute son interface est \
+                     retournée en miroir — les portraits et les icônes, eux, restent à l'endroit.",
+                )
+                .log_name("options-combat-a-droite"),
+            );
+            // **L'interligne des lignes d'option** (2026-09-14) — voir `tokens::CHECKBOX_ROW_GAP` : le
+            // jeu laisse 11px entre deux cases, pas zéro. Posé ici et pas dans `design::checkbox`
+            // parce que le relevé le range du côté de la mise en page, et parce qu'un écart porté par
+            // le composant s'ajouterait au `SECTION_GAP` qui suit la dernière ligne d'un bloc.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.add(
+                design::checkbox(
+                    &mut state.turn_notification,
+                    "Me prévenir quand un de mes personnages doit jouer",
+                )
+                .tooltip(
+                    "Une notification du système annonce le personnage dont c'est le tour, uniquement \
+                     si sa fenêtre de jeu n'est pas celle que vous avez sous les yeux.",
+                )
+                .log_name("options-notification-de-tour"),
+            );
+            // **Le son, sous la notification et en retrait** (demande du 2026-09-14) : la case ne
+            // vaut que si la notification est active — grisée sinon, sans changer de valeur (un son
+            // coupé le reste si on désactive puis réactive la notification). Sa case commence là où
+            // commence le LIBELLÉ de la case du dessus (case + écart, voir `design::checkbox`) : la
+            // première version reprenait le retrait titre → contrôle (7 px), jugé trop faible au
+            // rendu — « aligner la partie gauche avec le début du m d'en haut ».
+            //
+            // **Le bouton d'essai à sa droite** (2026-09-16), comme sur la sourdine des trois
+            // sections qui suivent (voir `panels::notifications`) : grisé quand le son ne
+            // viendrait pas — notification décochée ou son coupé. La ligne prend la hauteur des
+            // leurs et se centre dedans : dans un simple `horizontal`, la case restait calée en
+            // haut d'un bouton plus grand qu'elle.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.allocate_ui_with_layout(
+                egui::vec2(inner_width, notifications::ROW_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
+                ui.add(
+                    design::checkbox(
+                        &mut state.turn_notification_muted,
+                        notifications::MUTE_LABEL,
+                    )
+                    .enabled(state.turn_notification)
+                    .tooltip("La notification s'affiche sans jouer de son.")
+                    .log_name("options-notification-de-tour-sans-son"),
+                );
+                ui.add_space(notifications::CONTROL_GAP);
+                if notifications::test_sound_button(
+                    ui,
+                    "combat",
+                    state.turn_notification && !state.turn_notification_muted,
+                ) {
+                    action = OptionsModalAction::TestTurnSound;
                 }
-                _ => action = OptionsModalAction::CheckUpdate,
+            },
+            );
+
+            // **Plus de bouton « Rafraîchir le panneau de combat » ici** (2026-09-18, demande
+            // utilisateur) : la ligne d'aide et le bouton qui fermaient cette section depuis le
+            // 2026-09-17 ont été retirés. La relecture du journal (`EngineCommand::ResyncLog`)
+            // reste déclenchée par le chien de garde d'ingestion (`IngestWatchdog`), qui couvre
+            // le cas nominal en huit secondes, et par `ShortcutAction::Refresh` sous Windows.
+
+            // **Les trois sections de notifications** (2026-09-15) — le Suivi, les Alertes et le
+            // Chat, dans l'ordre du menu d'onglets, juste après « Combat » qui porte déjà les
+            // siennes depuis le 2026-09-14.
+            //
+            // Demande utilisateur : « déplacer le test de son, le choix de coupure de son, et la
+            // gestion du temps de fermeture de la notification de tous les onglets dans des
+            // sections dédiées, après la section Combat ». Les trois onglets réglaient chacun les
+            // siennes, avec des formulations qui avaient divergé ; les quatre sections d'ici
+            // disent maintenant la même chose de la même façon, fonctionnalité par fonctionnalité.
+            //
+            // Ce que chaque section porte dépend de ce que sa fonctionnalité fait entendre et
+            // voir, et rien n'a été uniformisé de force : les Alertes n'ont pas de sourdine
+            // globale — le son d'un ramassage se coupe déjà objet par objet, à la tuile
+            // (`panels::alerts_tab`).
+            //
+            // **Le Suivi a gagné sa fermeture automatique le 2026-09-16** (demande utilisateur) :
+            // sa section était la seule sans, au motif que « son alerte est un son et un bandeau
+            // permanent ». Le décompte arrivé à zéro affiche pourtant bien une carte
+            // (`panels::watchlist::WatchlistToastReason::Countdown`) — elle empruntait la durée
+            // du profil d'alertes de ramassage, et n'était donc réglable que depuis la section
+            // d'à côté, pour les deux à la fois.
+            //
+            // Une fonctionnalité éteinte (`panels::feature_switch`) grise sa section entière : il
+            // n'y a ni son à essayer ni carte à fermer quand rien ne se déclenche.
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Suivi"));
+            if notifications::section(
+                ui,
+                inner_width,
+                notifications::Section {
+                    log_prefix: "suivi",
+                    enabled: state.features.suivi,
+                    muted: Some(&mut state.mutes.suivi),
+                    // `available: true` sans condition, contrairement aux deux sections
+                    // suivantes : ce réglage est LOCAL (`config::OverlayConfig`), il n'y a aucun
+                    // brouillon de compte à attendre et donc jamais de ligne grisée.
+                    auto_close: Some(notifications::AutoClose {
+                        available: true,
+                        label: notifications::COUNTDOWN_AUTO_CLOSE_LABEL,
+                        settings: &mut state.countdown_toast,
+                        input: &mut state.suivi.duration_input,
+                    }),
+                },
+            ) {
+                action = OptionsModalAction::TestCountdownSound;
             }
-        }
+
+            // **Ce que devient un suivi qui vient d'aboutir** (2026-09-17, demande utilisateur).
+            //
+            // Ces deux cases sont la réponse à « et si le retrait était une erreur ? » : le geste
+            // n'est pas rattrapable après coup, il est réglable AVANT. Les deux sont actives par
+            // défaut.
+            //
+            // Elles ne passent pas par `notifications::section` : ce n'est ni un son ni une carte,
+            // c'est ce qu'il advient de l'ENTRÉE. Grisées avec le reste de la section quand le
+            // Suivi est éteint, comme tout ce qui le concerne ici.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.add(
+                design::checkbox(
+                    &mut state.completion.remove,
+                    "Supprimer les éléments suivis lorsqu'ils sont complétés",
+                )
+                .enabled(state.features.suivi)
+                .tooltip(
+                    "Un décompte arrivé à 0 ou un objectif atteint a fini son travail : son \
+                     élément disparaît du bandeau ET du compte. Décochée, il reste, compteur à sa \
+                     cible.",
+                )
+                .log_name("options-suivi-retrait"),
+            );
+            // **L'animation, sous le retrait et en retrait** (2026-09-18, demande utilisateur :
+            // « l'option "Activer l'animation de complétion" est dépendante de l'option
+            // "Supprimer les éléments suivis" ») — la veille, les deux cases étaient
+            // indépendantes et une tuile pouvait célébrer et rester. Plus maintenant : la
+            // célébration est l'adieu de la tuile, voir `suivi_tab::CompletionSettings`. Même
+            // géométrie et même règle que le suivi des sorts sous le détail des combats : la case
+            // commence là où commence le LIBELLÉ de celle du dessus, grisée sans changer de valeur
+            // quand le retrait est décoché — on la retrouve telle quelle en le recochant.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.horizontal(|ui| {
+                ui.add_space(design::tokens::CHECKBOX_SIZE + design::tokens::CHECKBOX_LABEL_GAP);
+                ui.add(
+                    design::checkbox(
+                        &mut state.completion.animate,
+                        "Activer l'animation de complétion",
+                    )
+                    .enabled(state.features.suivi && state.completion.remove)
+                    .tooltip(
+                        "La tuile se soulève, sa bordure devient arc-en-ciel et tournoie, se fige \
+                         sur la couleur de rareté de l'objet, puis éclate en confettis — trois \
+                         secondes et demie. Décochée, l'élément s'en va sans cérémonie.",
+                    )
+                    .log_name("options-suivi-animation"),
+                );
+            });
+
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Alertes"));
+            // Le brouillon d'alertes descend du compte : tant qu'il n'est pas là, la ligne de
+            // fermeture se peint grisée sur un profil de repli plutôt que d'apparaître en cours
+            // de route (voir `notifications::AutoClose::available`). Le son, lui, s'essaie sans
+            // compte — il ne dépend que du périphérique audio.
+            let mut alertes_repli = overlay_engine::AlertProfile::default();
+            let alertes_prêtes = state.alerts_draft.is_some();
+            let profil = state.alerts_draft.as_mut().unwrap_or(&mut alertes_repli);
+            if notifications::section(
+                ui,
+                inner_width,
+                notifications::Section {
+                    log_prefix: "alertes",
+                    enabled: state.features.alerts,
+                    muted: None,
+                    auto_close: Some(notifications::AutoClose {
+                        available: alertes_prêtes,
+                        label: notifications::AUTO_CLOSE_LABEL,
+                        settings: profil,
+                        input: &mut state.alerts.duration_input,
+                    }),
+                },
+            ) {
+                action = OptionsModalAction::TestAlertSound;
+            }
+
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Chat"));
+            let mut chat_repli = ChatDraft::default();
+            let chat_prêt = state.chat_draft.is_some();
+            let chat = state.chat_draft.as_mut().unwrap_or(&mut chat_repli);
+            if notifications::section(
+                ui,
+                inner_width,
+                notifications::Section {
+                    log_prefix: "chat",
+                    enabled: state.features.chat,
+                    muted: Some(&mut state.mutes.chat),
+                    auto_close: Some(notifications::AutoClose {
+                        available: chat_prêt,
+                        label: notifications::AUTO_CLOSE_LABEL,
+                        settings: &mut chat.toast,
+                        input: &mut state.chat.duration_input,
+                    }),
+                },
+            ) {
+                action = OptionsModalAction::TestChatSound;
+            }
+
+            // **Section « Démarrage » (2026-09-16)** — une seule case : ce que l'overlay fait
+            // avant même qu'on le lance.
+            //
+            // Elle a ouvert l'onglet quelques heures, à la place que « Fichier » occupait, puis a
+            // été descendue juste après « Fichier » (demande utilisateur du 2026-09-16 :
+            // « déplace la section Démarrage après la section Fichier ») : comme le chemin de
+            // `wakfu.log`, ce réglage se pose une fois et ne se retouche plus — c'est de la
+            // maintenance, pas un réglage de session. **Remontée avant « Fichier » le 2026-09-21**
+            // (demande utilisateur : « déplace la section "démarrage" avant la section
+            // "fichier" ») : elle ouvre la maintenance, une case seule avant le champ et le bloc
+            // « Journal » qui le suit. Elle reste la seule section dont le réglage agit hors de
+            // l'overlay.
+            //
+            // **Ce réglage n'est pas dans `config.toml`** : son état réel appartient au système
+            // (clé `Run` sous Windows, fichier `.desktop` sous Linux) et se désactive aussi depuis
+            // le Gestionnaire des tâches ou les réglages du bureau. Il est donc lu à l'ouverture
+            // et reposé à « Valider » — voir `crate::autostart`, dont la doc de module porte le
+            // raisonnement complet.
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Démarrage"));
+            ui.add(
+                design::checkbox(
+                    &mut state.start_with_os,
+                    "Lancer l'overlay au démarrage de l'ordinateur",
+                )
+                .tooltip(
+                    "L'overlay s'ouvre avec votre session, sans attendre que vous le lanciez. Il \
+                     reste sur son écran de connexion tant que le jeu n'est pas démarré.",
+                )
+                .log_name("options-demarrage-auto"),
+            );
+
+            // **Section « Fichier »** — le chemin de `wakfu.log` que l'overlay suit.
+            //
+            // **Descendue ici le 2026-09-16** (demande utilisateur : « déplacer la section
+            // Fichier avant la section Mise à jour »), elle ouvrait l'onglet depuis la refonte du
+            // 2026-09-09. Elle y était par ancienneté — c'était le premier réglage de l'overlay —
+            // pas par usage : ce chemin se règle une fois, souvent jamais (la découverte
+            // automatique le trouve seule, voir `overlay_ingest::discovery`), là où les sections
+            // qui la précèdent maintenant se règlent au fil des sessions. Elle rejoint donc les
+            // autres sections de maintenance.
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Fichier"));
+
+            // Le champ et le bouton partagent une ligne : le bouton prend sa largeur naturelle
+            // (libellé + marges du design system, voir `Button::desired_size`) et le champ occupe tout
+            // le reste. C'est le bouton qui commande, pas l'inverse — une largeur figée pour lui
+            // désaccorderait le couple dès que le libellé ou la fenêtre changent.
+            let browse = design::button("Parcourir")
+                .variant(ButtonVariant::Secondary)
+                .size(ButtonSize::Height(ROW_HEIGHT))
+                .log_name("options-parcourir");
+            let browse_width = browse.desired_size(ui).x;
+            let row_rect = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
+            // Plancher à zéro : si la ligne devenait plus étroite que le bouton, un rectangle de
+            // largeur négative serait inversé par egui et peint n'importe où. Zéro le rend invisible,
+            // ce qui se voit sur une capture — c'est la règle du contrat de composant.
+            let field_width = (row_rect.width() - browse_width - FIELD_TO_BROWSE_GAP).max(0.0);
+            // Le champ garde sa hauteur native (25px) et se centre sur la ligne, que le bouton fixe à
+            // 36 : le jeu compose réellement des lignes où le champ est plus bas que ce qui
+            // l'accompagne (voir `design::components::input`), et la règle du design system est que la
+            // hauteur d'un composant est celle de sa référence — pas celle de son voisin.
+            let field_rect = egui::Rect::from_center_size(
+                egui::pos2(row_rect.left() + field_width / 2.0, row_rect.center().y),
+                egui::vec2(field_width, FIELD_HEIGHT),
+            );
+            let browse_rect = egui::Rect::from_min_size(
+                egui::pos2(row_rect.right() - browse_width, row_rect.top()),
+                egui::vec2(browse_width, ROW_HEIGHT),
+            );
+            // **Plus de focus initial dans ce champ** depuis que la section a quitté la tête de
+            // l'onglet (2026-09-16) : il était justifié quand le chemin de `wakfu.log` était le
+            // premier réglage visible à l'ouverture (« son unique réglage est ce champ »), il ne
+            // l'est plus pour un champ que la fenêtre n'ouvre même pas sous les yeux — le curseur
+            // aurait clignoté plusieurs sections plus bas, hors du champ visible.
+            ui.put(
+                field_rect,
+                design::input(&mut state.path_input)
+                    .placeholder("Chemin vers wakfu.log")
+                    .width(field_width)
+                    // Un chemin se retape rarement à partir de l'ancien : la croix vide d'un geste.
+                    .clearable(true)
+                    // Le champ porte l'alerte en même temps que le message ci-dessous : celui-ci est
+                    // sous le bouton « Parcourir » et hors du regard de qui vient de taper.
+                    .error(state.error.is_some())
+                    .log_name("options-chemin"),
+            );
+
+            if ui.put(browse_rect, browse).clicked() {
+                action = OptionsModalAction::Browse;
+            }
+
+            // Message d'erreur — `design::info_text` au ton alerte depuis le 2026-09-10. C'était le
+            // dernier texte de la modale à échapper au design system : un `ui.label` à la police
+            // proportionnelle d'egui, au corps 13 arbitraire, sans pastille ni interligne relevé. Son
+            // rouge (`#e06055`) n'appartenait à aucune capture ; celui du composant est le rouge mesuré
+            // du bouton « Annuler ».
+            if let Some(err) = &state.error {
+                ui.add_space(INFO_GAP);
+                ui.add(
+                    design::info_text(err)
+                        .tone(design::InfoTone::Alert)
+                        .width(inner_width)
+                        .log_name("options-erreur"),
+                );
+            }
+
+            // **Section « Journal »** (2026-09-18, constat C6 de `docs/analyse-rgpd.md`). Le
+            // journal technique est local et n'est jamais téléversé, mais il vit 14 jours sur le
+            // disque et s'envoie tel quel avec un rapport de bug : ce qui s'y écrit ORDINAIREMENT
+            // ne contient plus de nom de personnage, de pseudonyme d'autre joueur, de chemin
+            // portant le nom de compte Windows, ni de code d'appairage. Cette case rend ces
+            // détails au diagnostic — sur demande, jamais par défaut, et sans redémarrer
+            // (`logging::set_verbose`).
+            //
+            // **Sous « Fichier » depuis le 2026-09-21** (demande utilisateur : « déplace la section
+            // "journal" de l'onglet "À propos" et tout son contenu en dessous de la section
+            // "Fichier" »). Elle est née dans « À propos », à côté de « Vos données » qui parle
+            // déjà de ce que l'overlay écrit sur la machine ; mais sa case est un réglage,
+            // brouillon comme les autres, et elle suit le fichier que le journal accompagne dans
+            // un rapport de bug.
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Journal"));
+            ui.add(
+                design::info_text(JOURNAL_INFO)
+                    .width(inner_width)
+                    .log_name("options-journal-info"),
+            );
+            ui.add_space(INFO_GAP);
+            ui.add(
+                design::checkbox(&mut state.verbose_log, "Journal détaillé")
+                    .tooltip(
+                        "À cocher seulement pour diagnostiquer un problème. Le journal reçoit \
+                         alors aussi les noms de vos personnages, le chemin complet de wakfu.log \
+                         et le détail des erreurs. Rien n'est envoyé pour autant : ce fichier \
+                         reste sur cet ordinateur.",
+                    )
+                    .log_name("options-journal-detaille"),
+            );
+
+            // **Section « Compte »** (2026-09-13) — la déconnexion, qui était jusque-là un raccourci
+            // global (`Ctrl+Alt+D`, voir `crate::shortcuts`). Demande utilisateur : en faire un bouton,
+            // ici, avec de quoi comprendre ce qu'il fait avant de le presser.
+            //
+            // **Ce bouton n'est PAS un brouillon**, contrairement à tout le reste de cette fenêtre : il
+            // agit tout de suite (l'hôte efface le jeton et l'overlay revient à son écran de
+            // connexion), et « Annuler » ne le rattraperait pas. C'est précisément ce qui justifie la
+            // confirmation qu'il ouvre — là où l'onglet « Alertes » a pu retirer la sienne, son retrait
+            // d'objet étant annulable jusqu'à « Valider » (voir `alerts_tab`, règle 4).
+            ui.add_space(SECTION_GAP);
+            ui.add(design::heading("Compte"));
+            ui.add(
+                design::info_text(
+                    "L'overlay ne fonctionne qu'avec un compte connecté : c'est lui qui porte la liste \
+                     suivie, les alertes et l'historique synchronisé. Vous déconnecter ramène l'overlay \
+                     à son écran de connexion, et il faudra réappairer l'application pour le réutiliser.",
+                )
+                .tone(design::InfoTone::Info)
+                .width(inner_width)
+                .log_name("options-compte-info"),
+            );
+            // **Jeton hors trousseau** (constat C7 de `docs/analyse-rgpd.md`, 2026-09-19) : quand
+            // le trousseau du système a manqué, la session est dans un fichier en clair — le
+            // journal le disait, pas l'interface. Posé par l'hôte à l'ouverture : la déconnexion
+            // ferme cette fenêtre, l'avis n'a donc pas à se rafraîchir pendant qu'elle est ouverte.
+            if let Some(text) = token_file_notice(state.token_on_disk) {
+                ui.add_space(INFO_GAP);
+                ui.add(
+                    design::info_text(text)
+                        .tone(design::InfoTone::Alert)
+                        .width(inner_width)
+                        .log_name("options-compte-jeton-fichier"),
+                );
+            }
+            ui.add_space(INFO_GAP);
+            // **Rouge et centré** (demande utilisateur, 2026-09-13), là où ce bouton était secondaire
+            // et aligné à gauche comme les réglages au-dessus. Les deux vont ensemble : c'est la seule
+            // action de cette fenêtre qui échappe à « Annuler », et noyée dans la colonne des réglages
+            // elle ne se distinguait pas d'un champ de plus. La couleur avertit, la confirmation
+            // rattrape le geste — l'une ne remplace pas l'autre.
+            //
+            // La texture `Danger` est native en **36 px**, soit exactement `ROW_HEIGHT` : ni dégradé
+            // étiré ni embout à la mauvaise échelle (voir `design::ButtonVariant::textures`).
+            //
+            // **Largeur naturelle**, jamais figée — même règle que la ligne de recherche de l'onglet
+            // « Raccourcis » : une largeur en dur écrête le libellé dès que la police ou le mot
+            // changent, ce qui s'est déjà vu (« Réinitialise »).
+            let disconnect = design::button("Se déconnecter")
+                .variant(ButtonVariant::Danger)
+                .size(ButtonSize::Height(ROW_HEIGHT))
+                .enabled(state.account_connected)
+                .tooltip(if state.account_connected {
+                    "Effacer la session enregistrée et revenir à l'écran de connexion"
+                } else {
+                    "Aucun compte connecté"
+                })
+                .log_name("options-deconnecter");
+            let disconnect_size = disconnect.desired_size(ui);
+            let row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
+            if ui
+                .put(
+                    egui::Rect::from_center_size(row.center(), disconnect_size),
+                    disconnect,
+                )
+                .clicked()
+            {
+                state.pending_disconnect = true;
+            }
+
+            // **« Supprimer les données locales » a fermé cette section du 2026-09-18 au
+            // 2026-09-21**, sous « Se déconnecter ». Il est parti sous « Vos données », dans
+            // « À propos » (demande utilisateur) : ce n'est pas un réglage de compte mais le droit
+            // à l'effacement, et le bloc qui dit ce que l'overlay conserve sur la machine est
+            // là-bas — voir `panels::a_propos_tab::PURGE_INFO`. La confirmation, elle, reste ici
+            // (`pending_purge`), commune aux deux onglets.
+        });
     });
 
-    if alerts_action == AlertsTabAction::TestSound {
-        action = OptionsModalAction::TestAlertSound;
-    }
-    if chat_action == ChatTabAction::TestSound {
-        action = OptionsModalAction::TestChatSound;
-    }
     match suivi_action {
-        suivi_tab::SuiviTabAction::TestSound => action = OptionsModalAction::TestCountdownSound,
         suivi_tab::SuiviTabAction::ResolveRecipe(id) => {
             action = OptionsModalAction::ResolveRecipe(id)
         }
@@ -1022,6 +1701,58 @@ pub fn show(
             design::ConfirmChoice::No => state.pending_disconnect = false,
             design::ConfirmChoice::Pending => {}
         }
+    } else if state.pending_purge {
+        // **La confirmation d'effacement** (2026-09-18) — même exclusion, même voile sur la
+        // fenêtre entière que ses voisines. Elle nomme les deux conséquences dans l'ordre où
+        // l'utilisateur les subit : l'effacement, puis la fermeture. Le bloc d'information sous
+        // « Vos données » (`a_propos_tab::PURGE_INFO`) dit ce que « toutes » recouvre ; la
+        // question, elle, tient en deux lignes (`tokens::CONFIRM_TEXT_WIDTH`).
+        let choix =
+            design::confirm_dialog("Supprimer toutes les données locales et fermer l'overlay ?")
+                .over(window)
+                .log_name("options.effacement-donnees")
+                .show(ui);
+        match choix {
+            design::ConfirmChoice::Yes => {
+                state.pending_purge = false;
+                action = OptionsModalAction::PurgeLocalData;
+            }
+            design::ConfirmChoice::No => state.pending_purge = false,
+            design::ConfirmChoice::Pending => {}
+        }
+    } else if state.pending_quit {
+        // **La confirmation de fermeture de l'overlay** (2026-09-16) — même exclusion, même voile
+        // sur la fenêtre entière que ses voisines : « Oui » arrête le programme, il n'y a rien à
+        // rattraper derrière.
+        let choix = design::confirm_dialog("Fermer l'overlay ?")
+            .over(window)
+            .log_name("options.fermeture-overlay")
+            .show(ui);
+        match choix {
+            design::ConfirmChoice::Yes => {
+                state.pending_quit = false;
+                action = OptionsModalAction::Quit;
+            }
+            design::ConfirmChoice::No => state.pending_quit = false,
+            design::ConfirmChoice::Pending => {}
+        }
+    } else if state.pending_restart {
+        // **La confirmation de redémarrage** (2026-09-17) — même exclusion, même voile sur la
+        // fenêtre entière que ses voisines. Elle dit « Redémarrer l'overlay ? » et non « Fermer
+        // puis relancer » : ce que l'utilisateur perd est le même qu'à la fermeture (le combat
+        // affiché, le brouillon de cette fenêtre), ce qu'il retrouve est un overlay neuf.
+        let choix = design::confirm_dialog("Redémarrer l'overlay ?")
+            .over(window)
+            .log_name("options.redemarrage-overlay")
+            .show(ui);
+        match choix {
+            design::ConfirmChoice::Yes => {
+                state.pending_restart = false;
+                action = OptionsModalAction::Restart;
+            }
+            design::ConfirmChoice::No => state.pending_restart = false,
+            design::ConfirmChoice::Pending => {}
+        }
     }
     // **La garde de fermeture**, peinte en dernier et sur la fenêtre ENTIÈRE.
     else if state.pending_close {
@@ -1042,12 +1773,14 @@ pub fn show(
     // Clavier — lu APRÈS les boutons : un clic de cette frame l'emporte sur une touche de la même
     // frame (cas de figure théorique, mais l'ordre doit être décidé plutôt que subi).
     //
-    // Ces deux touches sont traitées ICI, dans le panneau, et non par l'hôte, pour deux raisons.
-    // La première est le contrat (§17.3 bis du plan) : un panneau ne produit aucun effet de bord,
-    // il remonte une intention — `Cancel`/`Validate` sont exactement les intentions que les boutons
-    // du pied de page produisent déjà. La seconde est que l'hôte, lui, ne peut PAS distinguer un
-    // Échap destiné à la modale : son filet global `Échap → event_loop.exit()` fermait l'overlay
-    // entier (voir `main.rs`/`bin/overlay-ui-x11.rs`, où ce filet exclut désormais cette fenêtre).
+    // Ces deux touches sont traitées ICI, dans le panneau, et non par l'hôte, pour deux raisons. La
+    // première est le contrat (§17.3 bis du plan) : un panneau ne produit aucun effet de bord, il
+    // remonte une intention — `Cancel`/`Validate` sont exactement les intentions que les boutons du
+    // pied de page produisent déjà. La seconde est que l'hôte, lui, ne peut PAS distinguer un Échap
+    // destiné à la modale : son filet global `Échap → event_loop.exit()` fermait l'overlay entier.
+    // Ce filet excluait d'abord cette fenêtre (2026-09-08), puis a disparu tout court le
+    // 2026-09-17 — il fermait encore l'overlay quand la touche partait au bandeau resté au premier
+    // plan (voir `main.rs::window_event`). Échap n'a donc plus qu'un lecteur : ce panneau.
     //
     // `TextEdit` ne retire pas ces événements de l'entrée globale (il travaille sur une copie
     // filtrée, `InputState::filtered_events`) : les lire ici reste fiable même quand le champ de
@@ -1086,137 +1819,22 @@ pub fn show(
     action
 }
 
-/// La ligne d'information de la section « Mise à jour » et son ton — une fonction libre, pour
-/// que ses formulations soient testées sans peindre.
-pub fn update_info_line(
-    status: &UpdateStatus,
-    now: std::time::Instant,
-) -> (String, design::InfoTone) {
-    let since = |at: std::time::Instant| {
-        let secs = now.saturating_duration_since(at).as_secs();
-        if secs < 60 {
-            "à l'instant".to_string()
-        } else if secs < 3600 {
-            format!("il y a {} min", secs / 60)
-        } else {
-            format!("il y a {} h", secs / 3600)
-        }
-    };
-    match status {
-        UpdateStatus::Idle => (
-            "Aucune vérification depuis le lancement.".to_string(),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::Checking => ("Recherche en cours…".to_string(), design::InfoTone::Info),
-        UpdateStatus::UpToDate { checked_at } => (
-            format!(
-                "Dernière vérification {} · vous êtes à jour.",
-                since(*checked_at)
-            ),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::Available {
-            version,
-            download_size,
-            mandatory,
-            checked_at,
-            ..
-        } => (
-            format!(
-                "Dernière vérification {} · version {version} disponible · {}{}",
-                since(*checked_at),
-                update::human_size(*download_size),
-                if *mandatory { " · obligatoire" } else { "" }
-            ),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::Downloading {
-            version,
-            received,
-            total,
-        } => (
-            format!(
-                "Téléchargement de la version {version} : {} / {}",
-                update::human_size(*received),
-                update::human_size(*total)
-            ),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::Verifying { version } => (
-            format!("Vérification de la version {version}…"),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::ReadyToInstall { version, .. } | UpdateStatus::Installing { version } => (
-            format!("Installation de la version {version}…"),
-            design::InfoTone::Info,
-        ),
-        UpdateStatus::Unavailable { reason, checked_at } => (
-            format!(
-                "Dernière vérification {} · impossible ({reason}).",
-                since(*checked_at)
-            ),
-            design::InfoTone::Alert,
-        ),
-        UpdateStatus::Failed {
-            headline, detail, ..
-        } => (
-            format!("Mise à jour impossible : {headline} ({detail})"),
-            design::InfoTone::Alert,
-        ),
-    }
-}
-
-/// Le bouton unique de la section « Mise à jour », selon l'état.
-pub struct UpdateButtonSpec {
-    pub label: String,
-    pub variant: ButtonVariant,
-    pub enabled: bool,
-    pub tooltip: &'static str,
-}
-
-pub fn update_button(status: &UpdateStatus) -> UpdateButtonSpec {
-    match status {
-        UpdateStatus::Available { version, .. } => UpdateButtonSpec {
-            label: format!("Mettre à jour vers {version}"),
-            variant: ButtonVariant::Primary,
-            enabled: true,
-            tooltip: "Ferme l'overlay, installe la nouvelle version et le relance",
-        },
-        UpdateStatus::Checking => UpdateButtonSpec {
-            label: "Recherche…".to_string(),
-            variant: ButtonVariant::Secondary,
-            enabled: false,
-            tooltip: "Lecture de la dernière version publiée",
-        },
-        UpdateStatus::Downloading { .. }
-        | UpdateStatus::Verifying { .. }
-        | UpdateStatus::ReadyToInstall { .. }
-        | UpdateStatus::Installing { .. } => UpdateButtonSpec {
-            label: "Mise à jour en cours…".to_string(),
-            variant: ButtonVariant::Secondary,
-            enabled: false,
-            tooltip: "L'overlay se relancera une fois la version installée",
-        },
-        UpdateStatus::Failed { .. } => UpdateButtonSpec {
-            label: "Réessayer".to_string(),
-            variant: ButtonVariant::Secondary,
-            enabled: true,
-            tooltip: "Rechercher à nouveau la dernière version publiée",
-        },
-        UpdateStatus::Idle | UpdateStatus::UpToDate { .. } | UpdateStatus::Unavailable { .. } => {
-            UpdateButtonSpec {
-                label: "Recherche de mise à jour".to_string(),
-                variant: ButtonVariant::Secondary,
-                enabled: true,
-                tooltip: "Lire la dernière version publiée, sans rien installer",
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn l_avis_du_jeton_fichier_nomme_le_fichier_et_se_tait_sinon() {
+        assert_eq!(token_file_notice(false), None);
+        let texte = token_file_notice(true).unwrap();
+        // Le nom du fichier dépend du déploiement visé (`token_store::slot`, 2026-09-21) :
+        // `native-session.token` en prod, `native-session@<hôte>.token` ailleurs — dont ici, un
+        // build de test parlant à dev. On vérifie donc l'emplacement réel, pas un nom figé.
+        let emplacement = overlay_sync::token_store::token_file_location();
+        assert!(texte.contains(&emplacement.display().to_string()));
+        assert!(texte.contains("native-session"));
+        assert!(texte.contains("se déconnecter"));
+    }
 
     /// L'état d'une fenêtre qu'on vient d'ouvrir : référence et brouillon accordés, donc rien en
     /// attente.
@@ -1242,50 +1860,6 @@ mod tests {
         state.auto_update = false;
         assert!(state.is_dirty());
         assert!(!state.commit().auto_update);
-    }
-
-    #[test]
-    fn ligne_et_bouton_de_la_section_mise_a_jour_suivent_l_etat() {
-        use overlay_sync::update::UpdateStatus;
-        let now = std::time::Instant::now();
-        let (ligne, _) = update_info_line(
-            &UpdateStatus::UpToDate { checked_at: now },
-            now + std::time::Duration::from_secs(185),
-        );
-        assert_eq!(
-            ligne,
-            "Dernière vérification il y a 3 min · vous êtes à jour."
-        );
-        assert_eq!(
-            update_button(&UpdateStatus::Idle).label,
-            "Recherche de mise à jour"
-        );
-        let disponible = UpdateStatus::Available {
-            version: "0.21.0".into(),
-            download_size: 3_100_000,
-            mandatory: false,
-            notes_url: None,
-            checked_at: now,
-        };
-        let (ligne, tone) = update_info_line(&disponible, now);
-        assert_eq!(
-            ligne,
-            "Dernière vérification à l'instant · version 0.21.0 disponible · 3,1 Mo"
-        );
-        assert_eq!(tone, design::InfoTone::Info);
-        let bouton = update_button(&disponible);
-        assert_eq!(bouton.label, "Mettre à jour vers 0.21.0");
-        assert!(bouton.enabled);
-        assert_eq!(bouton.variant, ButtonVariant::Primary);
-        assert!(!update_button(&UpdateStatus::Checking).enabled);
-        let (_, tone) = update_info_line(
-            &UpdateStatus::Unavailable {
-                reason: "hors ligne".into(),
-                checked_at: now,
-            },
-            now,
-        );
-        assert_eq!(tone, design::InfoTone::Alert);
     }
 
     #[test]
@@ -1320,12 +1894,22 @@ mod tests {
             OptionsCommit {
                 path: "/jeu/wakfu.log".to_string(),
                 combat_always_visible: true,
+                // Le côté du panneau n'a pas été touché par ce test : emporté tel quel.
+                combat_on_right: false,
                 turn_notification: true,
                 turn_notification_muted: false,
                 features: FeatureToggles::default(),
                 mutes: AlertMutes::default(),
+                countdown_toast: suivi_tab::CountdownToastSettings::default(),
+                completion: suivi_tab::CompletionSettings::default(),
+                recap_resume: ResumeSettings::default(),
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
+                verbose_log: false,
+                // La case « Lancer l'overlay au démarrage de l'ordinateur » est posée décochée
+                // par `fenetre_ouverte` : « Valider » l'emporte telle quelle, sans rien lire du
+                // système — c'est l'hôte qui s'en charge (voir `crate::autostart`).
+                start_with_os: false,
             }
         );
     }
@@ -1343,7 +1927,7 @@ mod tests {
         state.features.suivi = false;
         assert!(
             state.is_dirty(),
-            "décocher « Activer le Suivi » doit ouvrir la garde de fermeture"
+            "décocher « Activer le suivi » doit ouvrir la garde de fermeture"
         );
         assert!(!state.commit().features.suivi, "« Valider » l'emporte");
 
@@ -1410,7 +1994,7 @@ mod tests {
         let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
         assert!(!state.is_dirty());
         state.shortcuts.set(
-            crate::shortcuts::ShortcutAction::Quit,
+            crate::shortcuts::ShortcutAction::Options,
             crate::shortcuts::Shortcut::parse("Ctrl+Alt+K").expect("combinaison de test valide"),
         );
         assert!(state.is_dirty());

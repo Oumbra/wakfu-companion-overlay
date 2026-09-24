@@ -15,9 +15,11 @@
 //! Régénéré depuis le vrai déploiement dev (`claude-dev.wakfu-companion.com`, 2026-09-02) via
 //! `cargo run -p overlay-sync --bin gen-catalog-fallback` (voir ce binaire) — jamais à la main.
 //! Catalogue complet réel (~489 Ko gzip, ~1,8 Mo bruts). À régénérer de la même façon si le
-//! catalogue serveur change significativement avant une release. Depuis le 2026-09-15,
-//! `client::base_url()` vise la prod par défaut : lancer le binaire tel quel régénère depuis la
-//! prod, poser `WAKFU_COMPANION_API_URL` pour régénérer depuis le déploiement dev.
+//! catalogue serveur change significativement avant une release. `client::base_url()` suit le
+//! profil de compilation (voir `build.rs` du crate) : `cargo run` (debug) régénère depuis le
+//! déploiement dev, `cargo run --release` depuis la prod ; `WAKFU_COMPANION_API_URL` surcharge.
+//! Depuis le 2026-09-20 la route exige une session : le binaire réutilise le jeton de l'overlay
+//! appairé sur le poste, contre ce même déploiement.
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -36,7 +38,7 @@ const APP_NAME: &str = "wakfu-companion-overlay";
 const APP_NAME: &str = "wakfu-companion-overlay-test";
 
 fn cache_file_path() -> PathBuf {
-    directories::ProjectDirs::from("", "", APP_NAME)
+    overlay_engine::app_dirs::project_dirs(APP_NAME)
         .map(|dirs| dirs.data_dir().join("catalog-cache.json"))
         .unwrap_or_else(|| PathBuf::from("catalog-cache.json"))
 }

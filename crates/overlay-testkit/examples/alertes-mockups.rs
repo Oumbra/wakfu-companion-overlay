@@ -94,7 +94,7 @@ use overlay_ui::panels::options_modal::OptionsTab;
 use overlay_ui::rarity_bridge::to_slot_rarity;
 use overlay_ui::ui_icons::UiIcons;
 
-use wakassets_fixtures::{CategoryFilter, CategoryIcons, RarityGems, GEM_NATIVE};
+use wakassets_fixtures::{CategoryFilter, CategoryIcons, RarityGems};
 
 // -------------------------------------------------------------------------------------------
 // Jetons propres aux maquettes.
@@ -391,9 +391,10 @@ impl SuggestionPreview {
                     *name,
                     categorie.category_key().unwrap_or_default(),
                 );
-                entry.gem = Some(gems.texture_id(*rarity));
-                entry.gem_size = GEM_NATIVE;
-                entry.image = Some(icons.unknown_entity_texture().id());
+                entry.gem = Some(gems.sized_texture(*rarity));
+                entry.image = Some(egui::load::SizedTexture::from_handle(
+                    icons.unknown_entity_texture(),
+                ));
                 entry.disabled = *deja;
                 if *deja {
                     entry.mention = Some("déjà suivi".to_owned());
@@ -409,7 +410,7 @@ impl SuggestionPreview {
         // disparaîtrait avec les rangées).
         let mut filters = vec![design::AutocompleteFilter::all(
             CategoryFilter::All.label(),
-            Some(cats.texture_id(CategoryFilter::All)),
+            Some(cats.sized_texture(CategoryFilter::All)),
         )];
         filters.extend(
             CategoryFilter::ITEM_CATEGORIES
@@ -419,7 +420,7 @@ impl SuggestionPreview {
                     Some(design::AutocompleteFilter::category(
                         c.category_key()?,
                         c.label(),
-                        Some(cats.texture_id(*c)),
+                        Some(cats.sized_texture(*c)),
                     ))
                 }),
         );
@@ -526,7 +527,9 @@ fn alert_item(
         design::item_slot()
             .size(TILE_SLOT)
             .frame(SlotFrame::Rarity(to_slot_rarity(item.rarity)))
-            .icon(icons.unknown_entity_texture().id())
+            .icon(egui::load::SizedTexture::from_handle(
+                icons.unknown_entity_texture(),
+            ))
             .log_name(item.name),
     );
 

@@ -207,7 +207,9 @@ fn item_slot(ui: &mut egui::Ui, icons: &UiIcons, rect: Rect, rarity: Option<Wakf
                 design::item_slot()
                     .size(rect.width())
                     .frame(SlotFrame::Rarity(to_slot_rarity(rarity)))
-                    .icon(icons.unknown_entity_texture().id()),
+                    .icon(egui::load::SizedTexture::from_handle(
+                        icons.unknown_entity_texture(),
+                    )),
             );
         }
         None => {

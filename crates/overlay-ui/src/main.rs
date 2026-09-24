@@ -24,12 +24,13 @@
 //! à cette fenêtre (`App::sync_session_windows`). Le logo du site est l'icône de fenêtre et
 //! l'icône de zone de notification, dont le menu — Options / Mise à jour / Déconnecter /
 //! Quitter — est le seul accès à l'overlay quand aucune fenêtre de jeu n'est ouverte
-//! (`App::install_tray`).
+//! (`App::install_tray`). « Mise à jour » rouvre cette même fenêtre sur son écran de mise à jour,
+//! seul cas où elle coexiste avec les overlays de jeu (`App::open_manual_update_window`).
 //!
-//! Volontairement incomplet par rapport à §9 du plan : pas encore d'État de synchro (dépend de la
-//! synchro serveur, L5). Pas de thème configurable ni de disposition repositionnable/persistée par
-//! écran — décision du mainteneur (§9 du plan, 2026-09-02) : un overlay n'est pas un site, palette
-//! fixe et ancrage automatique (`App::anchor_position`) seuls assumés. Le récap de session reste
+//! Pas de thème configurable ni de disposition repositionnable/persistée par écran, ni d'indicateur
+//! d'état de synchro — décisions du mainteneur (§9 du plan, 2026-09-02 et 2026-09-18) : un overlay
+//! n'est pas un site, palette fixe et ancrage automatique (`App::anchor_position`) seuls assumés ;
+//! la synchro (retries + backoff, L5) finit toujours par passer, rien d'alarmant à afficher. Le récap de session reste
 //! également **global** (identique sur toutes les fenêtres, pas ventilé par personnage —
 //! limitation connue, voir le plan) : ce sont les deux panneaux atteignables avec `overlay-engine`
 //! tel qu'il existe aujourd'hui.
@@ -39,6 +40,19 @@
 //! n'importe quel objet ramassé avec son son activé au compte déclenche toast + son
 //! (`alert_sound::play_loot_alert`), pas seulement les entrées suivies. Seul le cas
 //! `reason: 'countdown'` était câblé jusqu'ici (voir `spawn_engine_thread`).
+
+// **Exécutable fenêtré sans fenêtre** (2026-09-17, demande utilisateur : l'overlay doit tourner de
+// façon invisible, jamais dans une fenêtre de terminal). Compilé en sous-système *console*
+// jusqu'ici, un double-clic sur l'exe — ou son lancement automatique à l'ouverture de session
+// (`autostart`) — ouvrait une console noire qui restait à l'écran tant que l'overlay tournait, et
+// la fermer tuait l'overlay. Avec ce sous-système, Windows n'en crée aucune : l'overlay ne se
+// manifeste que par ses fenêtres transparentes et son icône de zone de notification (Quitter y est,
+// `App::install_tray`). Le journal console n'est pas perdu pour autant en développement : lancé
+// depuis un terminal (`preview.ps1`), le process se rattache à la console de son parent — voir
+// `logging::attach_parent_console`. Ce n'est PAS un service Windows, et ne peut pas l'être : un
+// service vit en session 0, sans accès au bureau de l'utilisateur, donc sans possibilité d'afficher
+// quoi que ce soit par-dessus le jeu (§11 du plan). Même modèle qu'`overlay-focus`.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 use std::collections::HashMap;
 use std::env;
@@ -51,22 +65,26 @@ use std::thread;
 use arc_swap::ArcSwap;
 use egui_wgpu::wgpu;
 use global_hotkey::GlobalHotKeyEvent;
-use overlay_engine::{CatalogIndex, DungeonIndex, SessionSnapshot, WatchlistEntry};
+use overlay_engine::{CatalogIndex, DungeonIndex, Roster, SessionSnapshot, WatchlistEntry};
 use overlay_ingest::discovery;
 use overlay_sync::update::{apply as update_apply, UpdateStatus};
 use overlay_ui::alert_sound;
+use overlay_ui::avatars::AvatarAtlas;
 use overlay_ui::background::{
-    spawn_auth_thread, spawn_catalog_thread, spawn_dungeon_thread, spawn_sync_thread,
-    spawn_update_thread, UpdateCommand,
+    spawn_auth_thread, spawn_catalog_thread, spawn_dungeon_thread, spawn_game_servers_thread,
+    spawn_sync_thread, spawn_update_thread, UpdateCommand,
 };
 use overlay_ui::build_info;
 use overlay_ui::chat_command::{self, ChatCommand};
+use overlay_ui::combat_placement;
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
+    SharedRosterDraft, WatchlistCompleted,
 };
 use overlay_ui::frame::{recreate_surface, render, GpuState};
-use overlay_ui::game_window::{GameRect, GameWindowTracker};
+use overlay_ui::game_servers::GameServers;
+use overlay_ui::game_window::{self, GameRect, GameWindowTracker};
 use overlay_ui::logging;
 use overlay_ui::panels;
 use overlay_ui::panels::alerts_tab;
@@ -75,14 +93,19 @@ use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::feature_switch::FeatureToggles;
 use overlay_ui::panels::login::{self, LoginState};
+use overlay_ui::panels::notifications::AlertMutes;
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
-use overlay_ui::panels::sound_row::AlertMutes;
+use overlay_ui::panels::personnages_tab::{PersonnagesAvailability, PersonnagesTabState};
 use overlay_ui::panels::suivi_tab;
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
+use overlay_ui::recap_placement;
+use overlay_ui::recap_session::{self, RecapSession};
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content;
-use overlay_ui::render_content::{AuthCommand, AuthStatus, OverlayKind, RenderContent, UserEvent};
+use overlay_ui::render_content::{
+    AuthCommand, AuthStatus, OverlayKind, RenderContent, ResetTarget, UserEvent,
+};
 use overlay_ui::shortcuts::{ShortcutAction, ShortcutBindings, ShortcutRegistry};
 use overlay_ui::startup::StartupProgress;
 use overlay_ui::turn_watch;
@@ -92,15 +115,14 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
-    SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
+    SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GW_HWNDPREV, HWND_NOTOPMOST, HWND_TOPMOST,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, WindowEvent};
+use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Icon, Window, WindowAttributes, WindowId, WindowLevel};
 
 #[cfg(target_os = "windows")]
@@ -112,16 +134,28 @@ use winit::platform::windows::WindowAttributesExtWindows;
 // DÉFAUT, inchangée par rapport aux anciennes constantes `HOTKEY_LABEL`/`DETAILS_HOTKEY_LABEL`/…,
 // dont la doc a suivi là-bas), `ShortcutBindings` (les combinaisons effectives, lues de
 // `config.toml`) et `ShortcutRegistry` (l'enregistrement auprès de l'OS, partagé avec
-// `bin/overlay-ui-x11.rs`). `App::hotkeys` porte le tout.
+// `bin/wakfu-companion-overlay-x11.rs`). `App::hotkeys` porte le tout.
 
 /// Voir `App::sync_topmost`.
+/// Écart entre deux images pendant qu'une tuile du Suivi célèbre son aboutissement — 60 Hz.
+///
+/// La boucle de l'overlay est réactive et se réveille sinon toutes les 50 ms (voir
+/// `about_to_wait`) : une couronne qui tourne à 20 images par seconde saccade visiblement. Ce
+/// rythme n'est demandé que le temps de la célébration, jamais en continu.
+const COMPLETION_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
+
 const TOPMOST_REASSERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
-/// Délai de grâce avant repli en `HWND_NOTOPMOST` — voir `OverlayWindow::pending_demote_since` et
-/// `App::sync_topmost`. Assez court pour qu'un changement de fenêtre volontaire et soutenu
-/// reste respecté rapidement (ne pas recouvrir durablement une autre appli, retour utilisateur
-/// 2026-09-01), assez long pour absorber un aléa de timing d'un seul tick (~50 ms) entre les deux
-/// overlays d'un même personnage.
-const TOPMOST_DEMOTE_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+/// Délai de grâce avant repli hors topmost (recollage juste au-dessus de sa fenêtre de jeu,
+/// `App::glue_above_game`) — voir `OverlayWindow::pending_demote_since` et
+/// `App::sync_topmost`. Deux ticks de sondage (~50 ms chacun) : assez pour absorber un aléa
+/// d'un seul tick entre les deux overlays d'un même personnage (le motif du 2026-09-02), et
+/// imperceptible à l'œil — la disparition doit être aussi immédiate que l'apparition.
+///
+/// **1 500 ms jusqu'au 2026-09-23** (retour utilisateur, vidéo à l'appui : « il reste une
+/// seconde cinq, c'est beaucoup trop », journal `session_id=14468` — rétrogradation 1,49 s après
+/// la promotion de l'autre client). Ce délai avait été choisi large sans mesure ; rien dans les
+/// journaux depuis n'a jamais montré un aléa supérieur à un tick.
+const TOPMOST_DEMOTE_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
 /// Cadence de la surveillance de tour (§9.1 decies) — voir `App::sync_turn_watch`. Le chrono du
 /// widget change à la seconde ; 500 ms suffisent pour voir chaque tour commencer.
 const TURN_WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
@@ -153,6 +187,7 @@ const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGI
 /// toast, 6 px de marge basse, plus 2 px d'arrondi — et rien de plus : la fenêtre reste
 /// cliquable/bloquante sur toute sa surface, y compris là où elle ne peint rien.
 const WATCHLIST_HEIGHT: f64 = 92.0 + render_content::WATCHLIST_TOOLTIP_RESERVE as f64;
+
 /// Même marge que `egui::Frame::NONE.inner_margin(6)` posée par `render` (6px de chaque côté) —
 /// à additionner à `panels::watchlist::content_width` pour obtenir la largeur de FENÊTRE
 /// nécessaire, pas seulement celle du contenu peint dedans.
@@ -215,23 +250,26 @@ fn watchlist_target_height(toast_active: bool, select_open: bool) -> f64 {
             0.0
         }
 }
-/// Marge, en pixels physiques, entre le bord gauche visible de la fenêtre de jeu et le bord
-/// gauche de l'overlay Combat.
-///
-/// **Refonte 2026-09-04** (retour utilisateur, capture d'écran à l'appui) : la valeur initiale
-/// (12 px, « collé à quelques pixels près ») laissait un vide visible entre le bord de la fenêtre
-/// de jeu et le cadre — l'utilisateur veut désormais que l'overlay se fonde dans le jeu (« comme
-/// si l'overlay faisait partie du jeu »), donc un ancrage réellement à zéro. Voir aussi
-/// `render_content::paint_content` : la marge interne du panneau (`Frame::inner_margin`) doit être
-/// nulle elle aussi, sinon un vide subsiste malgré cette valeur à 0.
-const GAME_EDGE_MARGIN_PX: i32 = 0;
-/// Même principe que `GAME_EDGE_MARGIN_PX`, mais pour le bord HAUT — ancrage de l'overlay Suivi
+// **La marge au bord vertical du client a rejoint `overlay_ui::combat_placement`** (2026-09-17)
+// avec tout l'ancrage du panneau Combat : elle est NULLE, des deux côtés, et c'est une décision
+// d'écran plus qu'un calcul. Son relevé, qu'il ne faut pas perdre :
+//
+// **Refonte 2026-09-04** (retour utilisateur, capture d'écran à l'appui) : la valeur initiale
+// (12 px, « collé à quelques pixels près ») laissait un vide visible entre le bord de la fenêtre
+// de jeu et le cadre — l'utilisateur veut que l'overlay se fonde dans le jeu (« comme si l'overlay
+// faisait partie du jeu »), donc un ancrage réellement à zéro. Voir aussi
+// `render_content::paint_content` : la marge interne du panneau (`Frame::inner_margin`) doit être
+// nulle elle aussi, sinon un vide subsiste malgré cet ancrage.
+//
+// Le binaire X11, lui, était resté à 12 px — cette refonte ne l'avait pas suivi, et personne ne
+// l'avait vu puisque rien ne comparait les deux hôtes. Le calcul partagé les met d'accord.
+/// Marge, en pixels physiques, entre le bord HAUT de la zone cliente du jeu et l'overlay Suivi
 /// (demande utilisateur explicite 2026-09-01 : « collé en haut de la fenêtre de jeu au centre »,
 /// « le même espacement » que les boutons d'interface du jeu — menu/Boutique en haut-gauche, icônes
 /// en haut-droite).
 ///
 /// **Historique de mise au point (2026-09-01, deux allers-retours avec capture d'écran)** : la
-/// valeur initiale (12 px, copiée de `GAME_EDGE_MARGIN_PX`) était bien trop petite — l'overlay
+/// valeur initiale (12 px, copiée de la marge latérale du Combat) était bien trop petite — l'overlay
 /// apparaissait quasiment collé au très haut de la fenêtre de jeu. Diagnostic confirmé par le
 /// `println!` de `create_overlay_window` (`rect.top=0 client_top=0, écart 0`) : **le client Wakfu
 /// dessine lui-même sa fausse barre de titre DANS sa zone cliente** (voir `GameRect::client_top`,
@@ -241,13 +279,19 @@ const GAME_EDGE_MARGIN_PX: i32 = 0;
 /// visuellement correct (confirmé par une deuxième capture d'écran, alignement quasi identique aux
 /// boutons Menu/Boutique du jeu).
 const GAME_TOP_MARGIN_PX: i32 = 28;
+// L'ancrage du bloc Récap — « en haut à gauche, en dessous des boutons du jeu » (2026-09-16) —
+// et le décalage que l'utilisateur lui donne à la souris depuis le 2026-09-17 vivent dans
+// `overlay_ui::recap_placement` (`DEFAULT_OFFSET`, bornage et aimantation) : le binaire X11 fait
+// le même calcul au pixel près, et là-bas il se teste sans serveur graphique. Les constantes
+// `GAME_RECAP_TOP_MARGIN_PX`/`GAME_RECAP_EDGE_MARGIN_PX` qui vivaient ici sont devenues ce
+// `DEFAULT_OFFSET`, relevé sur capture d'écran annotée — toute leur histoire y est.
 
 // `OverlayKind`/`UserEvent`/`AuthStatus`/`AuthCommand`/`CLICK_THROUGH_OPACITY` ont migré vers
 // `overlay_ui::render_content` (2026-09-03, §17.1 du plan) — voir leur doc là-bas, importés en
 // tête de ce fichier. Rien ne change à leur usage ici, seul leur PROPRIÉTAIRE change : la
 // construction d'UI (`render_content::build_ui`) doit pouvoir être appelée par un futur harnais
-// de rendu offscreen (`overlay-testkit`) sans dépendre du binaire `overlay-ui`, qui reste
-// Windows-only (import inconditionnel de `windows::`, voir plus haut).
+// de rendu offscreen (`overlay-testkit`) sans dépendre du binaire `wakfu-companion-overlay`, qui
+// reste Windows-only (import inconditionnel de `windows::`, voir plus haut).
 
 // `EngineCommand`/`SyncCommand`/`EngineHandles`/`spawn_engine_thread` ont migré vers
 // `overlay_ui::engine_thread` (§17.2 du plan, Niveau 2) — voir sa doc, importés en tête de ce
@@ -278,6 +322,10 @@ struct OverlayWindow {
     /// Icônes du switch Alliés/Ennemis + portrait générique d'ennemi — même remarque que
     /// `portraits` (une texture par fenêtre, coût négligeable).
     icons: UiIcons,
+    /// Les bustes de classe de l'onglet « Personnages » — **`Some` seulement pour la fenêtre
+    /// Options**, la seule qui les affiche (voir `overlay_ui::avatars`, doc de module) : 36 PNG
+    /// décodés et 1,8 Mo de textures par fenêtre de jeu seraient payés pour rien.
+    avatars: Option<AvatarAtlas>,
     /// Cache PAR FENÊTRE des icônes réelles d'objets/monstres déjà uploadées (voir
     /// `remote_icons::RemoteIconTextures`) — sans objet pour une fenêtre `Combat`.
     remote_icon_textures: RemoteIconTextures,
@@ -291,8 +339,8 @@ struct OverlayWindow {
     combat_metric: CombatMetric,
     /// État de la modale Options (2026-09-08, §9 du plan) — `Some` UNIQUEMENT pour `kind ==
     /// OverlayKind::Options`, voir `App::open_options_modal`. Même remarque que
-    /// `bin/overlay-ui-x11.rs` (code partagé côté `panels::options_modal`, duplication assumée
-    /// côté fenêtrage OS comme le reste de ce fichier).
+    /// `bin/wakfu-companion-overlay-x11.rs` (code partagé côté `panels::options_modal`, duplication
+    /// assumée côté fenêtrage OS comme le reste de ce fichier).
     options_state: Option<OptionsModalState>,
     /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour `kind ==
     /// OverlayKind::Login`, voir `App::create_login_window`. Même règle qu'`options_state`.
@@ -302,7 +350,9 @@ struct OverlayWindow {
     /// la fenêtre OS n'est retaillée que quand l'état affiché change de hauteur.
     last_login_height: Option<f32>,
     /// Fenêtre de jeu à laquelle cet overlay est ancré — **nulle pour la fenêtre de connexion**,
-    /// qui n'appartient à aucun personnage (voir `sync_topmost`, qui l'ignore).
+    /// qui n'appartient à aucun personnage (voir `sync_topmost`, qui l'ignore), **et pour la
+    /// fenêtre Options ouverte alors qu'aucun client Wakfu n'est à l'écran** (2026-09-17, voir
+    /// `is_detached` et `App::open_options_modal`).
     game_hwnd: HWND,
     /// Dernier rectangle connu de la fenêtre de jeu (mis à jour par `sync_windows`/`reposition`,
     /// voir `App::sync_windows`) — réutilisé par `RedrawRequested` pour le plafond de largeur
@@ -325,12 +375,20 @@ struct OverlayWindow {
     /// Même principe que `last_watchlist_width`, pour la HAUTEUR (voir `watchlist_target_height`)
     /// — change uniquement à l'apparition/disparition d'un toast, jamais avec le nombre d'entrées.
     last_watchlist_height: Option<f64>,
-    /// État `HWND_TOPMOST`/`HWND_NOTOPMOST` déjà appliqué — évite un `SetWindowPos` par tick pour
-    /// rien (voir `App::sync_topmost`).
+    /// Dernière hauteur demandée pour une fenêtre `Recap` — le bloc mesure ce qu'il occupe et
+    /// le renvoie (`RenderOutcome::recap_height`), l'hôte y ajuste la fenêtre OS. Même rôle et
+    /// même garde-fou que `last_watchlist_height` (ne pas rappeler `request_inner_size` pour
+    /// rien), et même raison de fond : une fenêtre plus haute que son bloc capte les clics sur du
+    /// vide. `None` pour toute autre zone.
+    last_recap_height: Option<f32>,
+    /// État déjà appliqué — `true` : `HWND_TOPMOST` ; `false` : collé juste au-dessus de sa
+    /// fenêtre de jeu, hors bande topmost (voir `App::glue_above_game`). Évite un `SetWindowPos`
+    /// par tick pour rien (voir `App::sync_topmost`).
     is_topmost: bool,
-    /// Dernière réaffirmation PÉRIODIQUE de `HWND_TOPMOST` (voir `App::sync_topmost` et
-    /// `TOPMOST_REASSERT_INTERVAL`) — distincte d'un changement d'état détecté (`is_topmost`),
-    /// qui reste réaffirmé immédiatement quel que soit ce champ.
+    /// Dernière réaffirmation PÉRIODIQUE de l'état courant (voir `App::sync_topmost` et
+    /// `TOPMOST_REASSERT_INTERVAL`) — `HWND_TOPMOST` quand `is_topmost`, recollage au-dessus de
+    /// la fenêtre de jeu sinon. Distincte d'un changement d'état détecté (`is_topmost`), qui reste
+    /// appliqué immédiatement quel que soit ce champ. `None` force la vérification au prochain tick.
     last_topmost_reassert: Option<std::time::Instant>,
     /// Instant depuis lequel `relevant` est retombé à `false` en continu, tant que l'overlay est
     /// encore `HWND_TOPMOST` — `None` tant qu'il est retombé à `false` pour la première fois OU
@@ -350,7 +408,7 @@ struct OverlayWindow {
     ///
     /// Toujours `true` sauf pour une fenêtre `Combat` quand l'option « Afficher le panneau de
     /// combat en dehors des combats » est décochée (le défaut) et qu'aucun combat n'est en cours —
-    /// voir `App::sync_combat_visibility`. Mémorisé ici pour ne pas rappeler `Window::set_visible`
+    /// voir `App::sync_panel_visibility`. Mémorisé ici pour ne pas rappeler `Window::set_visible`
     /// à chaque tick (50 ms) alors que rien n'a changé, comme `is_topmost` pour le z-order.
     visible: bool,
     /// Prochain redessin déjà planifié par une frame précédente qui a demandé un délai (retour
@@ -363,6 +421,167 @@ struct OverlayWindow {
     /// s'est affiché, là ça s'est caché »). Consommé par `App::about_to_wait`, qui redessine et
     /// vide ce champ une fois l'échéance atteinte.
     next_redraw_at: Option<std::time::Instant>,
+}
+
+impl OverlayWindow {
+    /// Cette fenêtre n'appartient à aucune fenêtre de jeu (`game_hwnd` nul) : la fenêtre de
+    /// connexion, toujours, et **la fenêtre Options ouverte sans client Wakfu à l'écran**
+    /// (2026-09-17, voir `App::open_options_modal`). `sync_windows` la laisse en place — rien ne
+    /// se ferme derrière elle — et `sync_topmost` ne la rétrograde jamais : sans fenêtre de jeu
+    /// dont suivre le premier plan, elle reste devant jusqu'à ce que l'utilisateur la referme.
+    fn is_detached(&self) -> bool {
+        self.game_hwnd == HWND::default()
+    }
+}
+
+/// Ce qu'il faut savoir pour poser une fenêtre `Combat`, et elle seule : de quel côté du client
+/// elle se colle, à quelle hauteur l'utilisateur l'a mise, et l'échelle d'affichage de son écran.
+///
+/// Un type plutôt que trois paramètres de plus à `App::anchor_position`, exactement comme
+/// [`RecapAnchor`] — et `CombatAnchor::default()` dit ce qu'il faut passer pour les zones qui n'en
+/// lisent rien. Le calcul, lui, est dans `overlay_ui::combat_placement`, partagé avec le binaire
+/// X11 ; ce type ne fait que traduire le rectangle de fenêtre de jeu de CETTE plateforme dans son
+/// vocabulaire.
+#[derive(Debug, Clone, Copy)]
+struct CombatAnchor {
+    /// Case « Afficher le panneau de combat à droite de la fenêtre de jeu »
+    /// (`config::OverlayConfig::combat_on_right`) — le bord vertical, et lui seul.
+    on_right: bool,
+    /// Hauteur voulue par l'utilisateur (`config::OverlayConfig::combat_position_y`), `None` tant
+    /// qu'il ne l'a pas déplacé : le panneau est alors centré comme il l'a toujours été.
+    offset: Option<i32>,
+    /// Échelle d'affichage de la fenêtre (`Window::scale_factor`) — elle ne sert qu'à convertir la
+    /// réserve d'infobulle, voir `combat_placement::Panel::new`.
+    scale: f64,
+}
+
+impl Default for CombatAnchor {
+    /// « À gauche, jamais déplacé », et une échelle neutre : ce que passent les zones qui ne sont
+    /// pas le Combat, et qui n'en lisent rien.
+    fn default() -> Self {
+        Self {
+            on_right: false,
+            offset: None,
+            scale: 1.0,
+        }
+    }
+}
+
+impl CombatAnchor {
+    fn new(on_right: bool, offset: Option<i32>, scale: f64) -> Self {
+        Self {
+            on_right,
+            offset,
+            scale,
+        }
+    }
+
+    /// La fenêtre de jeu et celle du panneau, dans le vocabulaire de `combat_placement`.
+    ///
+    /// `top`/`height` de la fenêtre ENTIÈRE (et non `client_top` comme la Récap et le Suivi) :
+    /// c'est le repère sur lequel ce panneau est centré depuis l'origine, et en changer décalerait
+    /// le panneau de tout le monde sans que personne l'ait demandé.
+    fn geometry(
+        self,
+        rect: GameRect,
+        overlay_width: i32,
+        overlay_height: i32,
+    ) -> (combat_placement::ClientArea, combat_placement::Panel) {
+        (
+            combat_placement::ClientArea {
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+            },
+            combat_placement::Panel::new(overlay_width, overlay_height, self.scale),
+        )
+    }
+}
+
+/// Un glissement du panneau Combat en cours (2026-09-17) — le pendant de [`RecapDragState`], en
+/// une seule dimension : ce panneau ne se déplace qu'en HAUTEUR (voir `combat_placement`).
+#[derive(Debug, Clone, Copy)]
+struct CombatDragState {
+    /// La fenêtre `Combat` saisie — en multicompte, chaque client a la sienne, et ce n'est pas
+    /// parce que l'une est tenue que les autres bougent.
+    window: WindowId,
+    /// Ordonnée de saisie DANS la fenêtre, en pixels physiques — figée au premier appui.
+    grab_y: i32,
+}
+
+/// Ce qu'il faut savoir **en plus** pour poser une fenêtre `Recap`, et elle seule : où
+/// l'utilisateur a mis la bande, et l'échelle d'affichage de son écran.
+///
+/// Un type plutôt que deux paramètres de plus à `App::anchor_position` : les quatre autres zones
+/// n'en ont que faire, et `RecapAnchor::default()` dit exactement ce qu'il faut passer pour
+/// elles (« jamais déplacée, échelle sans objet »). Le calcul, lui, n'est pas ici mais dans
+/// `overlay_ui::recap_placement`, partagé avec le binaire X11 — ce type ne fait que traduire le
+/// rectangle de fenêtre de jeu de CETTE plateforme dans le vocabulaire de ce module.
+#[derive(Debug, Clone, Copy)]
+struct RecapAnchor {
+    /// Décalage du bloc voulu par l'utilisateur (`config::OverlayConfig::recap_position`),
+    /// `None` tant qu'il ne l'a pas déplacé.
+    offset: Option<(i32, i32)>,
+    /// Échelle d'affichage de la fenêtre du bloc (`Window::scale_factor`) — elle ne sert qu'à
+    /// convertir la réserve d'infobulle, voir `recap_placement::Band::new`.
+    scale: f64,
+}
+
+impl Default for RecapAnchor {
+    /// « Jamais déplacée », et une échelle neutre : ce que passent les quatre zones qui ne sont
+    /// pas la Récap, et qui n'en lisent rien.
+    fn default() -> Self {
+        Self {
+            offset: None,
+            scale: 1.0,
+        }
+    }
+}
+
+impl RecapAnchor {
+    fn new(offset: Option<(i32, i32)>, scale: f64) -> Self {
+        Self { offset, scale }
+    }
+
+    /// La fenêtre de jeu et la fenêtre du bloc, dans le vocabulaire de `recap_placement`.
+    ///
+    /// `client_top` et non `top` (comme pour l'ancrage du Suivi) : le client Wakfu dessine sa
+    /// fausse barre de titre dans sa propre zone cliente, et c'est sous ce bord-là que tout
+    /// s'aligne — d'où aussi la hauteur, comptée depuis ce bord jusqu'au bas de la fenêtre.
+    fn geometry(
+        self,
+        rect: GameRect,
+        overlay_width: i32,
+        overlay_height: i32,
+    ) -> (recap_placement::ClientArea, recap_placement::Band) {
+        (
+            recap_placement::ClientArea {
+                left: rect.left,
+                top: rect.client_top,
+                width: rect.width,
+                height: rect.top + rect.height - rect.client_top,
+            },
+            recap_placement::Band::new(overlay_width, overlay_height, self.scale),
+        )
+    }
+}
+
+/// Un glissement de la bande Récap en cours (2026-09-17) — voir `panels::recap::RecapDrag`, qui
+/// dit pourquoi le geste se raconte en POSITIONS et non en écarts.
+///
+/// Un seul état, comme il n'y a qu'une souris : la fenêtre saisie, et l'endroit du bloc par
+/// lequel on l'a attrapée. C'est ce point de saisie, invariant du début à la fin du geste, qui
+/// rend le suivi exact — la position visée vaut toujours « où est le curseur à l'écran, moins
+/// l'endroit par lequel on tient la bande », sans rien accumuler d'une frame à l'autre. Un
+/// cumul d'écarts, lui, dériverait dès que le bornage retiendrait la bande contre un bord.
+#[derive(Debug, Clone, Copy)]
+struct RecapDragState {
+    /// La fenêtre `Recap` saisie — une autre fenêtre de jeu peut en avoir une aussi, et ce n'est
+    /// pas elle qu'on déplace.
+    window: WindowId,
+    /// Position de saisie DANS la fenêtre, en pixels physiques.
+    grab: (i32, i32),
 }
 
 struct App {
@@ -387,6 +606,17 @@ struct App {
     /// par la boucle d'événements sans savoir quelle fenêtre existe. Il n'y a de toute façon qu'un
     /// bandeau Suivi à la fois.
     watchlist_selection: panels::watchlist::WatchlistSelection,
+    /// **Les célébrations de complétion en cours** (2026-09-17) — alimentées par
+    /// `completions_rx`, avancées par `tick_watchlist_completions`, lues par le rendu du bandeau.
+    watchlist_completions: panels::watchlist::WatchlistCompletions,
+    /// Par où les complétions arrivent du thread Engine — voir
+    /// [`WatchlistCompleted`].
+    completions_rx: mpsc::Receiver<WatchlistCompleted>,
+    /// **L'entrée dont la réinitialisation attend confirmation** (2026-09-18) — posée à
+    /// l'ouverture de `OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)`, reprise à la
+    /// réponse. Ici et non dans la cible : `OverlayKind` est `Copy` (voir
+    /// `ResetTarget::WatchlistCounter`). Prêtée au rendu de la confirmation, qui nomme l'objet.
+    watchlist_reset_pending: Option<WatchlistEntry>,
     /// Publié par le thread Engine à chaque décompte de suivi qui vient d'atteindre 0 (voir
     /// `overlay_engine::WatchlistAlert`, §9 du plan « Alertes de drop ») — `None` initialement et
     /// après expiration (voir `WatchlistToast::hide_at`, comparé à `Instant::now()` au rendu).
@@ -397,9 +627,24 @@ struct App {
     /// Les recherches de chat du compte, même provenance et même usage que `alert_profile` — le
     /// brouillon de l'onglet « Chat ».
     chat_filters: SharedChatFilters,
+    /// Le roster du compte sous sa forme éditable — le brouillon de l'onglet « Personnages » (voir
+    /// `engine_thread::SharedRosterDraft`).
+    roster_draft: SharedRosterDraft,
+    /// Les serveurs de jeu proposés par le sélecteur de ce même onglet — voir
+    /// `background::spawn_game_servers_thread`.
+    game_servers: Arc<ArcSwap<GameServers>>,
     /// Réglages de la carte d'alerte de chat EN VIGUEUR (durée, fermeture manuelle) — lus de la
     /// config locale au démarrage, réécrits à la validation de l'onglet « Chat ».
     chat_toast: chat_tab::ChatToastSettings,
+    /// Réglages de la carte de **décompte arrivé à zéro** EN VIGUEUR — même provenance et même
+    /// politique que `chat_toast` : lus de la config locale au démarrage, réécrits à la validation
+    /// de la fenêtre Options (section « Suivi » de l'onglet « Paramètres », 2026-09-16).
+    countdown_toast: suivi_tab::CountdownToastSettings,
+    /// **Ce que devient un suivi complété** EN VIGUEUR (retrait, animation) — même provenance et
+    /// même politique que `countdown_toast`. Lu par `about_to_wait` à chaque complétion reçue du
+    /// thread Engine : c'est lui qui décide s'il y a une célébration à jouer et un retrait à
+    /// envoyer (voir `panels::suivi_tab::CompletionSettings`).
+    completion: suivi_tab::CompletionSettings,
     /// Publié par le thread Catalogue (`spawn_catalog_thread`) — d'abord depuis le cache disque
     /// (rapide, hors-ligne), puis réécrasé si le réseau confirme un contenu différent (voir
     /// `overlay_sync::catalog_cache`). Vide (`CatalogIndex::default`) tant que rien n'a encore pu
@@ -441,13 +686,34 @@ struct App {
     /// au démarrage (où il décide de la première commande envoyée au thread), remplacé à la
     /// validation de la fenêtre Options, effectif au prochain lancement.
     auto_update: bool,
+    /// **Journal détaillé** — réglage LOCAL persisté (`config::OverlayConfig::verbose_log`),
+    /// décoché par défaut (constat C6 de `docs/analyse-rgpd.md`). Appliqué au démarrage puis à
+    /// chaque validation de la fenêtre Options, à chaud (`logging::set_verbose`) : contrairement
+    /// à `auto_update`, il n'attend pas le prochain lancement.
+    verbose_log: bool,
     /// Voir la doc de `AppState::settings_tx` et `force_refresh`.
     settings_tx: mpsc::Sender<EngineCommand>,
     log_path: PathBuf,
     /// Le panneau Combat reste-t-il affiché en dehors des combats ? — réglage LOCAL persisté
     /// (`config::OverlayConfig::combat_always_visible`), lu au démarrage et remplacé à la
-    /// validation de la fenêtre Options. `false` par défaut : voir `sync_combat_visibility`.
+    /// validation de la fenêtre Options. `false` par défaut : voir `sync_panel_visibility`.
     combat_always_visible: bool,
+    /// Le panneau Combat est-il posé à DROITE de la fenêtre de jeu ? — réglage LOCAL persisté
+    /// (`config::OverlayConfig::combat_on_right`), même politique que `combat_always_visible` :
+    /// lu au démarrage, remplacé à la validation de la fenêtre Options. Deux effets, tous deux
+    /// immédiats : l'ancrage de la fenêtre Combat (`anchor_position`) et le miroir de son contenu
+    /// (`render_content::RenderContent::combat_on_right`, voir `overlay_ui::mirror`).
+    combat_on_right: bool,
+    /// **À quelle hauteur le panneau Combat est posé** (2026-09-17) — réglage LOCAL persisté
+    /// (`config::OverlayConfig::combat_position_y`), `None` tant que l'utilisateur ne l'a pas fait
+    /// glisser. Une seule valeur pour TOUTES les fenêtres de jeu, comme `recap_position` : un seul
+    /// panneau Combat par client, une seule hauteur, un seul verrou.
+    combat_position_y: Option<i32>,
+    /// Le panneau Combat est-il verrouillé en hauteur ? — le cadenas de sa rangée d'actions
+    /// (`config::OverlayConfig::combat_locked`, déverrouillé par défaut).
+    combat_locked: bool,
+    /// Le glissement du panneau Combat **en cours**, s'il y en a un — voir [`CombatDragState`].
+    combat_drag: Option<CombatDragState>,
     /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
     /// persisté (`config::OverlayConfig::turn_notification`), même politique que
     /// `combat_always_visible` : lu au démarrage, remplacé à la validation de la fenêtre Options.
@@ -466,7 +732,7 @@ struct App {
     /// continue).
     features: FeatureToggles,
     /// **Les deux sourdines** — cases « Couper le son des notifications » des onglets « Suivi » et
-    /// « Chat » (`panels::sound_row`). Réglages LOCAUX persistés
+    /// « Chat » (`panels::notifications`). Réglages LOCAUX persistés
     /// (`config::OverlayConfig::alert_mutes`), même politique que `features` : lus au démarrage,
     /// remplacés à la validation de la fenêtre Options.
     ///
@@ -480,6 +746,45 @@ struct App {
     /// sondages de 20 Hz d'`about_to_wait`, elle a sa propre cadence (`TURN_WATCH_INTERVAL`).
     turn_watch_last_tick: Option<std::time::Instant>,
     game_window: GameWindowTracker,
+    /// Le scan précédent trouvait au moins une fenêtre de jeu — pour n'envoyer
+    /// `EngineCommand::GameClosed` qu'au passage à « aucune », une fois par fermeture (voir
+    /// `sync_windows`).
+    game_was_present: bool,
+    /// **La session du Récap** (2026-09-17, `overlay_ui::recap_session`) : chrono qui n'avance
+    /// que fenêtre de jeu présente, compteurs de session, reprise après une pause tolérée,
+    /// remise à zéro confirmée. Nourrie à chaque tick par `sync_windows` (c'est le balayage des
+    /// fenêtres de jeu qui lui dit si le joueur joue), lue à chaque frame du bloc Récap
+    /// (`panels::recap::RecapView`). Elle remplace `started_at`, l'instant de lancement du
+    /// processus dont la durée était dérivée le premier jour.
+    recap_session: RecapSession,
+    /// **Le compte était-il lié au tick précédent ?** (2026-09-18, constat C5 de
+    /// `docs/analyse-rgpd.md` §3.5) — le seul rôle de ce drapeau est de reconnaître la TRANSITION
+    /// « connecté -> plus connecté », quelle qu'en soit l'origine : bouton de la section « Compte »,
+    /// entrée de la zone de notification, ou jeton refusé par le serveur. Le thread
+    /// d'authentification purge alors les données locales à tiers
+    /// (`local_data::Scope::OnDisconnect`), mais le récap de session appartient à cet hôte : sans ce
+    /// drapeau, l'objet en mémoire réécrirait `recap-session.json` trente secondes plus tard.
+    ///
+    /// Faux au démarrage : un lancement sans compte lié n'a rien à purger, et l'état de chargement
+    /// (`AuthStatus::Connecting`) ne compte pour aucune des deux valeurs.
+    account_was_connected: bool,
+    /// **Où l'utilisateur a posé la bande Récap** (2026-09-17) — décalage du bloc depuis le coin
+    /// de la zone cliente du jeu, `None` tant qu'il ne l'a pas déplacée (voir
+    /// `overlay_ui::recap_placement` et `config::OverlayConfig::recap_position`).
+    ///
+    /// **Une seule position pour toutes les fenêtres de jeu**, et pas une par personnage
+    /// (décision utilisateur du 2026-09-17) : elle est RELATIVE à la fenêtre de jeu, donc chaque
+    /// client affiche sa bande au même endroit chez lui. Elle vit ici, dans `App`, pour cette
+    /// raison — un champ d'`OverlayWindow` en ferait un réglage par fenêtre.
+    recap_position: Option<(i32, i32)>,
+    /// **La bande Récap est-elle verrouillée ?** (2026-09-17) — le cadenas de sa rangée
+    /// d'actions (`panels::recap::RecapChrome::locked`), relu de la config au démarrage et
+    /// réécrit à chaque bascule. Ici et non dans `OverlayWindow`, pour la même raison que
+    /// `recap_position` : une seule bande pour tous les clients, un seul verrou.
+    recap_locked: bool,
+    /// Le glissement de la bande Récap **en cours**, s'il y en a un — voir `RecapDragState` et
+    /// `panels::recap::RecapDrag`. `None` le reste du temps, c'est-à-dire presque toujours.
+    recap_drag: Option<RecapDragState>,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
     /// bannière.
@@ -512,6 +817,20 @@ struct App {
     /// Clics sur le menu de l'icône de zone de notification — même sondage non bloquant que
     /// `hotkey_events`, à chaque `about_to_wait`.
     menu_events: &'static tray_icon::menu::MenuEventReceiver,
+    /// **Écran de mise à jour ouvert à la demande** (2026-09-18) — posé par l'entrée « Mise à
+    /// jour » du menu de la zone de notification (voir `open_manual_update_window`), retiré par
+    /// « Fermer ». Tant qu'il vaut `true`, `sync_session_windows` garde la fenêtre de connexion
+    /// ouverte **même compte lié**, en mode mise à jour (`LoginState::manual_update`) : c'est le
+    /// seul endroit où cette fenêtre coexiste avec les overlays de jeu.
+    manual_update: bool,
+    /// **La Carte a été refermée par son bouton « Fermer »** (2026-09-22) — sans quoi
+    /// `sync_session_windows` la rouvrirait au tick suivant. L'overlay reste dans la zone de
+    /// notification, d'où l'entrée « Se connecter » le ramène.
+    login_dismissed: bool,
+    /// **La Carte est ouverte sur son écran de compte**, compte lié — l'entrée « Déconnecter » du
+    /// menu de la zone de notification, qui pose sa question par-dessus (2026-09-22). Même rôle
+    /// que [`Self::manual_update`] pour l'écran de mise à jour.
+    account_card: bool,
 }
 
 /// L'icône de zone de notification (`tray-icon`, même auteurs que `global-hotkey`) et les quatre
@@ -521,12 +840,14 @@ struct App {
 /// **Menu validé par l'utilisateur (2026-09-14)** : Options / Déconnecter / Quitter, rien d'autre
 /// — puis **« Mise à jour » ajoutée après « Options » à sa demande (2026-09-15)** : un clic lance
 /// la recherche de mise à jour (`UpdateCommand::Check`, la même que le bouton « Recherche de mise
-/// à jour » de la fenêtre Options, §8 de `docs/plan-mise-a-jour.md`). Toujours active : une
-/// recherche n'a pas besoin de compte, et le thread ignore de lui-même une demande pendant une
-/// opération en cours ou à moins de trente secondes de la précédente. C'est le seul accès à
-/// l'overlay quand ni fenêtre de jeu ni fenêtre de connexion ne sont à l'écran — et le seul moyen
-/// de quitter proprement une fois connecté (les overlays ancrés sur le jeu n'ont ni croix ni
-/// barre des tâches).
+/// à jour » de la fenêtre Options, §8 de `docs/plan-mise-a-jour.md`) et, **depuis le 2026-09-18,
+/// l'affiche** — la fenêtre de connexion/démarrage s'ouvre sur son écran de mise à jour, rouage
+/// et verdict compris (voir `open_manual_update_window`). Toujours active : une recherche n'a pas
+/// besoin de compte, et le thread ignore de lui-même une demande pendant une opération en cours
+/// ou à moins de trente secondes de la précédente. C'est le seul accès à l'overlay quand ni
+/// fenêtre de jeu ni fenêtre de connexion ne sont à l'écran — et le seul moyen de quitter
+/// proprement une fois connecté (les overlays ancrés sur le jeu n'ont ni croix ni barre des
+/// tâches).
 struct TrayMenu {
     /// Gardée en vie : l'icône disparaît de la zone de notification à la destruction.
     _icon: TrayIcon,
@@ -558,6 +879,12 @@ struct AppState {
     /// Voir `App::combat_always_visible` — lu de la config au démarrage (`main`), jamais découvert
     /// autrement.
     combat_always_visible: bool,
+    /// Voir `App::combat_on_right` — même provenance que `combat_always_visible`.
+    combat_on_right: bool,
+    /// Voir `App::combat_position_y` — relue de la config au démarrage.
+    combat_position_y: Option<i32>,
+    /// Voir `App::combat_locked` — relu de la config au démarrage.
+    combat_locked: bool,
     /// Voir `App::turn_notification` — même provenance que `combat_always_visible`.
     turn_notification: bool,
     /// Voir `App::turn_notification_muted`.
@@ -575,8 +902,24 @@ struct AppState {
     watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
     alert_profile: SharedAlertProfile,
     chat_filters: SharedChatFilters,
+    roster_draft: SharedRosterDraft,
+    game_servers: Arc<ArcSwap<GameServers>>,
     /// Voir `App::chat_toast` — lu de la config au démarrage.
     chat_toast: chat_tab::ChatToastSettings,
+    /// Voir `App::countdown_toast` — lu de la config au démarrage.
+    countdown_toast: suivi_tab::CountdownToastSettings,
+    /// Voir `App::completion` — lus de la config au démarrage.
+    completion: suivi_tab::CompletionSettings,
+    /// Voir `App::completions_rx` — le canal créé par `main`, avant le thread Engine.
+    completions_rx: mpsc::Receiver<WatchlistCompleted>,
+    /// Voir `App::recap_session` — relue du disque au démarrage, avec le réglage de la config.
+    recap_session: RecapSession,
+    /// Voir `App::recap_position` — relue du disque au démarrage (`config::OverlayConfig::
+    /// recap_position`), et réécrite à chaque bande reposée.
+    recap_position: Option<(i32, i32)>,
+    /// Voir `App::recap_locked` — relu de la config au démarrage
+    /// (`config::OverlayConfig::recap_locked`).
+    recap_locked: bool,
     catalog: Arc<ArcSwap<CatalogIndex>>,
     catalog_stale: Arc<AtomicBool>,
     remote_icons: RemoteIconStore,
@@ -588,6 +931,8 @@ struct AppState {
     update_status: Arc<ArcSwap<UpdateStatus>>,
     update_command_tx: mpsc::Sender<UpdateCommand>,
     auto_update: bool,
+    /// Voir `App::verbose_log`.
+    verbose_log: bool,
     /// Conservé (pas seulement transmis au thread Auth) pour permettre à `force_refresh` de
     /// redemander les réglages de compte à la volée — voir sa doc.
     settings_tx: mpsc::Sender<EngineCommand>,
@@ -598,6 +943,9 @@ impl App {
         let AppState {
             log_path,
             combat_always_visible,
+            combat_on_right,
+            combat_position_y,
+            combat_locked,
             turn_notification,
             turn_notification_muted,
             features,
@@ -608,7 +956,15 @@ impl App {
             watchlist_toast,
             alert_profile,
             chat_filters,
+            roster_draft,
+            game_servers,
             chat_toast,
+            countdown_toast,
+            completion,
+            completions_rx,
+            recap_session,
+            recap_position,
+            recap_locked,
             catalog,
             catalog_stale,
             remote_icons,
@@ -618,6 +974,7 @@ impl App {
             update_status,
             update_command_tx,
             auto_update,
+            verbose_log,
             settings_tx,
         } = state;
 
@@ -640,10 +997,17 @@ impl App {
             snapshot,
             watchlist,
             watchlist_selection: panels::watchlist::WatchlistSelection::default(),
+            watchlist_completions: Default::default(),
+            completions_rx,
+            watchlist_reset_pending: None,
             watchlist_toast,
             alert_profile,
             chat_filters,
+            roster_draft,
+            game_servers,
             chat_toast,
+            countdown_toast,
+            completion,
             catalog,
             catalog_stale,
             remote_icons,
@@ -653,9 +1017,14 @@ impl App {
             update_status,
             update_command_tx,
             auto_update,
+            verbose_log,
             settings_tx,
             log_path,
             combat_always_visible,
+            combat_on_right,
+            combat_position_y,
+            combat_locked,
+            combat_drag: None,
             turn_notification,
             turn_notification_muted,
             features,
@@ -663,12 +1032,21 @@ impl App {
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
             game_window: GameWindowTracker::new(),
+            game_was_present: false,
+            account_was_connected: false,
+            recap_session,
+            recap_position,
+            recap_locked,
+            recap_drag: None,
             banner_printed: false,
             last_foreground_heartbeat: None,
             pending_dialog: None,
             pending_recipe: None,
             tray: None,
             menu_events: MenuEvent::receiver(),
+            manual_update: false,
+            login_dismissed: false,
+            account_card: false,
         }
     }
 
@@ -701,13 +1079,29 @@ impl App {
         let connected = !loading && auth.is_connected();
         let has_login = self.windows.values().any(|w| w.kind == OverlayKind::Login);
         if connected {
-            if has_login {
+            // Seule exception à « compte lié = pas de fenêtre de connexion » : l'écran de mise à
+            // jour demandé depuis le menu de la zone de notification, qui vit alors à côté des
+            // overlays de jeu jusqu'à « Fermer » (voir `open_manual_update_window`).
+            if self.manual_update || self.account_card {
+                if !has_login {
+                    self.create_login_window(event_loop);
+                }
+            } else if has_login {
                 self.windows.retain(|_, w| w.kind != OverlayKind::Login);
                 tracing::info!(
                     "[connexion] compte lié et chargements terminés — fenêtre de connexion fermée, overlays de jeu activés."
                 );
             }
+            self.account_was_connected = true;
         } else {
+            // **Transition « connecté -> plus connecté »** (voir `account_was_connected`) : le récap
+            // de session part avec le compte, sinon il serait réécrit juste après la purge du thread
+            // d'authentification (`local_data::Scope::OnDisconnect`).
+            if self.account_was_connected && !loading {
+                let snapshot = self.snapshot.load();
+                self.recap_session
+                    .purge(&snapshot.totals, std::time::SystemTime::now());
+            }
             let had_options = self
                 .windows
                 .values()
@@ -723,22 +1117,45 @@ impl App {
                     before - self.windows.len()
                 );
             }
-            if !has_login {
+            if !has_login && !self.login_dismissed {
                 self.create_login_window(event_loop);
             }
-            // L'écran de chargement tombe (ou revient, sur « Se connecter ») : la carte doit se
-            // redessiner tout de suite, pas au prochain événement venu d'ailleurs.
-            for overlay in self.windows.values_mut() {
-                if let Some(state) = overlay.login_state.as_mut() {
-                    if state.loading != loading {
-                        state.loading = loading;
-                        overlay.next_redraw_at = Some(std::time::Instant::now());
-                        if !loading {
-                            tracing::info!(
-                                "[connexion] chargements terminés — écran de connexion."
-                            );
-                        }
+            // Le compte quitté est acté — mais jamais pendant le chargement, où `connected`
+            // est faux sans que personne ne se soit déconnecté (voir le champ).
+            if !loading {
+                self.account_was_connected = false;
+            }
+        }
+        // L'écran de chargement tombe (ou revient, sur « Se connecter »), l'écran de mise à jour
+        // s'ouvre ou se referme : la carte doit se redessiner tout de suite, pas au prochain
+        // événement venu d'ailleurs.
+        let manual_update = self.manual_update;
+        for overlay in self.windows.values_mut() {
+            if let Some(state) = overlay.login_state.as_mut() {
+                if state.loading != loading {
+                    state.loading = loading;
+                    overlay.next_redraw_at = Some(std::time::Instant::now());
+                    if !loading {
+                        tracing::info!("[connexion] chargements terminés — écran de connexion.");
                     }
+                }
+                if state.manual_update != manual_update {
+                    state.manual_update = manual_update;
+                    overlay.next_redraw_at = Some(std::time::Instant::now());
+                }
+                // **La hauteur de l'écran**, que seul l'hôte connaît : le volet « À propos » ne
+                // dépasse jamais 80 % de celle-ci (voir `panels::login::CARD_HEIGHT`). Relue à
+                // chaque tick plutôt qu'à la création : la fenêtre peut être traînée d'un
+                // moniteur à l'autre, et deux moniteurs n'ont pas la même hauteur.
+                let monitor_height = overlay
+                    .window
+                    .current_monitor()
+                    .map(|monitor| {
+                        monitor.size().height as f32 / overlay.window.scale_factor() as f32
+                    })
+                    .unwrap_or(login::CARD_HEIGHT);
+                if (state.monitor_height - monitor_height).abs() > 1.0 {
+                    state.monitor_height = monitor_height;
                 }
             }
         }
@@ -804,6 +1221,7 @@ impl App {
             window,
             gpu,
             kind: OverlayKind::Login,
+            avatars: None,
             portraits,
             combat_frame,
             icons,
@@ -828,6 +1246,7 @@ impl App {
             last_position: None,
             last_watchlist_width: None,
             last_watchlist_height: None,
+            last_recap_height: None,
             visible: true,
             is_topmost: false,
             last_topmost_reassert: None,
@@ -867,9 +1286,9 @@ impl App {
         let menu = Menu::new();
         // « Options » et « Déconnecter » naissent grisés : rien à régler ni à quitter tant
         // qu'aucun compte n'est lié (voir `sync_tray_menu`).
-        let options = MenuItem::new("Options", false, None);
+        let options = MenuItem::new("Paramètres", true, None);
         let update = MenuItem::new("Mise à jour", true, None);
-        let disconnect = MenuItem::new("Déconnecter", false, None);
+        let disconnect = MenuItem::new("Se connecter", true, None);
         let quit = MenuItem::new("Quitter", true, None);
         if let Err(err) = menu.append_items(&[
             &options,
@@ -918,11 +1337,133 @@ impl App {
     fn sync_tray_menu(&mut self, connected: bool) {
         if let Some(tray) = &mut self.tray {
             if tray.enabled_for_account != connected {
-                tray.options.set_enabled(connected);
-                tray.disconnect.set_enabled(connected);
+                // **Plus aucune entrée grisée** (2026-09-22) : « Paramètres » ouvre la Carte, dont
+                // cinq sections sur neuf se règlent sans compte, et « Déconnecter » devient
+                // « Se connecter » plutôt que de s'éteindre — une entrée grisée sans explication
+                // n'apprend rien, et c'est le seul menu de l'overlay.
+                tray.disconnect.set_text(if connected {
+                    "Déconnecter"
+                } else {
+                    "Se connecter"
+                });
                 tray.enabled_for_account = connected;
             }
         }
+    }
+
+    /// Entrée « Mise à jour » du menu de la zone de notification (2026-09-18, demande de
+    /// l'utilisateur) : **la recherche s'affiche**, elle ne court plus en silence.
+    ///
+    /// La fenêtre montrée est celle de la connexion et du démarrage (`panels::login`, la même
+    /// carte de 400 px), passée en mode mise à jour (`LoginState::manual_update`) : le rouage du
+    /// jeu et « Recherche d'une mise à jour… », puis le verdict — « Vous êtes déjà à jour »,
+    /// « Version X disponible » et son bouton, ou l'échec. Avant, seul le journal et la fenêtre
+    /// Options disaient ce que ce clic avait donné.
+    ///
+    /// Compte lié, cette fenêtre n'existe pas : c'est `manual_update` qui la fait naître et vivre
+    /// à côté des overlays de jeu (voir `sync_session_windows`), jusqu'à « Fermer ». Compte non
+    /// lié, elle est déjà là et change simplement d'écran.
+    ///
+    /// La commande part au thread comme avant (`UpdateCommand::Check { install_if_available:
+    /// false }`) : il l'ignore s'il travaille déjà, ou à moins de trente secondes de la
+    /// vérification précédente — l'écran montre alors tout de suite le verdict qu'il connaît
+    /// déjà, ce qui est exactement ce qu'on vient lui demander.
+    fn open_manual_update_window(&mut self, event_loop: &ActiveEventLoop) {
+        tracing::info!(">>> Recherche de mise à jour (zone de notification).");
+        self.manual_update = true;
+        let _ = self.update_command_tx.send(UpdateCommand::Check {
+            install_if_available: false,
+        });
+        // Sans attendre le prochain tick : la fenêtre doit apparaître au clic.
+        self.login_dismissed = false;
+        self.sync_session_windows(event_loop);
+        let floor = std::time::Instant::now() + panels::login::UPDATE_CHECK_FLOOR;
+        if let Some(overlay) = self
+            .windows
+            .values_mut()
+            .find(|w| w.kind == OverlayKind::Login)
+        {
+            if let Some(state) = overlay.login_state.as_mut() {
+                state.panel = panels::login::CardPanel::None;
+                state.update = UpdateStatus::Checking;
+                state.check_floor_until = Some(floor);
+            }
+            overlay.window.focus_window();
+        }
+    }
+
+    /// **Entrée « Paramètres » du menu de la zone de notification** (2026-09-22) — elle ouvrait la
+    /// fenêtre Options sur son onglet ; elle ouvre désormais la Carte sur son volet des
+    /// paramètres, et elle est **toujours active** : cinq de ses neuf sections se règlent sans
+    /// compte lié.
+    fn open_settings_card(&mut self, event_loop: &ActiveEventLoop) {
+        tracing::info!(">>> Paramètres (zone de notification).");
+        self.login_dismissed = false;
+        self.account_card = true;
+        self.sync_session_windows(event_loop);
+        self.focus_card(panels::login::CardPanel::Settings, None);
+    }
+
+    /// **Entrée « Déconnecter »** — elle envoyait `AuthCommand::Disconnect` sans rien demander
+    /// (2026-09-22, retour utilisateur). Elle ouvre maintenant la Carte sur son écran de compte,
+    /// la question par-dessus, et « Annuler » y laisse l'utilisateur.
+    fn open_disconnect_card(&mut self, event_loop: &ActiveEventLoop) {
+        tracing::info!(">>> Déconnexion demandée (zone de notification) — confirmation.");
+        self.login_dismissed = false;
+        self.account_card = true;
+        self.sync_session_windows(event_loop);
+        self.focus_card(
+            panels::login::CardPanel::None,
+            Some(panels::login::CardConfirm::Disconnect),
+        );
+    }
+
+    /// **Entrée « Se connecter »** — ce que devient « Déconnecter » quand aucun compte n'est lié.
+    fn open_login_card(&mut self, event_loop: &ActiveEventLoop) {
+        tracing::info!(">>> Écran de connexion demandé (zone de notification).");
+        self.login_dismissed = false;
+        self.sync_session_windows(event_loop);
+        self.focus_card(panels::login::CardPanel::None, None);
+    }
+
+    /// Pose la Carte sur l'écran demandé et la met au premier plan.
+    fn focus_card(
+        &mut self,
+        panel: panels::login::CardPanel,
+        confirm: Option<panels::login::CardConfirm>,
+    ) {
+        if let Some(overlay) = self
+            .windows
+            .values_mut()
+            .find(|w| w.kind == OverlayKind::Login)
+        {
+            if let Some(state) = overlay.login_state.as_mut() {
+                state.panel = panel;
+                state.settings_inputs = None;
+                state.confirm = confirm;
+            }
+            overlay.window.focus_window();
+        }
+    }
+
+    /// « Fermer » d'un écran de compte de la Carte — voir [`Self::login_dismissed`].
+    fn close_login_window(&mut self) {
+        self.windows.retain(|_, w| w.kind != OverlayKind::Login);
+        self.manual_update = false;
+        self.account_card = false;
+        self.login_dismissed = true;
+    }
+
+    /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle : on sort du mode manuel.
+    /// `sync_session_windows` referme alors la fenêtre si un compte est lié, ou la ramène à
+    /// l'écran de connexion sinon.
+    fn close_manual_update_window(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.manual_update {
+            return;
+        }
+        tracing::info!("[mise à jour] écran de mise à jour refermé.");
+        self.manual_update = false;
+        self.sync_session_windows(event_loop);
     }
 
     /// Clics sur le menu de l'icône de zone de notification — voir `TrayMenu`. « Déconnecter »
@@ -934,16 +1475,16 @@ impl App {
                 continue;
             };
             if event.id == *tray.options.id() {
-                tracing::info!(">>> Options (zone de notification)");
-                self.open_options_modal(event_loop, None, options_modal::OptionsTab::Parametres);
+                self.open_settings_card(event_loop);
             } else if event.id == *tray.update.id() {
-                tracing::info!(">>> Recherche de mise à jour (zone de notification).");
-                let _ = self.update_command_tx.send(UpdateCommand::Check {
-                    install_if_available: false,
-                });
+                self.open_manual_update_window(event_loop);
             } else if event.id == *tray.disconnect.id() {
-                tracing::info!(">>> Déconnexion du compte demandée (zone de notification).");
-                let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
+                // Une entrée, deux destinations selon l'état du compte — voir `sync_tray_menu`.
+                if self.auth_status.load().is_connected() {
+                    self.open_disconnect_card(event_loop);
+                } else {
+                    self.open_login_card(event_loop);
+                }
             } else if event.id == *tray.quit.id() {
                 logging::log_session_end("Quitter (zone de notification)");
                 event_loop.exit();
@@ -966,12 +1507,12 @@ impl App {
         }
         let found = self.game_window.scan();
         // Une fenêtre `Combat` créée alors qu'aucun combat n'est en cours naît MASQUÉE quand
-        // l'option est décochée — voir `sync_combat_visibility`, qui la fera apparaître au premier
+        // l'option est décochée — voir `sync_panel_visibility`, qui la fera apparaître au premier
         // combat. Lu ici une fois pour toute la passe.
         let snapshot = self.snapshot.load();
 
         self.windows.retain(|_, overlay| {
-            if overlay.kind == OverlayKind::Login {
+            if overlay.kind == OverlayKind::Login || overlay.is_detached() {
                 return true; // n'appartient à aucune fenêtre de jeu
             }
             let still_here = found.iter().any(|(_, info)| info.hwnd == overlay.game_hwnd);
@@ -981,6 +1522,8 @@ impl App {
                 // `open_options_modal`), donc elle s'en va avec elle. Un écran de réglages qui
                 // survivrait au client qu'il configure n'aurait plus de raison d'être à l'écran —
                 // et le brouillon qu'il porte ne serait de toute façon plus applicable.
+                // Seule exception, ci-dessus : la modale ouverte SANS client à l'écran
+                // (`is_detached`), qui n'a aucune fenêtre de jeu derrière laquelle disparaître.
                 let quoi = if overlay.kind == OverlayKind::Options {
                     "sa fenêtre Options est fermée"
                 } else {
@@ -995,24 +1538,40 @@ impl App {
         });
 
         for (character_name, info) in &found {
-            for kind in [OverlayKind::Combat, OverlayKind::Watchlist] {
+            for kind in [
+                OverlayKind::Combat,
+                OverlayKind::Watchlist,
+                OverlayKind::Recap,
+            ] {
                 if let Some(existing) = self
                     .windows
                     .values_mut()
                     .find(|w| w.game_hwnd == info.hwnd && w.kind == kind)
                 {
-                    Self::reposition(existing, info.rect);
+                    Self::reposition(
+                        existing,
+                        info.rect,
+                        self.combat_on_right,
+                        self.combat_position_y,
+                        self.recap_position,
+                    );
                     if existing.active_character != *character_name {
                         existing.active_character = character_name.clone();
                     }
                     continue;
                 }
-                let visible = kind != OverlayKind::Combat
-                    || panels::combat::should_show(
+                let visible = match kind {
+                    OverlayKind::Combat => panels::combat::should_show(
                         &snapshot,
                         character_name,
                         self.combat_always_visible,
-                    );
+                        self.features.combat,
+                    ),
+                    // La bande Récap n'a pas de condition de combat : seule sa case la commande
+                    // (voir `sync_panel_visibility`, qui la suit ensuite à chaque tick).
+                    OverlayKind::Recap => self.features.recap,
+                    _ => true,
+                };
                 let mut overlay = Self::create_overlay_window(
                     event_loop,
                     kind,
@@ -1021,6 +1580,9 @@ impl App {
                     info.rect,
                     self.interactive,
                     visible,
+                    self.combat_on_right,
+                    self.combat_position_y,
+                    self.recap_position,
                 );
                 tracing::info!(
                     "[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé."
@@ -1036,6 +1598,19 @@ impl App {
                 self.windows.insert(overlay.window.id(), overlay);
             }
         }
+        // **La session du Récap suit ce balayage** (2026-09-17) : au moins une fenêtre de jeu à
+        // l'écran, le chrono avance ; plus aucune, il s'arrête — et c'est ici que la reprise
+        // (ou la nouvelle session) se décide au retour d'une fenêtre. Voir `recap_session`.
+        let game_present = !found.is_empty();
+        self.recap_session
+            .observe(game_present, &snapshot.totals, std::time::SystemTime::now());
+        // **Le dernier client vient de se fermer** (2026-09-18) : le moteur purge du disque les
+        // combats en cours abandonnés — voir `EngineCommand::GameClosed`. Au passage seulement,
+        // jamais à chaque tick sans client.
+        if self.game_was_present && !game_present {
+            let _ = self.settings_tx.send(EngineCommand::GameClosed);
+        }
+        self.game_was_present = game_present;
     }
 
     /// Affiche ou masque chaque fenêtre `Combat` selon qu'un combat est en cours pour SON
@@ -1145,7 +1720,11 @@ impl App {
                         turn_watch::templates::save(&character, &glyph);
                     }
                     turn_watch::watcher::Event::Notify { character } => {
-                        tracing::info!("[tour] >>> {character} doit jouer — notification.");
+                        // Nom du personnage en `debug` (constat C6 de `docs/analyse-rgpd.md`) — la
+                        // notification, elle, reste tracée en clair : c'est elle qu'on vient
+                        // chercher quand le toast n'est pas apparu.
+                        tracing::info!("[tour] >>> notification de tour.");
+                        tracing::debug!(%character, "[tour] >>> doit jouer");
                         // Le clic ramène la fenêtre de CE personnage au premier plan — par un
                         // process frais lancé sur l'URI du toast (voir `turn_watch::notify`).
                         if let Err(err) = turn_watch::notify::show(
@@ -1166,17 +1745,40 @@ impl App {
         }
     }
 
+    /// Affiche ou masque les fenêtres dont la présence à l'écran est CONDITIONNELLE — `Combat`
+    /// (selon qu'un combat est en cours pour SON personnage, demande du 2026-09-13) et `Recap`
+    /// (selon sa case à cocher, 2026-09-16). `Watchlist` n'en est jamais : son bandeau porte le
+    /// carré de contrôle, seul accès à la fenêtre Options depuis le jeu.
+    ///
+    /// **Masquer plutôt que détruire la fenêtre** : une fenêtre OS, sa surface wgpu et ses atlas
+    /// de textures se recréent en dizaines de millisecondes — les refaire à chaque combat mettrait
+    /// ce coût pile au moment où le joueur a besoin de voir ses dégâts. `set_visible` ne coûte
+    /// rien et garde la fenêtre prête.
+    ///
     /// Appelée à chaque tick d'`about_to_wait`, juste après `sync_windows` (une fenêtre tout juste
     /// créée est donc déjà au bon état) et avant `sync_topmost` (une fenêtre qui vient de
-    /// réapparaître doit être promue dans la même passe).
-    fn sync_combat_visibility(&mut self) {
+    /// réapparaître doit être promue dans la même passe) — et sans attendre ce tick à la
+    /// validation de la fenêtre Options, pour que le geste et son effet soient dans la même passe.
+    fn sync_panel_visibility(&mut self) {
         let snapshot = self.snapshot.load();
         let always = self.combat_always_visible;
+        // Le détail des combats coupé masque toutes les fenêtres Combat au prochain tick — c'est
+        // la validation de la fenêtre Options qui déclenche la passe (voir `apply_options`, qui
+        // appelle cette méthode sans attendre `about_to_wait`).
+        let enabled = self.features.combat;
+        let recap_enabled = self.features.recap;
         for overlay in self.windows.values_mut() {
-            if overlay.kind != OverlayKind::Combat {
-                continue;
-            }
-            let wanted = panels::combat::should_show(&snapshot, &overlay.character_name, always);
+            // **Deux zones, une seule passe** (2026-09-16, arrivée de la bande Récap) : elles ont
+            // la même politique — masquer plutôt que détruire, voir la doc de cette méthode — et
+            // les mêmes précautions de réapparition juste en dessous. Seule la RÈGLE diffère :
+            // Combat dépend du combat en cours, Récap de sa seule case à cocher.
+            let wanted = match overlay.kind {
+                OverlayKind::Combat => {
+                    panels::combat::should_show(&snapshot, &overlay.character_name, always, enabled)
+                }
+                OverlayKind::Recap => recap_enabled,
+                _ => continue,
+            };
             if wanted == overlay.visible {
                 continue;
             }
@@ -1191,45 +1793,86 @@ impl App {
                 // `Surface` recréée de zéro rejoue ce chemin.
                 recreate_surface(&mut overlay.gpu, &overlay.window);
                 overlay.next_redraw_at = Some(std::time::Instant::now());
-                // Le z-order d'une fenêtre masquée n'a pas été suivi pendant son absence :
-                // réaffirmer `HWND_TOPMOST` au prochain tick plutôt qu'à la prochaine échéance
+                // Le z-order d'une fenêtre masquée n'a pas été suivi pendant son absence, et
+                // `ShowWindow(SW_SHOW)` (winit) peut la remonter : réaffirmer son état au prochain
+                // tick — `HWND_TOPMOST` si son jeu a le focus, recollage juste au-dessus de sa
+                // fenêtre de jeu sinon (voir `sync_topmost`) — plutôt qu'à la prochaine échéance
                 // périodique (jusqu'à `TOPMOST_REASSERT_INTERVAL` plus tard).
                 overlay.last_topmost_reassert = None;
             }
             tracing::info!(
-                "[combat] {} — panneau {}",
+                "[{}] {} — panneau {}",
+                if overlay.kind == OverlayKind::Recap {
+                    "recap"
+                } else {
+                    "combat"
+                },
                 overlay.character_name,
                 if wanted { "affiché" } else { "masqué" }
             );
         }
     }
 
-    /// Position ancrée sur la fenêtre de jeu selon la zone (voir `OverlayKind`) : Combat reste
-    /// collé au bord gauche, centré verticalement (comportement d'origine, S1/L2) ; Suivi est
+    /// Position ancrée sur la fenêtre de jeu selon la zone (voir `OverlayKind`) : Combat est collé
+    /// à un bord VERTICAL, centré verticalement (comportement d'origine, S1/L2) ; Suivi est
     /// désormais collé au bord HAUT, centré horizontalement — demande utilisateur explicite
     /// 2026-09-01, à l'image du bandeau du web (`tracker-strip.component`).
+    ///
+    /// `combat_on_right` (2026-09-17) décide DUQUEL des deux bords verticaux il s'agit — case
+    /// « Afficher le panneau de combat à droite de la fenêtre de jeu » des Options. Il ne concerne
+    /// que la zone Combat ; le contenu de la fenêtre, lui, est retourné en miroir par le rendu
+    /// (voir `overlay_ui::mirror`), les deux allant toujours ensemble.
     fn anchor_position(
         kind: OverlayKind,
         rect: GameRect,
         overlay_width: i32,
         overlay_height: i32,
+        combat: CombatAnchor,
+        recap: RecapAnchor,
     ) -> PhysicalPosition<i32> {
         match kind {
-            OverlayKind::Combat => PhysicalPosition::new(
-                rect.left + GAME_EDGE_MARGIN_PX,
-                rect.top + (rect.height - overlay_height) / 2,
-            ),
+            // Combat : collé à un bord vertical (`CombatAnchor::on_right`), centré verticalement
+            // tant que l'utilisateur ne l'a pas fait glisser, à sa hauteur ensuite (2026-09-17) —
+            // tout le calcul, bornage compris, est dans `overlay_ui::combat_placement`, partagé
+            // avec le binaire X11. La marge au bord (`GAME_EDGE_MARGIN_PX`) y est nulle des deux
+            // côtés, comme ici auparavant : « comme si l'overlay faisait partie du jeu ».
+            OverlayKind::Combat => {
+                let (client, panel) = combat.geometry(rect, overlay_width, overlay_height);
+                let (x, y) = combat_placement::window_position(
+                    combat.offset,
+                    combat.on_right,
+                    client,
+                    panel,
+                );
+                PhysicalPosition::new(x, y)
+            }
             OverlayKind::Watchlist => PhysicalPosition::new(
                 rect.left + (rect.width - overlay_width) / 2,
                 rect.client_top + GAME_TOP_MARGIN_PX,
             ),
-            // Centrée sur les DEUX axes (2026-09-08, §9 du plan) — « au centre de l'écran de
-            // l'utilisateur au niveau du jeu », contrairement à Combat/Suivi qui restent ancrés
-            // sur un bord.
-            OverlayKind::Options => PhysicalPosition::new(
-                rect.left + (rect.width - overlay_width) / 2,
-                rect.top + (rect.height - overlay_height) / 2,
-            ),
+            // Récap : sous les boutons du jeu et leurs infobulles tant que l'utilisateur ne l'a
+            // pas déplacée, là où il l'a posée ensuite (2026-09-17) — tout le calcul, bornage
+            // compris, est dans `overlay_ui::recap_placement`, partagé avec le binaire X11. Le
+            // décalage vise le BLOC ; la fenêtre, elle, commence `RECAP_TOOLTIP_RESERVE` px plus
+            // haut (la marge que `paint_content` lui donne pour ses infobulles).
+            OverlayKind::Recap => {
+                let (client, band) = recap.geometry(rect, overlay_width, overlay_height);
+                let (x, y) = recap_placement::window_position(recap.offset, client, band);
+                PhysicalPosition::new(x, y)
+            }
+            // La confirmation de remise à zéro couvre la fenêtre de jeu ENTIÈRE, barre de titre
+            // comprise : son voile part du coin de la fenêtre, pas de la zone cliente.
+            OverlayKind::ResetConfirm(_) => PhysicalPosition::new(rect.left, rect.top),
+            // **Rattachée à une fenêtre de jeu, la fenêtre Options EST la fenêtre de jeu**
+            // (2026-09-17) : elle la couvre entière, barre de titre comprise, comme la
+            // confirmation ci-dessus — son voile part du coin, et c'est le rendu qui centre la
+            // modale dedans (`RenderContent::veiled`). Jusque-là elle était centrée sur les deux
+            // axes à sa propre taille (2026-09-08, « au centre de l'écran de l'utilisateur au
+            // niveau du jeu ») ; ce centrage vaut toujours, il a seulement changé d'étage.
+            //
+            // Détachée (`is_detached`), elle garde sa taille et ce bras n'est pas lu :
+            // `center_on_primary_monitor` la place, et `reposition` ne la voit jamais.
+            OverlayKind::Options => PhysicalPosition::new(rect.left, rect.top),
             // Jamais ancrée sur le jeu — centrée sur l'écran par `center_on_primary_monitor`,
             // et jamais repositionnée ensuite (`reposition` ne la voit pas, `sync_windows`
             // l'ignore). Ce bras n'est là que pour l'exhaustivité.
@@ -1237,6 +1880,11 @@ impl App {
         }
     }
 
+    // Neuf paramètres depuis que le panneau Combat se pose à droite et que la bande Récap se
+    // déplace (2026-09-17) : ce sont les caractéristiques d'UNE fenêtre à créer, toutes distinctes
+    // et toutes obligatoires. Un struct de paramètres ne ferait que déplacer la liste d'un cran,
+    // pour trois appelants.
+    #[allow(clippy::too_many_arguments)]
     fn create_overlay_window(
         event_loop: &ActiveEventLoop,
         kind: OverlayKind,
@@ -1245,6 +1893,14 @@ impl App {
         rect: GameRect,
         interactive: bool,
         visible: bool,
+        // `combat_on_right` : voir `anchor_position` — le bord vertical où la zone Combat se colle.
+        combat_on_right: bool,
+        // À quelle hauteur poser le panneau Combat (`App::combat_position_y`, 2026-09-17) — sans
+        // objet pour les autres zones.
+        combat_offset: Option<i32>,
+        // Où poser la bande Récap (`App::recap_position`) — sans objet pour les autres zones,
+        // qui n'en lisent rien.
+        recap_offset: Option<(i32, i32)>,
     ) -> OverlayWindow {
         let size = match kind {
             OverlayKind::Combat => WINDOW_SIZE,
@@ -1259,16 +1915,49 @@ impl App {
                 watchlist_target_width(0, true, false, rect.width),
                 watchlist_target_height(false, false),
             ),
+            // Rattachée à une fenêtre de jeu : SA taille, pour que le voile la couvre en entier,
+            // overlays compris (2026-09-17, voir `RenderContent::veiled`). Détachée (`game_hwnd`
+            // nul, aucun client à l'écran) : celle de la modale seule, sans voile.
+            OverlayKind::Options if game_hwnd != HWND::default() => {
+                (rect.width as f64, rect.height as f64)
+            }
             OverlayKind::Options => (
                 options_modal::WINDOW_SIZE.0 as f64,
                 options_modal::WINDOW_SIZE.1 as f64,
             ),
+            // Récap : largeur FIXE, celle de la rangée de boutons du jeu (`panels::recap::WIDTH`) ;
+            // la hauteur naît à trois lignes et suit le contenu (voir le redimensionnement dans
+            // `RedrawRequested`, même mécanique que le Suivi), plus la réserve des infobulles,
+            // qui s'ouvrent au-dessus (marge haute du contenu).
+            OverlayKind::Recap => (
+                panels::recap::WIDTH as f64,
+                panels::recap::HEIGHT as f64
+                    + render_content::RECAP_TOOLTIP_RESERVE as f64
+                    + render_content::RECAP_ACTIONS_RESERVE as f64,
+            ),
+            // La taille de la fenêtre de jeu, pour que le voile la couvre en entier — overlays
+            // compris, puisque cette fenêtre est créée après eux et donc au-dessus.
+            OverlayKind::ResetConfirm(_) => (rect.width as f64, rect.height as f64),
             // Créée par `create_login_window`, jamais par ici — voir sa doc.
             OverlayKind::Login => (login::WINDOW_WIDTH as f64, login::INITIAL_HEIGHT as f64),
+        };
+        // **Une fenêtre qui couvre le jeu se mesure en pixels PHYSIQUES** : `GameRect` vient de
+        // `GetWindowRect`, et la position posée plus bas (`set_outer_position`) est physique
+        // aussi. Une taille logique serait multipliée par l'échelle d'affichage (125 % : un voile
+        // d'un quart plus grand que le jeu, débordant en bas et à droite). Les autres zones ont
+        // des tailles de MAQUETTE, en points logiques, et restent logiques.
+        let covers_game = matches!(kind, OverlayKind::ResetConfirm(_))
+            || (kind == OverlayKind::Options && game_hwnd != HWND::default());
+        let inner_size: winit::dpi::Size = if covers_game {
+            PhysicalSize::new(size.0, size.1).into()
+        } else {
+            winit::dpi::LogicalSize::new(size.0, size.1).into()
         };
         let title_suffix = match kind {
             OverlayKind::Combat => "Combat",
             OverlayKind::Watchlist => "Suivi",
+            OverlayKind::Recap => "Recap",
+            OverlayKind::ResetConfirm(_) => "Confirmation",
             OverlayKind::Options => "Options",
             OverlayKind::Login => "Connexion",
         };
@@ -1276,13 +1965,13 @@ impl App {
             .with_title(format!(
                 "wakfu-companion-overlay — {character_name} — {title_suffix}"
             ))
-            .with_inner_size(winit::dpi::LogicalSize::new(size.0, size.1))
+            .with_inner_size(inner_size)
             .with_transparent(true)
             .with_decorations(false)
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_resizable(false)
             // Une fenêtre `Combat` peut naître MASQUÉE (aucun combat en cours, option décochée —
-            // voir `sync_combat_visibility`) : demandé dès les attributs plutôt que par un
+            // voir `sync_panel_visibility`) : demandé dès les attributs plutôt que par un
             // `set_visible(false)` juste après la création, qui la laisserait clignoter à l'écran
             // le temps d'une frame. Toujours `true` pour Suivi et Options.
             .with_visible(visible);
@@ -1302,7 +1991,9 @@ impl App {
         // cette fenêtre garde `WS_EX_TOOLWINDOW` (hors barre des tâches/alt-tab, comme
         // `with_skip_taskbar` ci-dessus) sans `WS_EX_NOACTIVATE`, contrairement à Combat/Suivi qui
         // ne doivent JAMAIS voler le focus au jeu.
-        if kind == OverlayKind::Options {
+        // La confirmation de remise à zéro aussi (2026-09-17) : Échap doit pouvoir répondre
+        // « Non », il lui faut le focus clavier.
+        if matches!(kind, OverlayKind::Options | OverlayKind::ResetConfirm(_)) {
             Self::apply_extended_styles_focusable(hwnd);
         } else {
             Self::apply_extended_styles(hwnd);
@@ -1317,9 +2008,18 @@ impl App {
         let portraits = PortraitAtlas::load(&gpu.egui_ctx);
         let combat_frame = CombatFrame::load(&gpu.egui_ctx);
         let icons = UiIcons::load(&gpu.egui_ctx);
+        // Payés seulement là où ils servent — voir le champ `avatars` d'`OverlayWindow`.
+        let avatars = (kind == OverlayKind::Options).then(|| AvatarAtlas::load(&gpu.egui_ctx));
 
         let outer = window.outer_size();
-        let position = Self::anchor_position(kind, rect, outer.width as i32, outer.height as i32);
+        let position = Self::anchor_position(
+            kind,
+            rect,
+            outer.width as i32,
+            outer.height as i32,
+            CombatAnchor::new(combat_on_right, combat_offset, window.scale_factor()),
+            RecapAnchor::new(recap_offset, window.scale_factor()),
+        );
         window.set_outer_position(position);
         if kind == OverlayKind::Watchlist {
             // Diagnostic PERMANENT (pas juste temporaire) : l'écart entre `rect.top` (bord
@@ -1344,6 +2044,7 @@ impl App {
             portraits,
             combat_frame,
             icons,
+            avatars,
             remote_icon_textures: RemoteIconTextures::default(),
             combat_side: CombatSide::default(),
             combat_metric: CombatMetric::default(),
@@ -1362,6 +2063,9 @@ impl App {
             // d'entrées reste 0. `None` pour `Combat`, qui ne redimensionne jamais.
             last_watchlist_width: (kind == OverlayKind::Watchlist).then_some(size.0),
             last_watchlist_height: (kind == OverlayKind::Watchlist).then_some(size.1),
+            // Déjà la largeur demandée ci-dessus pour une fenêtre `Recap` — même principe que le
+            // Suivi juste au-dessus : la première frame ne redemande rien si elle tombe dessus.
+            last_recap_height: (kind == OverlayKind::Recap).then_some(panels::recap::HEIGHT),
             visible,
             is_topmost: true, // WindowLevel::AlwaysOnTop déjà appliqué ci-dessus à la création
             last_topmost_reassert: None,
@@ -1373,11 +2077,24 @@ impl App {
     /// Recolle une fenêtre overlay sur sa fenêtre de jeu selon son ancrage (voir
     /// `anchor_position`) ; n'appelle `set_outer_position` que si la position cible a changé, pour
     /// ne pas spammer le compositeur DWM 20×/s pour rien.
-    fn reposition(overlay: &mut OverlayWindow, rect: GameRect) {
+    fn reposition(
+        overlay: &mut OverlayWindow,
+        rect: GameRect,
+        combat_on_right: bool,
+        combat_offset: Option<i32>,
+        recap_offset: Option<(i32, i32)>,
+    ) {
         overlay.game_rect = rect;
         let outer = overlay.window.outer_size();
-        let desired =
-            Self::anchor_position(overlay.kind, rect, outer.width as i32, outer.height as i32);
+        let scale = overlay.window.scale_factor();
+        let desired = Self::anchor_position(
+            overlay.kind,
+            rect,
+            outer.width as i32,
+            outer.height as i32,
+            CombatAnchor::new(combat_on_right, combat_offset, scale),
+            RecapAnchor::new(recap_offset, scale),
+        );
         if overlay.last_position != Some(desired) {
             overlay.window.set_outer_position(desired);
             overlay.last_position = Some(desired);
@@ -1409,6 +2126,63 @@ impl App {
         match window.window_handle().expect("handle de fenêtre").as_raw() {
             RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut _),
             other => panic!("handle de fenêtre inattendu sur Windows : {other:?}"),
+        }
+    }
+
+    /// `hwnd` porte-t-il `WS_EX_TOPMOST` — appartient-il à la bande topmost du z-order ?
+    fn is_topmost_window(hwnd: HWND) -> bool {
+        let ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+        ex_style & WS_EX_TOPMOST.0 != 0
+    }
+
+    /// Colle un overlay rétrogradé **juste au-dessus de sa fenêtre de jeu** dans le z-order, hors
+    /// bande topmost — voir `sync_topmost` (correctif 2026-09-23). `hWndInsertAfter` est la fenêtre
+    /// qui précède immédiatement le jeu (`GW_HWNDPREV`, n'importe quel processus) ; s'il n'y en a
+    /// pas, ou si elle est elle-même topmost (le jeu est alors la PREMIÈRE fenêtre non-topmost),
+    /// `HWND_NOTOPMOST` — tête de la bande non-topmost — revient au même endroit. Insérer après
+    /// une fenêtre non-topmost retire au passage `WS_EX_TOPMOST` à l'overlay (règle Win32 : un
+    /// topmost repositionné derrière une fenêtre non-topmost cesse de l'être). Sans effet s'il est
+    /// déjà exactement là (la fenêtre précédant le jeu est l'overlay lui-même).
+    fn glue_above_game(hwnd: HWND, game_hwnd: HWND) {
+        let prev = unsafe { GetWindow(game_hwnd, GW_HWNDPREV) }.unwrap_or_default();
+        if prev == hwnd {
+            return;
+        }
+        let insert_after = if prev.0.is_null() || Self::is_topmost_window(prev) {
+            HWND_NOTOPMOST
+        } else {
+            prev
+        };
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                Some(insert_after),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+    }
+
+    /// L'overlay `hwnd` est-il déjà collé au-dessus de sa fenêtre de jeu — c'est-à-dire dans la
+    /// suite CONTIGUË de fenêtres de son groupe (`group` : les overlays de ce même client) qui
+    /// précède immédiatement `game_hwnd` dans le z-order ? Sert à `sync_topmost` à ne pas
+    /// remélanger inutilement des frères déjà bien placés à chaque revérification périodique.
+    fn is_glued_above_game(hwnd: HWND, game_hwnd: HWND, group: &[HWND]) -> bool {
+        let mut cursor = game_hwnd;
+        loop {
+            let Ok(prev) = (unsafe { GetWindow(cursor, GW_HWNDPREV) }) else {
+                return false;
+            };
+            if prev == hwnd {
+                return true;
+            }
+            if !group.contains(&prev) {
+                return false;
+            }
+            cursor = prev;
         }
     }
 
@@ -1545,6 +2319,15 @@ impl App {
             overlay.next_redraw_at = Some(std::time::Instant::now());
         }
         self.sync_topmost();
+        // **(e) Le flux de log lui-même** (2026-09-17) — un panneau Combat qui répond mais n'avance
+        // plus (« les boutons marchent, les dégâts ne montent plus ») ne se répare ni par un
+        // redessin ni par une réaffirmation topmost : ce qu'il affiche est fidèle au dernier
+        // `SessionSnapshot` publié, c'est la publication qui s'est arrêtée. Ce raccourci étant
+        // voulu comme la réponse universelle à « quelque chose s'est mal affiché » (voir plus
+        // haut), il relit désormais `wakfu.log` en entier et reconstruit la session — voir
+        // `EngineCommand::ResyncLog`. Le chien de garde du thread Engine (`IngestWatchdog`) fait
+        // de même tout seul au bout de huit secondes ; ce chemin-ci n'attend pas.
+        let _ = self.settings_tx.send(EngineCommand::ResyncLog);
         let settings_tx = self.settings_tx.clone();
         // Capturé AVANT le `move` : le thread n'a pas accès à `self` (et la combinaison peut de
         // toute façon changer entre-temps, la fenêtre Options étant ouvrable pendant l'appel).
@@ -1595,6 +2378,29 @@ impl App {
     fn disconnect_account(&mut self) {
         let _ = self.auth_command_tx.send(AuthCommand::Disconnect);
         tracing::info!(">>> Déconnexion du compte demandée (fenêtre Options).");
+    }
+
+    /// **« Supprimer les données locales », confirmé** (2026-09-18, constat C5 de
+    /// `docs/analyse-rgpd.md` §3.5) — depuis « Vos données » de l'onglet « À propos » de la
+    /// fenêtre Options (`OptionsModalAction::PurgeLocalData`) ou depuis la fenêtre de connexion
+    /// (`RenderOutcome::purge_local_data`, le seul chemin quand aucun compte n'est lié).
+    ///
+    /// Efface tout ce que l'overlay a écrit sur cette machine, puis **arrête le programme** par le
+    /// même chemin que « Fermer l'overlay » : c'est la seule façon de garantir qu'aucun thread ne
+    /// réécrive ce qui vient de partir (voir `local_data`, doc de module). La borne de fin de
+    /// session est posée AVANT la purge — après, il n'y a plus de journal où l'écrire.
+    fn purge_local_data_and_quit(&mut self, event_loop: &ActiveEventLoop) {
+        tracing::warn!(
+            ">>> Effacement des données locales confirmé — l'overlay efface tout ce qu'il a écrit \
+             sur cette machine, puis se ferme."
+        );
+        logging::log_session_end("Supprimer les données locales");
+        let snapshot = self.snapshot.load();
+        let _ = overlay_ui::local_data::purge_everything_before_shutdown(
+            &mut self.recap_session,
+            &snapshot.totals,
+        );
+        event_loop.exit();
     }
 
     /// **Installe la mise à jour prête et relance** — appelé à chaque tick d'`about_to_wait`, AVANT
@@ -1707,7 +2513,10 @@ impl App {
             .copied()
             .find(|key| *key == foreground)
             .or_else(|| windows.first().copied());
-        tracing::info!(">>> Répondre en privé : {author}");
+        // Le nom du destinataire est celui d'un TIERS (constat C6 de `docs/analyse-rgpd.md`) :
+        // l'action se journalise, pas la personne visée — le nom part en `debug`.
+        tracing::info!(">>> Répondre en privé à l'auteur de l'alerte de chat.");
+        tracing::debug!(author, ">>> Répondre en privé");
         chat_command::send_whisper(author, target);
     }
 
@@ -1771,11 +2580,28 @@ impl App {
     }
 
     /// Chaque overlay au-dessus SEULEMENT si SA PROPRE fenêtre de jeu (ou lui-même) a le focus ;
-    /// sinon repli en z-order normal — pour ne plus recouvrir une application quelconque devenue
-    /// active (retour utilisateur 2026-09-01 : "l'overlay ne doit pas s'afficher par-dessus
-    /// l'explorateur de fichiers"), ET pour que passer d'une fenêtre de jeu à l'autre en
-    /// multi-compte fasse remonter le BON overlay au premier plan. Un seul `GetForegroundWindow()`
-    /// par tick, comparé au `HWND` de chaque fenêtre suivie — coût négligeable.
+    /// sinon **collé juste au-dessus de sa fenêtre de jeu dans le z-order, hors bande topmost**
+    /// (`glue_above_game`) — pour ne plus recouvrir une application quelconque devenue active
+    /// (retour utilisateur 2026-09-01 : "l'overlay ne doit pas s'afficher par-dessus l'explorateur
+    /// de fichiers"), ET pour que passer d'une fenêtre de jeu à l'autre en multi-compte fasse
+    /// remonter le BON overlay au premier plan. Un seul `GetForegroundWindow()` par tick, comparé
+    /// au `HWND` de chaque fenêtre suivie — coût négligeable.
+    ///
+    /// **Correctif 2026-09-23** (retour utilisateur, captures à l'appui, journal `session_id=26088`
+    /// : les bascules topmost s'y enchaînent pourtant exactement comme prévu) : le repli était
+    /// `SetWindowPos(HWND_NOTOPMOST)`, qui place la fenêtre **en tête de la bande non-topmost** —
+    /// c'est-à-dire AU-DESSUS de l'application qui vient d'être activée, tant que celle-ci n'est
+    /// pas réactivée. Deux clients côte à côte : les overlays de Canis, rétrogradés après le
+    /// passage sur Zoroark, restaient dessinés PAR-DESSUS la fenêtre de Zoroark (qui, active
+    /// depuis avant la rétrogradation, ne repassait jamais devant eux) ; même chose au-dessus de
+    /// VS Code ou de l'outil de capture. Le modèle voulu est « un groupe d'overlays par fenêtre de
+    /// jeu, qui suit sa fenêtre » : rétrogradé, un overlay est désormais inséré juste au-dessus
+    /// de SA fenêtre de jeu (`GW_HWNDPREV` de celle-ci) — visible tant que son client l'est,
+    /// recouvert dès que n'importe quelle autre fenêtre passe devant ce client, exactement comme
+    /// s'il en faisait partie. Seul le groupe du client au premier plan est topmost. Le recollage
+    /// est revérifié périodiquement (`TOPMOST_REASSERT_INTERVAL`, `is_glued_above_game`) : un
+    /// `ShowWindow` (panneau Combat qui réapparaît au début d'un combat, voir
+    /// `sync_panel_visibility`) ou un tiers peut le défaire.
     ///
     /// **Correctif 2026-09-01** (retour utilisateur, multi-fenêtre) : la politique précédente
     /// (« TOUTE fenêtre de jeu Wakfu remet TOUS les overlays au premier plan ») avait deux défauts
@@ -1830,14 +2656,26 @@ impl App {
         // TOUS les overlays de CE personnage relevant — jamais ceux d'un AUTRE personnage en
         // multi-compte, qui gardent leur propre calcul indépendant.
         let mut relevant_game_hwnds: Vec<HWND> = Vec::new();
+        // Le groupe de chaque fenêtre de jeu : les `HWND` de tous ses overlays — ce que
+        // `is_glued_above_game` doit traverser pour reconnaître un overlay déjà recollé derrière
+        // ses frères (une `Vec` de paires : `HWND` n'est pas `Hash`, et il y a une poignée de
+        // fenêtres au plus).
+        let mut groups: Vec<(HWND, Vec<HWND>)> = Vec::new();
         for overlay in self.windows.values() {
-            if overlay.kind == OverlayKind::Login {
+            if overlay.kind == OverlayKind::Login || overlay.is_detached() {
                 continue;
             }
-            let this_relevant =
-                overlay.game_hwnd == foreground || Self::hwnd_of(&overlay.window) == foreground;
+            let hwnd = Self::hwnd_of(&overlay.window);
+            let this_relevant = overlay.game_hwnd == foreground || hwnd == foreground;
             if this_relevant && !relevant_game_hwnds.contains(&overlay.game_hwnd) {
                 relevant_game_hwnds.push(overlay.game_hwnd);
+            }
+            match groups
+                .iter_mut()
+                .find(|(game, _)| *game == overlay.game_hwnd)
+            {
+                Some((_, members)) => members.push(hwnd),
+                None => groups.push((overlay.game_hwnd, vec![hwnd])),
             }
         }
 
@@ -1855,7 +2693,15 @@ impl App {
             // manifestement l'attention ailleurs (retour utilisateur 2026-09-12). Rattachée à une
             // vraie fenêtre de jeu, elle n'a plus besoin d'exception : elle suit le premier plan
             // de SON personnage, et un second client Wakfu ne la voit pas.
-            let relevant = relevant_game_hwnds.contains(&overlay.game_hwnd);
+            //
+            // **Sauf ouverte sans aucun client à l'écran** (`is_detached`, 2026-09-17) : il n'y a
+            // alors aucun premier plan à suivre, et une fenêtre `WS_EX_TOOLWINDOW` rétrogradée
+            // — absente de la barre des tâches et de l'alt-tab — serait perdue derrière la
+            // première application venue, sans moyen de la retrouver ni d'en rouvrir une autre
+            // (une seule modale à la fois). Elle reste donc toujours « pertinente » : réaffirmée
+            // devant périodiquement comme un overlay dont le jeu a le focus, jamais démotée.
+            let relevant =
+                overlay.is_detached() || relevant_game_hwnds.contains(&overlay.game_hwnd);
 
             // Retour utilisateur 2026-09-02 : « l'overlay disparaît de manière indéterminée, il
             // n'y a rien qui permet de le réafficher ». Cause trouvée : Windows peut démoter un
@@ -1955,27 +2801,82 @@ impl App {
             // `relevant == false` : retour utilisateur 2026-09-02 (vidéo à l'appui), l'overlay
             // Combat disparaissait « un coup sur deux » en changeant de fenêtre alors que le Suivi
             // du même personnage restait visible au même instant, bien que les deux passent par ce
-            // même code — la démotion en NOTOPMOST était jusqu'ici IMMÉDIATE dès qu'un seul tick
-            // (~50 ms) voyait `GetForegroundWindow()` cesser de désigner la fenêtre de jeu, ce qui
-            // rend le résultat sensible au moindre aléa d'ordonnancement entre les deux fenêtres
-            // overlay (Windows peut livrer le nouveau premier plan à l'un des deux `SetWindowPos`
-            // un tick avant l'autre). `pending_demote_since` absorbe cet aléa : on ne démote qu'une
-            // fois `relevant` resté faux pendant `TOPMOST_DEMOTE_GRACE` en continu, pas déjà
-            // démoté sinon. Un retour à `relevant == true` avant l'échéance annule la démotion sans
+            // même code — la démotion était jusqu'ici IMMÉDIATE dès qu'un seul tick (~50 ms)
+            // voyait `GetForegroundWindow()` cesser de désigner la fenêtre de jeu, ce qui rend le
+            // résultat sensible au moindre aléa d'ordonnancement entre les deux fenêtres overlay
+            // (Windows peut livrer le nouveau premier plan à l'un des deux `SetWindowPos` un tick
+            // avant l'autre). `pending_demote_since` absorbe cet aléa : on ne démote qu'une fois
+            // `relevant` resté faux pendant `TOPMOST_DEMOTE_GRACE` en continu, pas déjà démoté
+            // sinon. Un retour à `relevant == true` avant l'échéance annule la démotion sans
             // jamais avoir bougé le z-order (voir la branche `if relevant` ci-dessus, qui vide
             // `pending_demote_since`).
+            let hwnd = Self::hwnd_of(&overlay.window);
             if !overlay.is_topmost {
+                // Déjà rétrogradé : revérifier périodiquement qu'il est toujours collé au-dessus
+                // de sa fenêtre de jeu (voir la doc de cette méthode, correctif 2026-09-23), au
+                // même rythme que la réaffirmation topmost — et dès le prochain tick quand
+                // `sync_panel_visibility` vient de le réafficher (`last_topmost_reassert = None`).
+                let due_for_reassert = overlay
+                    .last_topmost_reassert
+                    .is_none_or(|t| now.duration_since(t) >= TOPMOST_REASSERT_INTERVAL);
+                if !due_for_reassert {
+                    continue;
+                }
+                let group = groups
+                    .iter()
+                    .find(|(game, _)| *game == overlay.game_hwnd)
+                    .map(|(_, members)| members.as_slice())
+                    .unwrap_or(&[]);
+                if !Self::is_glued_above_game(hwnd, overlay.game_hwnd, group) {
+                    Self::glue_above_game(hwnd, overlay.game_hwnd);
+                    tracing::debug!(
+                        "[topmost] {} ({:?}) recollé au-dessus de sa fenêtre de jeu",
+                        overlay.character_name,
+                        overlay.kind
+                    );
+                }
+                overlay.last_topmost_reassert = Some(now);
                 continue;
             }
             let demote_due_at = *overlay.pending_demote_since.get_or_insert(now);
             if now.duration_since(demote_due_at) < TOPMOST_DEMOTE_GRACE {
                 continue;
             }
-            let hwnd = Self::hwnd_of(&overlay.window);
+            Self::glue_above_game(hwnd, overlay.game_hwnd);
+            tracing::info!(
+                "[topmost] {} ({:?}) -> collé au-dessus de sa fenêtre de jeu, hors topmost (après {:?} sans pertinence)",
+                overlay.character_name,
+                overlay.kind,
+                now.duration_since(demote_due_at)
+            );
+            overlay.is_topmost = false;
+            overlay.pending_demote_since = None;
+            overlay.last_topmost_reassert = Some(now);
+        }
+
+        // **Les fenêtres qui voilent le jeu restent devant tout** (2026-09-17) : chaque
+        // `SetWindowPos(HWND_TOPMOST)` ci-dessus place SA fenêtre en tête de la bande topmost —
+        // donc devant le voile, si un Combat ou un Suivi de la même fenêtre de jeu vient d'être
+        // réaffirmé après elle (l'ordre d'itération d'une `HashMap` n'est pas le nôtre).
+        // Réaffirmées EN DERNIER, à chaque passe, tant qu'elles sont topmost : elles reprennent le
+        // dessus. La fenêtre Options rattachée à un client voile depuis le même jour (voir
+        // `RenderContent::veiled`) ; la confirmation de remise à zéro passe après elle, au cas où
+        // les deux coexisteraient — la question doit rester lisible par-dessus le réglage.
+        let mut veils: Vec<&OverlayWindow> = self
+            .windows
+            .values()
+            .filter(|w| {
+                w.is_topmost
+                    && (matches!(w.kind, OverlayKind::ResetConfirm(_))
+                        || (w.kind == OverlayKind::Options && !w.is_detached()))
+            })
+            .collect();
+        veils.sort_by_key(|w| matches!(w.kind, OverlayKind::ResetConfirm(_)));
+        for overlay in veils {
             unsafe {
                 let _ = SetWindowPos(
-                    hwnd,
-                    Some(HWND_NOTOPMOST),
+                    Self::hwnd_of(&overlay.window),
+                    Some(HWND_TOPMOST),
                     0,
                     0,
                     0,
@@ -1983,31 +2884,33 @@ impl App {
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                 );
             }
-            tracing::info!(
-                "[topmost] {} ({:?}) -> HWND_NOTOPMOST (après {:?} sans pertinence)",
-                overlay.character_name,
-                overlay.kind,
-                now.duration_since(demote_due_at)
-            );
-            overlay.is_topmost = false;
-            overlay.pending_demote_since = None;
         }
     }
 
     /// Ouvre la modale Options (2026-09-08, §9 du plan) — bouton "Options" du carré de contrôle
     /// (`anchor_rect` = `game_rect` de la fenêtre Suivi cliquée) ou raccourci global
-    /// `ShortcutAction::Options` (`anchor_rect` = celui de la première fenêtre de jeu connue, s'il y
-    /// en a une). Sans effet si une modale est déjà ouverte (une seule à la fois, comme un vrai
-    /// dialogue modal) — pas de file d'attente, l'utilisateur referme/valide l'existante avant
-    /// d'en rouvrir une. Même méthode que `bin/overlay-ui-x11.rs` (dupliquée, voir la doc de
-    /// `lib.rs` pour pourquoi le fenêtrage OS n'est PAS partagé entre les deux binaires).
-    /// Ouvre la modale Options, **rattachée à une fenêtre de jeu**.
+    /// `ShortcutAction::Options` (`anchor_rect` = celui de la première fenêtre de jeu connue, s'il
+    /// y en a une). Sans effet si une modale est déjà ouverte (une seule à la fois, comme un vrai
+    /// dialogue modal) — pas de file d'attente, l'utilisateur referme/valide l'existante avant d'en
+    /// rouvrir une. Même méthode que `bin/wakfu-companion-overlay-x11.rs` (dupliquée, voir la doc
+    /// de `lib.rs` pour pourquoi le fenêtrage OS n'est PAS partagé entre les deux binaires). Ouvre
+    /// la modale Options, **rattachée à une fenêtre de jeu**.
     ///
     /// `anchor` est la fenêtre depuis laquelle elle est demandée : le bouton « Options » d'un
     /// bandeau Suivi la donne directement. Le raccourci global, lui, n'en a pas — il prend alors
     /// la fenêtre de jeu **au premier plan**, et à défaut le premier overlay connu. Sans ce
     /// rattachement la modale n'appartiendrait à personne, ce qui était précisément le défaut :
-    /// voir `sync_topmost`.
+    /// voir `sync_topmost`. **Aucune fenêtre de jeu du tout** (2026-09-17) : la modale s'ouvre
+    /// quand même, détachée — centrée sur l'écran principal, jamais refermée par `sync_windows`
+    /// (voir `OverlayWindow::is_detached`).
+    ///
+    /// **Rattachée, la fenêtre OS est celle du jeu, pas celle de la modale** (2026-09-17, décision
+    /// utilisateur : « un voile qui recouvre toute la fenêtre du jeu et les overlays lorsque
+    /// l'utilisateur ouvre la modale d'options alors que la fenêtre de jeu est ouverte ») : elle
+    /// couvre le client entier, voile tout — Combat, Suivi, Récap compris, puisqu'elle naît après
+    /// eux et que `sync_topmost` la garde devant — et centre la modale dedans
+    /// (`RenderContent::veiled`, `design::scrim`). Détachée, « aucun voile ne doit être
+    /// appliqué » : elle garde la taille de la modale.
     ///
     /// `initial_tab` est l'onglet sur lequel la fenêtre s'ouvre — **`Paramètres` pour le bouton
     /// « Options » du bandeau de suivi** (demande utilisateur 2026-09-13 : ce bouton donne accès
@@ -2036,30 +2939,39 @@ impl App {
             );
             return;
         }
-        // Sans ancre explicite (raccourci global), la fenêtre de jeu AU PREMIER PLAN est la
-        // bonne réponse : c'est celle que l'utilisateur regarde au moment où il appuie. Repli sur
-        // le premier overlay connu si le premier plan n'est pas un client Wakfu.
-        let (game_hwnd, rect) = match anchor {
-            Some(ancre) => ancre,
-            None => {
-                let foreground = unsafe { GetForegroundWindow() };
-                self.windows
-                    .values()
-                    .find(|w| w.game_hwnd == foreground)
-                    .or_else(|| self.windows.values().next())
-                    .map(|w| (w.game_hwnd, w.game_rect))
-                    .unwrap_or((
-                        HWND::default(),
-                        GameRect {
-                            left: 0,
-                            top: 0,
-                            width: 1280,
-                            height: 720,
-                            client_top: 0,
-                        },
-                    ))
-            }
-        };
+        // Sans ancre explicite (raccourci global, icône de zone de notification), la fenêtre de
+        // jeu AU PREMIER PLAN est la bonne réponse : c'est celle que l'utilisateur regarde au
+        // moment où il appuie. Repli sur le premier overlay connu si le premier plan n'est pas un
+        // client Wakfu.
+        let anchor = anchor.or_else(|| {
+            let foreground = unsafe { GetForegroundWindow() };
+            self.windows
+                .values()
+                .filter(|w| !w.is_detached())
+                .find(|w| w.game_hwnd == foreground)
+                .or_else(|| self.windows.values().find(|w| !w.is_detached()))
+                .map(|w| (w.game_hwnd, w.game_rect))
+        });
+        // **Aucune fenêtre de jeu à l'écran ⇒ la modale s'ouvre quand même, seule** (2026-09-17).
+        // Jusque-là elle naissait rattachée à une HWND nulle et un rectangle inventé — et
+        // `sync_windows`, ne trouvant aucun client derrière cette HWND, la refermait au tick
+        // suivant : « Options » depuis la zone de notification ne faisait rien tant que le jeu
+        // n'était pas lancé, alors que c'est précisément là qu'on règle le chemin de `wakfu.log`
+        // ou les raccourcis avant de jouer. Une modale DÉTACHÉE (`OverlayWindow::is_detached`)
+        // est centrée sur l'écran principal comme la fenêtre de connexion, reste devant (voir
+        // `sync_topmost`) et n'est fermée que par l'utilisateur. Elle ne se rattache pas à un
+        // client lancé entre-temps : elle vit jusqu'à « Valider »/« Annuler », comme avant.
+        let detached = anchor.is_none();
+        let (game_hwnd, rect) = anchor.unwrap_or((
+            HWND::default(),
+            GameRect {
+                left: 0,
+                top: 0,
+                width: 0,
+                height: 0,
+                client_top: 0,
+            },
+        ));
         // **Rattachée à `game_hwnd` comme n'importe quel overlay** depuis le 2026-09-12 : elle
         // suit donc le premier plan de ce personnage, et disparaît quand on passe sur un autre
         // client en multi-compte. Elle portait `HWND::default()` (nul) jusque-là, ce qui obligeait
@@ -2076,15 +2988,42 @@ impl App {
             rect,
             true,
             // Une fenêtre de réglages qu'on vient d'ouvrir est visible, toujours : seul `Combat`
-            // peut naître masqué (voir `sync_combat_visibility`).
+            // peut naître masqué (voir `sync_panel_visibility`).
             true,
+            self.combat_on_right,
+            // Sans objet : cette fenêtre-ci n'est ni le panneau Combat ni la bande Récap.
+            None,
+            None,
         );
+        if detached {
+            // Pas de jeu sur lequel s'ancrer : au centre de l'écran principal, et le focus tout de
+            // suite — il n'y a personne à qui le voler. `last_position` est oublié : cette fenêtre
+            // n'est jamais recollée par `reposition` (voir `sync_windows`), la valeur d'ancrage
+            // calculée à la création ne correspond à rien.
+            Self::center_on_primary_monitor(event_loop, &overlay.window);
+            overlay.last_position = None;
+            tracing::info!(
+                "[options] aucune fenêtre de jeu à l'écran — fenêtre Options ouverte seule, centrée sur l'écran principal."
+            );
+        }
+        // **Le focus clavier, rattachée ou non** (2026-09-17). Il n'était demandé que pour la
+        // modale détachée : ouverte depuis un bandeau, la fenêtre naissait devant mais SANS le
+        // focus, qui restait au bandeau qu'on venait de cliquer (en mode interactif, ce clic fait
+        // de lui la fenêtre au premier plan malgré `WS_EX_NOACTIVATE` — voir `sync_topmost`). Ses
+        // deux touches ne l'atteignaient donc pas : Échap ne l'annulait pas, Entrée ne validait
+        // pas, et le filet « Échap quitte l'overlay » du bandeau, lui, fermait tout (retour
+        // utilisateur, voir `window_event`).
+        //
+        // Le prendre au jeu est ici l'effet recherché, et non un vol : cette fenêtre est la seule
+        // délibérément focalisable (§9.1 du plan, il faut pouvoir taper dans le champ de chemin),
+        // et depuis le voile du même jour elle couvre le client entier — on ne joue pas derrière.
+        overlay.window.focus_window();
         // **Le brouillon d'alertes est une COPIE du profil du compte**, prise à l'ouverture : les
         // gestes de l'onglet la modifient librement, et seul « Valider » la renvoie (§5.1 du plan).
         // Sans compte lié, il n'y a ni liste à charger ni endroit où l'écrire — l'onglet le dit.
         let alerts_snapshot = self.alert_profile.load();
         let (alerts_draft, alerts_availability) = match alerts_snapshot.as_ref() {
-            Some((profile, _)) => (Some(profile.clone()), alerts_tab::AlertsAvailability::Ready),
+            Some(profile) => (Some(profile.clone()), alerts_tab::AlertsAvailability::Ready),
             None if matches!(**self.auth_status.load(), AuthStatus::Connected) => {
                 // Compte lié mais réglages pas encore revenus : c'est le seul cas où un rouage dit
                 // la vérité.
@@ -2152,6 +3091,18 @@ impl App {
             }
         });
 
+        // **Le brouillon du roster**, même principe que les alertes et le chat : une copie de ce
+        // que le compte porte, prise ici, modifiée librement, renvoyée à « Valider ».
+        let roster_snapshot = self.roster_draft.load();
+        let (personnages_draft, personnages_availability) = match roster_snapshot.as_ref() {
+            Some(roster) => (Some(roster.clone()), PersonnagesAvailability::Ready),
+            None => (None, PersonnagesAvailability::Loading),
+        };
+        // Lu une seule fois par ouverture, jamais à chaque frame : c'est un accès au registre
+        // (Windows) ou au disque (Linux), et la case est un brouillon comme les autres — elle ne
+        // doit surtout pas se remettre d'aplomb toute seule pendant qu'on la regarde.
+        let autostart_actif = overlay_ui::autostart::is_enabled();
+
         overlay.options_state = Some(OptionsModalState {
             path_input: self.log_path.display().to_string(),
             error: None,
@@ -2161,24 +3112,52 @@ impl App {
             // La case part du réglage EN VIGUEUR, pas du défaut : la fenêtre montre l'état réel,
             // et « Annuler » n'a rien à défaire tant qu'on n'y touche pas (voir `is_dirty`).
             combat_always_visible: self.combat_always_visible,
+            combat_on_right: self.combat_on_right,
             turn_notification: self.turn_notification,
             turn_notification_muted: self.turn_notification_muted,
             // Idem pour les trois interrupteurs : les cases s'ouvrent sur l'état réel.
             features: self.features,
             // Idem pour les deux sourdines.
             mutes: self.alert_mutes,
+            // Idem pour la fermeture de la carte de décompte (2026-09-16) — réglage local, donc
+            // rien à attendre d'un compte : la ligne s'ouvre directement sur sa valeur.
+            countdown_toast: self.countdown_toast,
+            completion: self.completion,
+            // Idem pour la reprise de la session du Récap (2026-09-17).
+            recap_resume: self.recap_session.resume_settings(),
             // Même règle pour les raccourcis : le brouillon part des combinaisons ACTIVES.
             shortcuts: self.hotkeys.bindings().clone(),
             raccourcis: Default::default(),
             // Le bouton « Déconnecter » de la section « Compte » n'a de sens que sur un compte
             // lié — l'hôte est seul à connaître `AuthStatus` (voir `spawn_auth_thread`).
             account_connected: matches!(**self.auth_status.load(), AuthStatus::Connected),
+            // L'avis « session conservée en clair » de la section « Compte » (constat C7).
+            token_on_disk: overlay_sync::token_store::token_file_in_use(),
             pending_disconnect: false,
+            // « Supprimer les données locales » : jamais en cours à l'ouverture, comme les cinq
+            // autres confirmations de cette fenêtre.
+            pending_purge: false,
+            personnages: PersonnagesTabState {
+                // Le compte affiché à l'ouverture est le principal, celui que tout roster a.
+                account: personnages_draft
+                    .as_ref()
+                    .map(|roster| roster.default_index())
+                    .unwrap_or(0),
+                ..Default::default()
+            },
             // La section « Mise à jour » lit l'état publié par le thread de mise à jour ; rafraîchi
             // avant chaque rendu (voir `redraw`), posé ici pour la première frame.
             update: (**self.update_status.load()).clone(),
             auto_update: self.auto_update,
+            verbose_log: self.verbose_log,
+            // **Le démarrage avec l'ordinateur se lit dans le SYSTÈME**, pas dans un champ de
+            // l'hôte : c'est le seul réglage de cette fenêtre qu'un autre programme peut avoir
+            // changé entre deux ouvertures (Gestionnaire des tâches, réglages du bureau). Voir
+            // `autostart`, doc de module.
+            start_with_os: autostart_actif,
             pending_install: None,
+            pending_quit: false,
+            pending_restart: false,
             alerts: alerts_tab::AlertsTabState {
                 // Le champ de durée s'ouvre sur la valeur en place, pas vide : c'est un réglage
                 // existant qu'on vient modifier.
@@ -2197,20 +3176,34 @@ impl App {
                 alerts: alerts_draft.clone(),
                 suivi: suivi_draft.clone(),
                 chat: chat_draft.clone(),
+                personnages: personnages_draft.clone(),
                 combat_always_visible: self.combat_always_visible,
+                combat_on_right: self.combat_on_right,
                 turn_notification: self.turn_notification,
                 turn_notification_muted: self.turn_notification_muted,
                 features: self.features,
                 mutes: self.alert_mutes,
+                countdown_toast: self.countdown_toast,
+                completion: self.completion,
+                recap_resume: self.recap_session.resume_settings(),
                 shortcuts: self.hotkeys.bindings().clone(),
                 auto_update: self.auto_update,
+                verbose_log: self.verbose_log,
+                start_with_os: autostart_actif,
             },
             pending_close: false,
             alerts_draft,
             alerts_availability,
             chat_draft,
             chat_availability,
-            suivi: Default::default(),
+            personnages_draft,
+            personnages_availability,
+            suivi: suivi_tab::SuiviTabState {
+                // Comme pour les Alertes et le Chat : le champ de durée s'ouvre sur la valeur en
+                // place, pas vide — c'est un réglage existant qu'on vient modifier.
+                duration_input: format_alert_duration(self.countdown_toast.duration_seconds),
+                ..Default::default()
+            },
             suivi_draft,
             suivi_availability,
         });
@@ -2223,6 +3216,92 @@ impl App {
         // par `close_options_modal`, quelle que soit la façon dont la fenêtre se referme.
         self.hotkeys.suspend();
         tracing::info!("[options] modale ouverte — raccourcis globaux suspendus.");
+    }
+
+    /// **Les suivis qui viennent d'aboutir** — reçus du thread Engine, célébrés, puis retirés
+    /// (2026-09-17).
+    ///
+    /// Appelée à chaque tick de la boucle d'événements, **pas au rendu**, et c'est tout l'intérêt :
+    /// décision utilisateur, « le retrait est une conséquence du seuil, pas de l'animation ». Une
+    /// fenêtre Suivi masquée, un Suivi coupé, un joueur qui regardait ailleurs : l'entrée aboutie
+    /// part quand même, et part au compte.
+    ///
+    /// Le retrait emprunte le chemin de la suppression groupée du bandeau, sans rien y ajouter :
+    /// `SetWatchlistDefinitions` avec la liste amputée → `WatchlistState::apply_definitions` →
+    /// `drain_watchlist_sync` → `SyncCommand::SyncWatchlist` → `PATCH /api/v1/settings`. Le moteur
+    /// garde les compteurs des entrées restantes, et un échec réseau est retenté par le thread
+    /// Sync — le retrait ne se perd pas dans une coupure.
+    fn tick_watchlist_completions(&mut self) {
+        let now = std::time::Instant::now();
+        while let Ok(completed) = self.completions_rx.try_recv() {
+            tracing::info!(
+                name = %completed.name,
+                remove = self.completion.remove,
+                animate = self.completion.animates(),
+                "[suivi] entrée complétée"
+            );
+            self.watchlist_completions.push(
+                completed.key,
+                now,
+                self.completion.removal_delay_seconds(),
+                self.completion.remove,
+            );
+        }
+
+        // **Redessiner le bandeau tant qu'une tuile célèbre.** La boucle est réactive (§6.1) :
+        // sans cette demande, l'animation n'avancerait qu'au tick de 50 ms et au gré des lots du
+        // moteur — soit des à-coups visibles sur une couronne qui tourne. Le rythme est rendu à la
+        // bande dès la dernière image : trois secondes et demie de 60 Hz, pas une de plus.
+        if self.watchlist_completions.is_animating(now) {
+            let prochaine = now + COMPLETION_FRAME;
+            for overlay in self.windows.values_mut() {
+                if matches!(overlay.kind, OverlayKind::Watchlist) {
+                    overlay.next_redraw_at = Some(match overlay.next_redraw_at {
+                        Some(deja) => deja.min(prochaine),
+                        None => prochaine,
+                    });
+                }
+            }
+        }
+
+        let a_retirer = self.watchlist_completions.drain_due(now);
+        if a_retirer.is_empty() {
+            return;
+        }
+        // **La liste de référence est celle du moteur**, relue à l'instant du retrait et non à
+        // celui du franchissement : entre les deux, le joueur a pu ajouter une entrée depuis la
+        // fenêtre Options ou le site. Repartir d'une copie prise 3,5 s plus tôt la ferait
+        // disparaître.
+        let definitions: Vec<WatchlistEntry> = self
+            .watchlist
+            .load()
+            .iter()
+            .filter(|entry| {
+                !a_retirer.contains(&panels::suivi_tab::key_of(&entry.name, entry.catalog_id))
+            })
+            .cloned()
+            .collect();
+        // Rien à écrire si aucune des clés ne correspond plus à une entrée vivante : elles ont pu
+        // être retirées entre-temps depuis la fenêtre Options ou le site. Réécrire la clé pour
+        // rien repousserait son horodatage, et le « dernier écrivain gagne » du serveur ferait
+        // perdre une modification faite ailleurs (même précaution que `commit_suivi`).
+        if definitions.len() == self.watchlist.load().len() {
+            return;
+        }
+        tracing::info!(
+            retirees = a_retirer.len(),
+            restantes = definitions.len(),
+            "[suivi] entrées complétées retirées, réplication au compte en route"
+        );
+        let _ = self
+            .settings_tx
+            .send(EngineCommand::SetWatchlistDefinitions {
+                definitions,
+                // Rien à oublier en plus : l'entrée complétée quitte la liste sans y revenir,
+                // exactement comme un retrait depuis le bandeau. Le jour où elle est recréée,
+                // c'est une entrée neuve, qui repart de la valeur de son mode.
+                retirees: Vec::new(),
+            });
     }
 
     /// Lance l'explorateur de fichiers natif (`rfd`) sur un thread dédié — bloquant côté OS, ne
@@ -2293,6 +3372,43 @@ impl App {
         toast_changed
     }
 
+    /// Commit du brouillon de l'onglet « Personnages » — calqué sur [`Self::commit_chat`] : le
+    /// roster est appliqué localement d'abord (le combat en cours doit reconnaître le personnage
+    /// déclaré sans attendre le réseau), puis écrit sur le compte depuis un thread.
+    ///
+    /// **Seul l'écart part au compte** (`Roster::patch_against`, constat C9, 2026-09-19) : les
+    /// comptes modifiés ou créés, et les identifiants des comptes retirés — la référence est le
+    /// roster publié par le thread Engine, c'est-à-dire celui du compte ou celui de la dernière
+    /// validation. Voir `overlay_engine::roster`, doc de module, et
+    /// `overlay_sync::client::patch_roster`.
+    fn commit_personnages(&mut self, options_window_id: WindowId) {
+        let Some(roster) = self
+            .windows
+            .get(&options_window_id)
+            .and_then(|overlay| overlay.options_state.as_ref())
+            .and_then(|state| state.personnages_draft.clone())
+        else {
+            return;
+        };
+        let reference = self.roster_draft.load();
+        let patch = roster.patch_against(reference.as_ref().as_ref().unwrap_or(&Roster::default()));
+        if patch.is_empty() {
+            return;
+        }
+        let _ = self.settings_tx.send(EngineCommand::SetRoster(roster));
+        thread::spawn(move || match overlay_sync::token_store::load_token() {
+            Some(token) => match overlay_sync::client::patch_roster(&token, &patch) {
+                Ok(_) => tracing::info!("[options] roster enregistré sur le compte."),
+                Err(err) => {
+                    tracing::warn!(%err, "[options] échec de l'enregistrement du roster")
+                }
+            },
+            None => tracing::info!(
+                "[options] roster appliqué localement — aucun compte lié, rien n'est enregistré."
+            ),
+        });
+    }
+
     /// Valide `raw` (contenu du champ texte au moment du clic sur "Valider", ou chemin choisi par
     /// le dialogue natif) via `discovery::validate_log_path` — voir §5.1 du plan : « il ne peut
     /// sélectionner qu'un fichier wakfu.log [...] des guards pour éviter de sélectionner n'importe
@@ -2319,11 +3435,7 @@ impl App {
             return;
         };
         let connu = self.alert_profile.load();
-        let (reference, raw) = match connu.as_ref() {
-            Some((profile, raw)) => (Some(profile.clone()), raw.clone()),
-            None => (None, None),
-        };
-        if reference.as_ref() == Some(&draft) {
+        if connu.as_ref().as_ref() == Some(&draft) {
             return;
         }
 
@@ -2333,10 +3445,11 @@ impl App {
             .send(EngineCommand::SetAlertProfile(draft.clone()));
 
         // Et écrit au compte sur un thread — jamais sur la boucle winit (§7.3 du plan, même règle
-        // que tous les appels réseau de ce dépôt).
-        let profile_value = draft.patch_value(raw.as_ref());
+        // que tous les appels réseau de ce dépôt). Les trois champs d'alerte seulement : le
+        // serveur fusionne (`AlertProfile::patch_fields`, constat C9, 2026-09-19).
+        let fields = draft.patch_fields();
         thread::spawn(move || match overlay_sync::token_store::load_token() {
-            Some(token) => match overlay_sync::client::patch_profile(&token, &profile_value) {
+            Some(token) => match overlay_sync::client::patch_profile(&token, &fields) {
                 Ok(_) => tracing::info!("[options] alertes enregistrées sur le compte."),
                 // Best-effort, comme la réplication des compteurs de Suivi : le réglage est déjà
                 // actif localement, et la prochaine validation réessaiera. Un échec réseau ne doit
@@ -2373,19 +3486,29 @@ impl App {
         let Some(draft) = state.suivi_draft.clone() else {
             return;
         };
+        // Les entrées retirées pendant l'édition partent AVEC le brouillon : une entrée supprimée
+        // puis recréée y figure des deux côtés, et c'est la seule chose qui la distingue d'une
+        // entrée jamais touchée (voir `SuiviTabState::retirees`).
+        let retirees = state.suivi.retirees.clone();
         // Rien n'a bougé : ne pas réécrire une clé pour rien, et surtout ne pas repousser son
         // horodatage — le « dernier écrivain gagne » du serveur ferait alors perdre une
-        // modification faite depuis le site entre-temps.
-        if state.initial.suivi.as_ref() == Some(&draft) {
+        // modification faite depuis le site entre-temps. Une entrée supprimée puis recréée à
+        // l'identique laisse bien la liste inchangée, mais son compteur, lui, doit repartir : elle
+        // n'est pas « rien n'a bougé ».
+        if state.initial.suivi.as_ref() == Some(&draft) && retirees.is_empty() {
             return;
         }
         tracing::info!(
             entry_count = draft.len(),
+            removed_count = retirees.len(),
             "[options] liste de suivi validée"
         );
         let _ = self
             .settings_tx
-            .send(EngineCommand::SetWatchlistDefinitions(draft));
+            .send(EngineCommand::SetWatchlistDefinitions {
+                definitions: draft,
+                retirees,
+            });
     }
 
     /// Résout les ingrédients d'une recette pour la fenêtre de l'onglet « Suivi » — sur un thread,
@@ -2411,6 +3534,170 @@ impl App {
                 let _ = tx.send(ingredients);
             })
             .ok();
+    }
+
+    /// Ouvre une confirmation du Récap (2026-09-17, `OverlayKind::ResetConfirm`) par-dessus la
+    /// fenêtre de jeu d'où le glyphe a été cliqué — une seule à la fois, quelle que soit sa cible
+    /// (les compteurs ou la position, voir `ResetTarget`), comme la fenêtre Options. Toujours
+    /// interactive et visible : c'est une question qu'on vient de poser.
+    fn open_reset_confirm(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        game_hwnd: HWND,
+        rect: GameRect,
+        target: ResetTarget,
+    ) {
+        if self
+            .windows
+            .values()
+            .any(|w| matches!(w.kind, OverlayKind::ResetConfirm(_)))
+        {
+            return;
+        }
+        let mut overlay = Self::create_overlay_window(
+            event_loop,
+            OverlayKind::ResetConfirm(target),
+            game_hwnd,
+            "Recap".to_string(),
+            rect,
+            true,
+            true,
+            self.combat_on_right,
+            // La confirmation couvre la fenêtre de jeu entière — elle ne suit ni le panneau
+            // Combat ni la bande Récap.
+            None,
+            None,
+        );
+        overlay.next_redraw_at = Some(std::time::Instant::now());
+        self.windows.insert(overlay.window.id(), overlay);
+        match target {
+            ResetTarget::RecapSession => {
+                tracing::info!("[session] confirmation de remise à zéro ouverte.")
+            }
+            ResetTarget::RecapPosition => {
+                tracing::info!("[recap] confirmation de replacement ouverte.")
+            }
+            ResetTarget::CombatPosition => {
+                tracing::info!("[combat] confirmation de replacement ouverte.")
+            }
+            ResetTarget::WatchlistCounter => {
+                tracing::info!(
+                    name = self
+                        .watchlist_reset_pending
+                        .as_ref()
+                        .map(|e| e.name.as_str()),
+                    "[suivi] confirmation de réinitialisation du compteur ouverte."
+                )
+            }
+        }
+    }
+
+    /// **Le bouton de réinitialisation d'une tuile du bandeau** (2026-09-18) : retenir l'entrée,
+    /// puis ouvrir la même confirmation que le Récap — voir `ResetTarget::WatchlistCounter` sur
+    /// pourquoi l'entrée est retenue ici plutôt que portée par la cible.
+    fn open_watchlist_reset_confirm(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        game_hwnd: HWND,
+        rect: GameRect,
+        entry: WatchlistEntry,
+    ) {
+        self.watchlist_reset_pending = Some(entry);
+        self.open_reset_confirm(event_loop, game_hwnd, rect, ResetTarget::WatchlistCounter);
+    }
+
+    /// **Le cadenas de la bande Récap** (2026-09-17) : un seul bouton, deux états, pas de
+    /// confirmation — verrouiller ne perd rien et le glyphe montre aussitôt ce qu'on a obtenu.
+    /// Le réglage est écrit tout de suite : il doit survivre à un arrêt brutal comme la position
+    /// qu'il protège.
+    fn toggle_recap_lock(&mut self) {
+        self.recap_locked = !self.recap_locked;
+        self.persist_config();
+        tracing::info!(
+            "[recap] bande {}.",
+            if self.recap_locked {
+                "verrouillée"
+            } else {
+                "déverrouillée"
+            }
+        );
+    }
+
+    /// **Le cadenas du panneau Combat** (2026-09-17) : même geste que celui de la bande Récap, et
+    /// même politique — un seul bouton, deux états, pas de confirmation, écrit tout de suite.
+    fn toggle_combat_lock(&mut self) {
+        self.combat_locked = !self.combat_locked;
+        self.persist_config();
+        tracing::info!(
+            "[combat] panneau {}.",
+            if self.combat_locked {
+                "verrouillé"
+            } else {
+                "déverrouillé"
+            }
+        );
+    }
+
+    /// La réponse à une confirmation du Récap : « Oui » agit sur la cible, les deux réponses
+    /// ferment la fenêtre. Le bloc Récap se redessine à son prochain tick — il se redessine
+    /// toutes les secondes de toute façon.
+    ///
+    /// **Le replacement** : `recap_position` à `None`, la config réécrite, et les fenêtres
+    /// replacées — « jamais déplacée » veut dire « suit l'ancrage », voir `recap_placement::snap`.
+    /// C'est le seul chemin depuis le 2026-09-18 : la fenêtre Options n'a plus de bouton
+    /// « Replacer au défaut », la bande porte le sien (`panels::recap`).
+    fn answer_reset_confirm(
+        &mut self,
+        confirm_window_id: WindowId,
+        target: ResetTarget,
+        confirmed: bool,
+    ) {
+        self.windows.remove(&confirm_window_id);
+        match (target, confirmed) {
+            (ResetTarget::RecapSession, true) => {
+                let snapshot = self.snapshot.load();
+                self.recap_session
+                    .reset(&snapshot.totals, std::time::SystemTime::now());
+            }
+            (ResetTarget::RecapSession, false) => {
+                tracing::info!("[session] remise à zéro annulée.")
+            }
+            (ResetTarget::RecapPosition, true) => {
+                self.recap_position = None;
+                self.persist_config();
+                self.reposition_recap();
+                tracing::info!("[recap] bande revenue à son emplacement d'origine.");
+            }
+            (ResetTarget::RecapPosition, false) => tracing::info!("[recap] replacement annulé."),
+            (ResetTarget::CombatPosition, true) => {
+                self.combat_position_y = None;
+                self.persist_config();
+                self.reposition_combat();
+                tracing::info!("[combat] panneau revenu à sa hauteur d'origine.");
+            }
+            (ResetTarget::CombatPosition, false) => {
+                tracing::info!("[combat] replacement annulé.")
+            }
+            // **Le compteur repart** : c'est le moteur qui le remet (il seul tient les compteurs
+            // vivants), republie la liste et réplique au compte — même chemin qu'un ramassage.
+            // L'entrée est désignée par son identité : la liste a pu bouger entre-temps.
+            (ResetTarget::WatchlistCounter, true) => match self.watchlist_reset_pending.take() {
+                Some(entry) => {
+                    tracing::info!(name = %entry.name, "[suivi] réinitialisation du compteur confirmée.");
+                    let _ = self.settings_tx.send(EngineCommand::ResetWatchlistCounter {
+                        name: entry.name,
+                        kind: entry.kind,
+                    });
+                }
+                None => tracing::warn!(
+                    "[suivi] réinitialisation confirmée sans entrée retenue, rien fait."
+                ),
+            },
+            (ResetTarget::WatchlistCounter, false) => {
+                self.watchlist_reset_pending = None;
+                tracing::info!("[suivi] réinitialisation du compteur annulée.")
+            }
+        }
     }
 
     /// Ferme la fenêtre Options et **rend ses raccourcis globaux au système** (voir
@@ -2439,6 +3726,204 @@ impl App {
     /// message d'erreur et RIEN n'est pris en compte — ni les alertes, ni le suivi, ni l'affichage
     /// du panneau de combat. Un commit partiel laisserait l'utilisateur devant une fenêtre en
     /// erreur sans savoir ce qui a déjà été écrit.
+    /// Recolle chaque bande Récap sur sa fenêtre de jeu — pour les fois où c'est la POSITION qui
+    /// change alors que les fenêtres de jeu, elles, n'ont pas bougé (bouton « Replacer au
+    /// défaut »). `sync_windows` s'en charge le reste du temps, mais au prochain tick seulement :
+    /// le geste et son effet doivent être dans la même passe, comme pour les cases à cocher (voir
+    /// `sync_panel_visibility`).
+    fn reposition_recap(&mut self) {
+        self.reposition_kind(OverlayKind::Recap);
+    }
+
+    /// Recolle chaque panneau Combat sur sa fenêtre de jeu — le pendant de
+    /// [`Self::reposition_recap`] pour la hauteur du panneau (glyphe de replacement de sa rangée
+    /// d'actions, bouton des Options).
+    fn reposition_combat(&mut self) {
+        self.reposition_kind(OverlayKind::Combat);
+    }
+
+    /// Recolle toutes les fenêtres d'une zone donnée, fenêtres de jeu inchangées — voir les deux
+    /// appelants ci-dessus.
+    fn reposition_kind(&mut self, kind: OverlayKind) {
+        let recap_position = self.recap_position;
+        let combat_on_right = self.combat_on_right;
+        let combat_position_y = self.combat_position_y;
+        for overlay in self.windows.values_mut() {
+            if overlay.kind == kind {
+                let rect = overlay.game_rect;
+                Self::reposition(
+                    overlay,
+                    rect,
+                    combat_on_right,
+                    combat_position_y,
+                    recap_position,
+                );
+            }
+        }
+    }
+
+    /// **Écrit `config.toml` en entier, depuis l'état courant de l'application.**
+    ///
+    /// Le fichier est réécrit d'un bloc (voir `config::save`) : n'y porter que le réglage qu'on
+    /// vient de changer effacerait tous les autres. Cette méthode est donc le SEUL endroit qui
+    /// sache ce que la config doit contenir — jusqu'au 2026-09-17 la même construction vivait au
+    /// milieu de `validate_and_commit_options`, et la bande Récap déplaçable lui ajoutait un
+    /// deuxième appelant (la pose de la bande, qui n'ouvre aucune fenêtre Options). Deux copies
+    /// de cette liste de champs auraient divergé au premier réglage ajouté, et le réglage oublié
+    /// dans l'une serait effacé par l'autre.
+    ///
+    /// Best-effort, comme tout le module `config` : un échec d'écriture est journalisé là-bas,
+    /// jamais fatal.
+    fn persist_config(&self) {
+        let mut saved = config::OverlayConfig {
+            log_path: Some(self.log_path.clone()),
+            combat_always_visible: self.combat_always_visible,
+            combat_on_right: self.combat_on_right,
+            turn_notification: self.turn_notification,
+            turn_notification_muted: self.turn_notification_muted,
+            auto_update: self.auto_update,
+            verbose_log: self.verbose_log,
+            ..Default::default()
+        };
+        saved.set_shortcuts(self.hotkeys.bindings());
+        saved.set_chat_toast(self.chat_toast);
+        saved.set_countdown_toast(self.countdown_toast);
+        saved.set_completion(self.completion);
+        saved.set_recap_resume(self.recap_session.resume_settings());
+        saved.set_recap_position(self.recap_position);
+        saved.recap_locked = self.recap_locked;
+        saved.combat_position_y = self.combat_position_y;
+        saved.combat_locked = self.combat_locked;
+        saved.set_features(self.features);
+        saved.set_alert_mutes(self.alert_mutes);
+        config::save(&saved);
+    }
+
+    /// **Ce que le volet « Paramètres » de la Carte vient d'écrire** (2026-09-22) — appliqué et
+    /// persisté tout de suite.
+    ///
+    /// C'est toute la différence avec [`Self::validate_and_commit_options`] : la fenêtre Options
+    /// travaille sur un brouillon que « Valider » commit d'un bloc, la Carte n'en a pas. Chaque
+    /// case est son propre engagement, donc chaque geste passe ici, et le fichier est réécrit une
+    /// fois par geste — `config::save` l'écrit en entier de toute façon.
+    ///
+    /// Le chemin de `wakfu.log` est le seul réglage qui puisse être refusé : un chemin invalide
+    /// est journalisé et ignoré, le reste du volet s'applique quand même.
+    fn apply_card_settings(&mut self, settings: &panels::login::CardSettings) {
+        use panels::notifications::ToastClose as _;
+        let mut features = self.features;
+        features.recap = settings.recap;
+        features.recap_cells.duration = settings.recap_duration;
+        features.recap_cells.fights = settings.recap_fights;
+        features.recap_cells.challenges = settings.recap_challenges;
+        features.combat = settings.combat;
+        features.spells = settings.spells;
+        if features != self.features {
+            self.features = features;
+            let _ = self
+                .settings_tx
+                .send(EngineCommand::SetFeatures(self.features));
+        }
+
+        self.combat_always_visible = settings.combat_always_visible;
+        self.combat_on_right = settings.combat_on_right;
+        self.turn_notification = settings.turn_notification;
+        self.turn_notification_muted = settings.turn_notification_muted;
+
+        let mut mutes = self.alert_mutes;
+        mutes.suivi = settings.suivi_muted;
+        mutes.chat = settings.chat_muted;
+        if mutes != self.alert_mutes {
+            self.alert_mutes = mutes;
+            let _ = self
+                .settings_tx
+                .send(EngineCommand::SetAlertMutes(self.alert_mutes));
+        }
+
+        let mut countdown = self.countdown_toast;
+        countdown.manual_close = !settings.suivi_auto_close;
+        countdown.duration_seconds = settings.suivi_seconds;
+        if countdown != self.countdown_toast {
+            self.countdown_toast = countdown;
+            let _ = self
+                .settings_tx
+                .send(EngineCommand::SetCountdownToast(self.countdown_toast));
+        }
+
+        let mut chat_toast = self.chat_toast;
+        chat_toast.manual_close = !settings.chat_auto_close;
+        chat_toast.duration_seconds = settings.chat_seconds;
+        if chat_toast != self.chat_toast {
+            self.chat_toast = chat_toast;
+            let _ = self
+                .settings_tx
+                .send(EngineCommand::SetChatToast(self.chat_toast));
+        }
+
+        self.completion.remove = settings.suivi_remove_on_complete;
+        self.completion.animate = settings.suivi_completion_animation;
+
+        let mut resume = self.recap_session.resume_settings();
+        resume.enabled = settings.recap_resume;
+        resume.minutes = settings.recap_resume_minutes;
+        self.recap_session.set_resume_settings(resume);
+
+        // Le profil d'alertes vit sur le COMPTE : appliqué localement d'abord, puis écrit au
+        // compte depuis un thread — même chemin et mêmes précautions que `commit_alerts`.
+        if settings.alerts_available {
+            let connu = self.alert_profile.load();
+            if let Some(profil) = connu.as_ref().as_ref() {
+                let mut draft = profil.clone();
+                draft.set_manual_close(!settings.alerts_auto_close);
+                draft.set_duration(settings.alerts_seconds);
+                if &draft != profil {
+                    let _ = self
+                        .settings_tx
+                        .send(EngineCommand::SetAlertProfile(draft.clone()));
+                    let fields = draft.patch_fields();
+                    thread::spawn(move || match overlay_sync::token_store::load_token() {
+                        Some(token) => match overlay_sync::client::patch_profile(&token, &fields) {
+                            Ok(_) => {
+                                tracing::info!("[carte] alertes enregistrées sur le compte.")
+                            }
+                            Err(err) => tracing::warn!(
+                                %err,
+                                "[carte] échec de l'enregistrement des alertes"
+                            ),
+                        },
+                        None => tracing::info!(
+                            "[carte] alertes appliquées localement — aucun compte lié."
+                        ),
+                    });
+                }
+            }
+        }
+
+        overlay_ui::autostart::apply(settings.start_with_os);
+
+        if settings.verbose_log != self.verbose_log {
+            self.verbose_log = settings.verbose_log;
+            logging::set_verbose(self.verbose_log);
+        }
+
+        let candidate = PathBuf::from(settings.log_path.trim());
+        if !candidate.as_os_str().is_empty() && candidate != self.log_path {
+            match discovery::validate_log_path(&candidate) {
+                Ok(()) => {
+                    tracing::info!("[carte] nouveau fichier de log : {}", candidate.display());
+                    self.log_path = candidate.clone();
+                    let _ = self
+                        .settings_tx
+                        .send(EngineCommand::ChangeLogPath(candidate));
+                }
+                Err(err) => tracing::info!("[carte] chemin refusé : {}", err.message()),
+            }
+        }
+
+        self.persist_config();
+        // Le geste et son effet dans la même passe — même raison que « Valider ».
+        self.sync_panel_visibility();
+    }
     fn validate_and_commit_options(
         &mut self,
         options_window_id: WindowId,
@@ -2478,6 +3963,22 @@ impl App {
                         }
                     );
                 }
+                // Le côté du panneau (2026-09-17) : rien d'autre à faire ici que de retenir la
+                // valeur. Le balayage des fenêtres de jeu recolle chaque overlay à son ancrage à
+                // chaque tick (`sync_windows` → `reposition`), et le rendu lit le nouveau côté à
+                // la frame suivante — la fenêtre Combat traverse donc l'écran toute seule.
+                let side_changed = commit.combat_on_right != self.combat_on_right;
+                if side_changed {
+                    self.combat_on_right = commit.combat_on_right;
+                    tracing::info!(
+                        "[options] panneau de combat : {}",
+                        if self.combat_on_right {
+                            "à droite"
+                        } else {
+                            "à gauche"
+                        }
+                    );
+                }
                 let turn_changed = commit.turn_notification != self.turn_notification;
                 if turn_changed {
                     self.turn_notification = commit.turn_notification;
@@ -2503,9 +4004,12 @@ impl App {
                         }
                     );
                 }
-                // **Les trois interrupteurs (2026-09-15)** — le thread Engine est prévenu dès
-                // qu'ils bougent : c'est lui qui joue (ou ne joue plus) les alertes. Le bandeau,
-                // lui, lit `self.features` directement au rendu (voir `render_window`).
+                // **Les interrupteurs (2026-09-15)** — le thread Engine est prévenu dès qu'ils
+                // bougent : c'est lui qui joue (ou ne joue plus) les alertes. Le bandeau, lui, lit
+                // `self.features` directement au rendu (voir `render_window`), et les deux cases
+                // de la section « Combat » ne concernent pas le moteur du tout : le détail des
+                // combats passe par `sync_panel_visibility` (appelée en fin de cette méthode) et
+                // le suivi des sorts par le rendu du panneau.
                 let features_changed = commit.features != self.features;
                 if features_changed {
                     self.features = commit.features;
@@ -2513,6 +4017,12 @@ impl App {
                         suivi = self.features.suivi,
                         alertes = self.features.alerts,
                         recherche = self.features.chat,
+                        combat = self.features.combat,
+                        sorts = self.features.spells,
+                        recap = self.features.recap,
+                        recap_duree = self.features.recap_cells.duration,
+                        recap_combats = self.features.recap_cells.fights,
+                        recap_challenges = self.features.recap_cells.challenges,
                         "[options] fonctionnalités actives mises à jour"
                     );
                     let _ = self
@@ -2535,6 +4045,45 @@ impl App {
                         .settings_tx
                         .send(EngineCommand::SetAlertMutes(self.alert_mutes));
                 }
+                // **La fermeture de la carte de décompte (2026-09-16)** — même chemin que les
+                // sourdines ci-dessus : c'est le thread Engine qui pose `hide_at` au moment où
+                // l'alerte naît, lui seul a besoin de connaître le délai.
+                let countdown_toast_changed = commit.countdown_toast != self.countdown_toast;
+                if countdown_toast_changed {
+                    self.countdown_toast = commit.countdown_toast;
+                    tracing::info!(
+                        duration_seconds = self.countdown_toast.duration_seconds,
+                        manual_close = self.countdown_toast.manual_close,
+                        "[options] fermeture de la carte de décompte mise à jour"
+                    );
+                    let _ = self
+                        .settings_tx
+                        .send(EngineCommand::SetCountdownToast(self.countdown_toast));
+                }
+                // **Les deux réglages de complétion (2026-09-17)** — ils ne partent PAS au
+                // thread Engine, contrairement à la fermeture ci-dessus : le moteur ne sait rien
+                // de la célébration ni du retrait, c'est l'hôte qui les décide à réception de la
+                // complétion (voir `about_to_wait`).
+                if commit.completion != self.completion {
+                    self.completion = commit.completion;
+                    tracing::info!(
+                        remove = self.completion.remove,
+                        animate = self.completion.animates(),
+                        "[options] complétion d'un suivi mise à jour"
+                    );
+                }
+                // **La reprise de la session du Récap (2026-09-17)** — réglage local, posé sur
+                // la session elle-même : il ne sert qu'au prochain retour d'une fenêtre de jeu.
+                let recap_resume_changed =
+                    commit.recap_resume != self.recap_session.resume_settings();
+                if recap_resume_changed {
+                    self.recap_session.set_resume_settings(commit.recap_resume);
+                    tracing::info!(
+                        enabled = commit.recap_resume.enabled,
+                        minutes = commit.recap_resume.minutes,
+                        "[options] reprise de la session du récap mise à jour"
+                    );
+                }
                 // **Les raccourcis (2026-09-13)** — `apply` pendant la suspension ne touche pas
                 // encore l'OS : c'est `close_options_modal`, juste après, qui enregistre
                 // effectivement le nouveau jeu. Un refus de l'OS (combinaison déjà prise par une
@@ -2545,6 +4094,12 @@ impl App {
                     tracing::info!("[options] raccourcis personnalisés mis à jour.");
                     self.hotkeys.apply(commit.shortcuts);
                 }
+                // **Le démarrage avec l'ordinateur (2026-09-16)** — le seul réglage de cette fenêtre
+                // qui ne passe NI par la config NI par le thread Engine : il s'inscrit dans le système
+                // (voir `autostart`, doc de module). `apply` compare à l'état réel avant d'écrire, et
+                // n'échoue jamais bruyamment — un refus du système laisse simplement la case revenir
+                // sur son état réel à la prochaine ouverture.
+                overlay_ui::autostart::apply(commit.start_with_os);
                 // **La mise à jour automatique (2026-09-15)** — persistée, effective au prochain lancement :
                 // c'est là que la première commande au thread de mise à jour se décide.
                 let auto_update_changed = commit.auto_update != self.auto_update;
@@ -2559,35 +4114,37 @@ impl App {
                         }
                     );
                 }
+                // **Le journal détaillé (2026-09-18, constat C6)** — appliqué À CHAUD, sans
+                // attendre un redémarrage : la case sert à diagnostiquer un problème en cours,
+                // un réglage qui ne prendrait effet qu'au prochain lancement raterait justement
+                // ce qu'on cherche à voir.
+                let verbose_log_changed = commit.verbose_log != self.verbose_log;
+                if verbose_log_changed {
+                    self.verbose_log = commit.verbose_log;
+                    logging::set_verbose(self.verbose_log);
+                }
                 // **La config est réécrite EN ENTIER**, et seulement si l'un des réglages a bougé :
                 // le fichier est réécrit d'un bloc (voir `config::save`), n'y porter que le réglage
                 // modifié effacerait les autres.
                 // Les réglages de la carte de chat vivent dans la même config : commités AVANT
                 // l'écriture, pour qu'elle les emporte (voir `commit_chat`).
                 let chat_toast_changed = self.commit_chat(options_window_id);
+                self.commit_personnages(options_window_id);
                 if path_changed
                     || combat_changed
+                    || side_changed
                     || turn_changed
                     || turn_muted_changed
                     || shortcuts_changed
                     || chat_toast_changed
                     || features_changed
                     || mutes_changed
+                    || countdown_toast_changed
+                    || recap_resume_changed
                     || auto_update_changed
+                    || verbose_log_changed
                 {
-                    let mut saved = config::OverlayConfig {
-                        log_path: Some(candidate),
-                        combat_always_visible: self.combat_always_visible,
-                        turn_notification: self.turn_notification,
-                        turn_notification_muted: self.turn_notification_muted,
-                        auto_update: self.auto_update,
-                        ..Default::default()
-                    };
-                    saved.set_shortcuts(self.hotkeys.bindings());
-                    saved.set_chat_toast(self.chat_toast);
-                    saved.set_features(self.features);
-                    saved.set_alert_mutes(self.alert_mutes);
-                    config::save(&saved);
+                    self.persist_config();
                 }
                 // **« Valider » commit TOUS les onglets, pas seulement celui qu'on regarde.** Le
                 // pied de page est partagé : un bouton dont l'effet dépendrait de l'onglet affiché
@@ -2600,7 +4157,7 @@ impl App {
                 // Sans cet appel, cocher la case ne se verrait qu'au prochain tick
                 // d'`about_to_wait` — 50 ms, imperceptible, mais le geste et son effet doivent
                 // être dans la même passe : c'est ce qui rend la fenêtre Options vérifiable.
-                self.sync_combat_visibility();
+                self.sync_panel_visibility();
             }
             Err(err) => {
                 tracing::info!("[options] chemin refusé : {}", err.message());
@@ -2626,6 +4183,19 @@ enum PostRedraw {
     /// jamais le défaut implicite d'`options_modal::OptionsTab`.
     OpenOptions(HWND, GameRect, options_modal::OptionsTab),
     CloseOptions,
+    /// Glyphe de remise à zéro du bloc Récap cliqué : ouvrir la confirmation par-dessus CETTE
+    /// fenêtre de jeu (2026-09-17, voir `open_reset_confirm`).
+    OpenResetConfirm(HWND, GameRect, ResetTarget),
+    /// La confirmation a répondu — `true` pour « Oui » (voir `answer_reset_confirm`).
+    AnswerResetConfirm(ResetTarget, bool),
+    /// Bouton de réinitialisation d'une tuile du bandeau cliqué : retenir l'entrée et ouvrir la
+    /// confirmation par-dessus CETTE fenêtre de jeu (2026-09-18, voir
+    /// `open_watchlist_reset_confirm`).
+    OpenWatchlistResetConfirm(HWND, GameRect, WatchlistEntry),
+    /// Le cadenas de la bande Récap vient d'être cliqué (voir `toggle_recap_lock`).
+    ToggleRecapLock,
+    /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
+    ToggleCombatLock,
     /// Carte d'alerte de chat cliquée : préparer la réponse en privé à cet auteur (voir
     /// `whisper_from_toast`) — après le rendu, comme tout ce qui touche `self` entier.
     Whisper(String),
@@ -2643,9 +4213,42 @@ enum PostRedraw {
     CheckUpdate,
     /// « Mettre à jour vers X », **après confirmation** — voir `request_update_install`.
     InstallUpdate,
+    /// « Fermer l'overlay », **après confirmation** (pied de l'onglet « Paramètres »,
+    /// 2026-09-16) : arrête le programme par le chemin de l'entrée « Quitter » de la zone de
+    /// notification — le raccourci global « Quitter l'overlay » a été retiré le 2026-09-17.
+    Quit,
+    /// « Redémarrer », **après confirmation** (pied de l'onglet « Paramètres », à gauche de
+    /// « Fermer l'overlay », 2026-09-17) : un process neuf est lancé (`restart::relaunch`) puis
+    /// celui-ci sort, par le même chemin que [`Self::Quit`].
+    Restart,
+    /// Un réglage du volet « Paramètres » de la Carte vient de changer (2026-09-22) : appliqué et
+    /// écrit dans `config.toml` tout de suite, sans validation. Encadré pour ne pas gonfler
+    /// l'énumération — c'est son seul membre volumineux.
+    ApplyCardSettings(Box<panels::login::CardSettings>),
+    /// Un bouton d'essai du son du volet « Paramètres » de la Carte.
+    TestCardSound(panels::login::CardSound),
+    /// « Fermer » d'un écran de compte de la Carte : la fenêtre se referme sans rien engager.
+    CloseCard,
+    /// « Déconnecter » **confirmé** dans la boîte de la Carte.
+    DisconnectFromCard,
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion : nouvelle
     /// vérification, avec installation.
     RetryUpdate,
+    /// « Mettre à jour maintenant » de l'écran de mise à jour manuelle : le téléchargement part,
+    /// et son avancement s'affiche sur la même carte (voir `open_manual_update_window`).
+    StartManualUpdate,
+    /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle.
+    CloseManualUpdate,
+    /// **Ouvrir l'écran de mise à jour de la Carte** et y lancer une recherche (2026-09-22) — le
+    /// lien « Mise à jour » du pied, et « Rechercher à nouveau » de cet écran même. Le même geste
+    /// que l'entrée « Mise à jour » du menu de la zone de notification, dont il partage le code.
+    OpenManualUpdate,
+    /// **« Supprimer les données locales »**, *confirmé* — depuis « Vos données » de l'onglet
+    /// « À propos » de la fenêtre Options ou depuis la fenêtre de connexion (2026-09-18, constat C5 de
+    /// `docs/analyse-rgpd.md` §3.5) : tout ce que l'overlay a écrit sur cette machine est effacé,
+    /// puis le programme s'arrête par le même chemin que [`Self::Quit`] — voir
+    /// `purge_local_data_and_quit`.
+    PurgeLocalData,
 }
 
 impl App {
@@ -2667,12 +4270,21 @@ impl App {
     /// déclencheur parmi d'autres.
     fn redraw(&mut self, event_loop: &ActiveEventLoop, id: WindowId) {
         let mut post_redraw = PostRedraw::None;
+        // La bande Récap vient d'être reposée : la config est réécrite une fois le geste fini
+        // (jamais pendant, voir le traitement de `RenderOutcome::recap_drag` plus bas). Un
+        // drapeau local plutôt qu'une variante de `PostRedraw` : celui-là est écrasé par
+        // l'action suivante quand deux se présentent, et une position perdue ne se rattrape pas
+        // — il faudrait re-glisser la bande.
+        let mut persist_recap_position = false;
+        // Même mécanique pour la hauteur du panneau Combat (2026-09-17) : écrite une fois, au
+        // relâchement.
+        let mut persist_combat_position = false;
         let Some(overlay) = self.windows.get_mut(&id) else {
             return;
         };
-        // Fenêtre `Combat` masquée hors combat (voir `sync_combat_visibility`) : rien à peindre,
+        // Fenêtre `Combat` masquée hors combat (voir `sync_panel_visibility`) : rien à peindre,
         // et surtout rien à présenter — un `Present()` sur une surface invisible ne sert à rien.
-        // C'est `sync_combat_visibility` qui replanifie un redessin en la faisant réapparaître.
+        // C'est `sync_panel_visibility` qui replanifie un redessin en la faisant réapparaître.
         if !overlay.visible {
             return;
         }
@@ -2685,7 +4297,7 @@ impl App {
         let snapshot = self.snapshot.load();
         let fight = snapshot.fight_for_character(&overlay.character_name);
         let watchlist_all = self.watchlist.load();
-        // **Suivi coupé : le bandeau n'affiche plus aucune tuile** — case « Activer le Suivi »
+        // **Suivi coupé : le bandeau n'affiche plus aucune tuile** — case « Activer le suivi »
         // (`panels::feature_switch`). Une liste vide plutôt qu'une fenêtre masquée, parce que le
         // bandeau porte aussi le carré de contrôle, seul accès à la fenêtre Options depuis le jeu :
         // la masquer enfermerait dehors qui vient de décocher la case. C'est exactement l'état
@@ -2738,26 +4350,108 @@ impl App {
             }
         }
         let catalog = self.catalog.load();
+        let game_servers = self.game_servers.load();
         let auth_status = self.auth_status.load();
         // La modale Options force sa propre interactivité (voir `App::
         // open_options_modal`) — jamais assujettie à `self.interactive` (mode
         // clic-traversant global de Combat/Suivi), sans quoi elle deviendrait elle-même
         // traversable si l'utilisateur avait basculé ce mode juste avant.
-        let interactive =
-            matches!(overlay.kind, OverlayKind::Options | OverlayKind::Login) || self.interactive;
+        let interactive = matches!(
+            overlay.kind,
+            OverlayKind::Options | OverlayKind::Login | OverlayKind::ResetConfirm(_)
+        ) || self.interactive;
         let this_game_rect = overlay.game_rect;
         let this_game_hwnd = overlay.game_hwnd;
+        // Voir `RenderContent::veiled` : la fenêtre Options rattachée à un client couvre sa
+        // fenêtre de jeu et la voile ; détachée, elle est à la taille de la modale.
+        let veiled = overlay.kind == OverlayKind::Options && !overlay.is_detached();
         // L'état de la mise à jour, copié dans la fenêtre qui l'affiche AVANT chaque rendu
         // (jamais figé à l'ouverture, voir `OptionsModalState::update`).
         let update_status = self.update_status.load();
         if let Some(state) = overlay.login_state.as_mut() {
-            if state.update != **update_status {
-                state.update = (**update_status).clone();
+            // **Le plancher de la recherche** (voir `LoginState::check_floor_until`) : tant qu'il
+            // court, le verdict du thread de mise à jour attend son tour.
+            if state.check_floor_until.is_some_and(|until| now < until) {
+                if !matches!(state.update, UpdateStatus::Checking) {
+                    state.update = UpdateStatus::Checking;
+                }
+            } else {
+                state.check_floor_until = None;
+                if state.update != **update_status {
+                    state.update = (**update_status).clone();
+                }
             }
         }
         if let Some(state) = overlay.options_state.as_mut() {
             state.update = (**update_status).clone();
         }
+        // **Les réglages que le volet « Paramètres » de la Carte montre** (2026-09-22) — pris à
+        // neuf à chaque frame, jamais mémorisés : la Carte n'a pas de brouillon, un geste écrit
+        // tout de suite. Seul le texte en cours de frappe vit d'une frame à l'autre, dans
+        // `LoginState::settings_inputs`.
+        let mut card_settings = (overlay.kind == OverlayKind::Login).then(|| {
+            use panels::notifications::ToastClose as _;
+            let alerts = self.alert_profile.load();
+            let alerts = alerts.as_ref().as_ref();
+            let resume = self.recap_session.resume_settings();
+            panels::login::CardSettings {
+                recap: self.features.recap,
+                recap_duration: self.features.recap_cells.duration,
+                recap_fights: self.features.recap_cells.fights,
+                recap_challenges: self.features.recap_cells.challenges,
+                recap_resume: resume.enabled,
+                recap_resume_minutes: resume.minutes,
+                combat: self.features.combat,
+                spells: self.features.spells,
+                combat_always_visible: self.combat_always_visible,
+                combat_on_right: self.combat_on_right,
+                turn_notification: self.turn_notification,
+                turn_notification_muted: self.turn_notification_muted,
+                suivi_muted: self.alert_mutes.suivi,
+                suivi_auto_close: !self.countdown_toast.manual_close,
+                suivi_seconds: self.countdown_toast.duration_seconds,
+                suivi_remove_on_complete: self.completion.remove,
+                suivi_completion_animation: self.completion.animate,
+                alerts_available: alerts.is_some(),
+                alerts_auto_close: alerts.map(|p| !p.manual_close()).unwrap_or(true),
+                alerts_seconds: alerts.map(|p| p.duration_seconds()).unwrap_or(6.0),
+                chat_muted: self.alert_mutes.chat,
+                chat_auto_close: !self.chat_toast.manual_close,
+                chat_seconds: self.chat_toast.duration_seconds,
+                start_with_os: overlay_ui::autostart::is_enabled(),
+                log_path: self.log_path.display().to_string(),
+                verbose_log: self.verbose_log,
+            }
+        });
+
+        // La vue de la session du Récap — construite ici pour chaque fenêtre, même celles qui
+        // ne la peignent pas : c'est quatre entiers et une heure, moins cher qu'un branchement.
+        let recap_view = panels::recap::RecapView {
+            totals: self.recap_session.totals(&snapshot.totals),
+            uptime: self.recap_session.uptime(),
+            started_at: self.recap_session.started_at_local(),
+            resumed: self.recap_session.resumed(),
+        };
+        // Ce que la bande Récap sait d'elle-même par l'hôte (2026-09-17) — verrou, position
+        // personnalisée, et de quel côté sa rangée d'actions tient. Le côté se décide sur la
+        // fenêtre de JEU (`recap_placement::actions_below`), que le panneau ne connaît pas.
+        let recap_chrome = panels::recap::RecapChrome {
+            locked: self.recap_locked,
+            moved: self.recap_position.is_some(),
+            actions_below: overlay.kind == OverlayKind::Recap && {
+                let outer = overlay.window.outer_size();
+                let (client, band) = RecapAnchor::new(None, overlay.window.scale_factor())
+                    .geometry(overlay.game_rect, outer.width as i32, outer.height as i32);
+                recap_placement::actions_below(self.recap_position, client, band)
+            },
+        };
+        // Ce que le panneau Combat sait de lui-même par l'hôte (2026-09-17) — verrou et hauteur
+        // personnalisée. Pas de côté à calculer ici : la rangée d'actions vit dans la fenêtre, et
+        // c'est le miroir qui la porte du bon côté (voir `panels::combat::paint_actions_row`).
+        let combat_chrome = panels::combat::CombatChrome {
+            locked: self.combat_locked,
+            moved: self.combat_position_y.is_some(),
+        };
         let (repaint_delay, outcome) = render(
             &mut overlay.gpu,
             &overlay.window,
@@ -2768,11 +4462,18 @@ impl App {
                 portraits: &overlay.portraits,
                 combat_frame: &overlay.combat_frame,
                 icons: &overlay.icons,
+                avatars: overlay.avatars.as_ref(),
+                game_servers: &game_servers,
                 combat_side: &mut overlay.combat_side,
                 combat_metric: &mut overlay.combat_metric,
                 watchlist,
                 watchlist_enabled: self.features.suivi,
+                spells_enabled: self.features.spells_visible(),
+                combat_on_right: self.combat_on_right,
+                combat_chrome,
                 watchlist_selection: &mut self.watchlist_selection,
+                watchlist_completions: &self.watchlist_completions,
+                watchlist_reset: self.watchlist_reset_pending.as_ref(),
                 watchlist_toast,
                 catalog: &catalog,
                 catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
@@ -2783,10 +4484,187 @@ impl App {
                 interactive,
                 shortcuts: self.hotkeys.bindings(),
                 now,
+                recap_cells: self.features.recap_cells,
+                recap: &recap_view,
                 options: overlay.options_state.as_mut(),
+                veiled,
+                recap_chrome,
                 login: overlay.login_state.as_mut(),
+                card_settings: card_settings.as_mut(),
             },
         );
+        // Bloc Récap : retaillé à la hauteur qu'il vient de mesurer — même mécanique et même
+        // raison que le Suivi juste au-dessus (une fenêtre plus grande que son contenu bloque les
+        // clics sur du vide), à ceci près que la mesure vient du panneau lui-même plutôt que d'un
+        // calcul de l'hôte : c'est la largeur des CHIFFRES qui décide si une ligne s'empile, et
+        // seul le rendu la connaît. `request_inner_size` est synchrone sous Windows, d'où
+        // `reconfigure_surface` ici même (voir sa doc).
+        if overlay.kind == OverlayKind::Recap {
+            if let Some(height) = outcome.recap_height {
+                // **Jamais pendant qu'on la tient** (2026-09-17, demande utilisateur du même
+                // retour d'écran) : retailler la fenêtre sous le curseur déplacerait le bloc
+                // pendant le geste, et le bornage avec lui. Le contenu, lui, continue de vivre
+                // — ce sont les chiffres, ils ne bougent rien. La hauteur en attente s'applique
+                // à la frame suivant le relâchement, `last_recap_height` étant resté sur
+                // l'ancienne valeur.
+                if overlay.last_recap_height != Some(height) && self.recap_drag.is_none() {
+                    let size = winit::dpi::LogicalSize::new(
+                        panels::recap::WIDTH as f64,
+                        height as f64
+                            + render_content::RECAP_TOOLTIP_RESERVE as f64
+                            + render_content::RECAP_ACTIONS_RESERVE as f64,
+                    );
+                    if let Some(actual) = overlay.window.request_inner_size(size) {
+                        Self::reconfigure_surface(&mut overlay.gpu, actual);
+                    }
+                    overlay.last_recap_height = Some(height);
+                    overlay.next_redraw_at = Some(std::time::Instant::now());
+                }
+            }
+            // **La bande saisie à la souris** (2026-09-17, voir `panels::recap::RecapDrag`) :
+            // le panneau remonte le geste, l'hôte pose la fenêtre — comme pour la remise à zéro,
+            // le panneau n'agit jamais lui-même.
+            //
+            // La position visée vaut toujours « le curseur À L'ÉCRAN, moins le point du bloc par
+            // lequel on le tient », le point de saisie étant figé au premier appui. Le curseur
+            // d'écran vient de l'OS (`game_window::cursor_position`) et non d'egui : la position
+            // qu'egui rapporte est mesurée depuis le coin de cette fenêtre-ci, donc s'en servir
+            // pour la déplacer reboucle et la fait vibrer — voir `recap_placement::drag_offset`,
+            // qui porte le diagnostic complet.
+            let scale = overlay.window.scale_factor();
+            let outer = overlay.window.outer_size();
+            let (client, band) = RecapAnchor::new(None, scale).geometry(
+                overlay.game_rect,
+                outer.width as i32,
+                outer.height as i32,
+            );
+            // Le curseur arrive en points logiques (repère d'egui), tout le reste est en pixels
+            // d'écran — à 125 %, confondre les deux ferait partir la bande une fois et quart
+            // trop loin.
+            let physical = |pos: egui::Pos2| {
+                (
+                    (pos.x as f64 * scale).round() as i32,
+                    (pos.y as f64 * scale).round() as i32,
+                )
+            };
+            let mut place = |position: Option<(i32, i32)>| {
+                let (x, y) = recap_placement::window_position(position, client, band);
+                let posed = PhysicalPosition::new(x, y);
+                if overlay.last_position != Some(posed) {
+                    overlay.window.set_outer_position(posed);
+                    overlay.last_position = Some(posed);
+                }
+            };
+            match outcome.recap_drag {
+                panels::recap::RecapDrag::None => {}
+                panels::recap::RecapDrag::Started(pos) => {
+                    self.recap_drag = Some(RecapDragState {
+                        window: id,
+                        grab: physical(pos),
+                    });
+                }
+                // `filter` sur la fenêtre saisie : en multicompte, chaque client a sa bande, et
+                // ce n'est pas parce que l'une est tenue que les autres bougent.
+                panels::recap::RecapDrag::Moved => {
+                    if let Some(drag) = self.recap_drag.filter(|drag| drag.window == id) {
+                        // Curseur illisible : la bande reste où elle est, ce geste-ci n'a
+                        // simplement pas d'effet cette frame.
+                        if let Some(cursor) = game_window::cursor_position() {
+                            let offset =
+                                recap_placement::drag_offset(cursor, drag.grab, client, band);
+                            if self.recap_position != Some(offset) {
+                                self.recap_position = Some(offset);
+                                place(Some(offset));
+                            }
+                        }
+                    }
+                }
+                // La pose : l'aimantation d'abord (une bande revenue près de son ancrage
+                // d'origine y recolle et la config oublie sa position, voir
+                // `recap_placement::snap`), l'écriture ensuite — une seule, pour tout le geste.
+                panels::recap::RecapDrag::Released => {
+                    if self.recap_drag.is_some_and(|drag| drag.window == id) {
+                        self.recap_drag = None;
+                        self.recap_position = self.recap_position.and_then(recap_placement::snap);
+                        place(self.recap_position);
+                        persist_recap_position = true;
+                        match self.recap_position {
+                            Some((x, y)) => tracing::info!("[recap] bande posée en {x} / {y}."),
+                            None => {
+                                tracing::info!("[recap] bande revenue à son emplacement d'origine.")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // **Le panneau Combat saisi par sa poignée latérale** (2026-09-17) : la même mécanique que
+        // la bande ci-dessus, en une seule dimension — le côté ne se déplace pas à la souris (voir
+        // `combat_placement`), seule la hauteur bouge. Le curseur vient de l'OS et non d'egui,
+        // pour la raison qui a fait vibrer la bande (`recap_placement::drag_offset`).
+        if overlay.kind == OverlayKind::Combat {
+            // Le côté est copié AVANT la fermeture qui pose la fenêtre : elle ne doit rien
+            // garder de `self`, dont d'autres champs changent juste après (la hauteur, l'état du
+            // glissement).
+            let on_right = self.combat_on_right;
+            let scale = overlay.window.scale_factor();
+            let outer = overlay.window.outer_size();
+            let (client, panel) = CombatAnchor::new(on_right, None, scale).geometry(
+                overlay.game_rect,
+                outer.width as i32,
+                outer.height as i32,
+            );
+            let mut place = |offset: Option<i32>| {
+                let (x, y) = combat_placement::window_position(offset, on_right, client, panel);
+                let posed = PhysicalPosition::new(x, y);
+                if overlay.last_position != Some(posed) {
+                    overlay.window.set_outer_position(posed);
+                    overlay.last_position = Some(posed);
+                }
+            };
+            match outcome.combat_drag {
+                panels::drag::PanelDrag::None => {}
+                panels::drag::PanelDrag::Started(pos) => {
+                    self.combat_drag = Some(CombatDragState {
+                        window: id,
+                        // Le curseur arrive en points logiques (repère d'egui), tout le reste est
+                        // en pixels d'écran — à 125 %, confondre les deux ferait partir le panneau
+                        // une fois et quart trop loin.
+                        grab_y: (pos.y as f64 * scale).round() as i32,
+                    });
+                }
+                panels::drag::PanelDrag::Moved => {
+                    if let Some(drag) = self.combat_drag.filter(|drag| drag.window == id) {
+                        // Curseur illisible : le panneau reste où il est, ce geste-ci n'a
+                        // simplement pas d'effet cette frame.
+                        if let Some((_, cursor_y)) = game_window::cursor_position() {
+                            let offset =
+                                combat_placement::drag_offset(cursor_y, drag.grab_y, client, panel);
+                            if self.combat_position_y != Some(offset) {
+                                self.combat_position_y = Some(offset);
+                                place(Some(offset));
+                            }
+                        }
+                    }
+                }
+                panels::drag::PanelDrag::Released => {
+                    if self.combat_drag.is_some_and(|drag| drag.window == id) {
+                        self.combat_drag = None;
+                        self.combat_position_y = self
+                            .combat_position_y
+                            .and_then(|offset| combat_placement::snap(offset, client, panel));
+                        place(self.combat_position_y);
+                        persist_combat_position = true;
+                        match self.combat_position_y {
+                            Some(y) => tracing::info!("[combat] panneau posé à la hauteur {y}."),
+                            None => {
+                                tracing::info!("[combat] panneau revenu à sa hauteur d'origine.")
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // Fenêtre de connexion : retaillée à la hauteur que la carte vient d'occuper (chaque
         // état a la sienne), en gardant son centre — `request_inner_size` est synchrone sous
         // Windows, d'où `reconfigure_surface` ici même (voir sa doc). Et déplacée à la souris
@@ -2825,6 +4703,40 @@ impl App {
             if outcome.retry_update {
                 post_redraw = PostRedraw::RetryUpdate;
             }
+            // Écran de mise à jour manuelle (voir `open_manual_update_window`) — « Rechercher à
+            // nouveau » de cet écran, et « Mise à jour » du pied de la Carte, qui l'ouvre depuis
+            // n'importe quel autre écran (2026-09-22).
+            if outcome.check_update {
+                post_redraw = PostRedraw::OpenManualUpdate;
+            }
+            if outcome.install_update {
+                post_redraw = PostRedraw::StartManualUpdate;
+            }
+            if outcome.close_update {
+                post_redraw = PostRedraw::CloseManualUpdate;
+            }
+            if outcome.purge_local_data {
+                post_redraw = PostRedraw::PurgeLocalData;
+            }
+            // **Le volet « Paramètres » de la Carte** (2026-09-22) — il n'y a rien à valider :
+            // chaque geste arrive ici et part directement dans la configuration.
+            if outcome.settings_changed {
+                if let Some(settings) = card_settings.take() {
+                    post_redraw = PostRedraw::ApplyCardSettings(Box::new(settings));
+                }
+            }
+            if outcome.browse_log_path {
+                post_redraw = PostRedraw::BrowseOptions;
+            }
+            if let Some(sound) = outcome.test_sound {
+                post_redraw = PostRedraw::TestCardSound(sound);
+            }
+            if outcome.close_login_window {
+                post_redraw = PostRedraw::CloseCard;
+            }
+            if outcome.disconnect_account {
+                post_redraw = PostRedraw::DisconnectFromCard;
+            }
         }
         // Fermeture au clic (carte ou croix, voir `panels::watchlist::toast_card`) — seul
         // point du code à détenir un accès en écriture à cet `ArcSwap` (`render` ne reçoit
@@ -2852,7 +4764,13 @@ impl App {
             );
             let _ = self
                 .settings_tx
-                .send(EngineCommand::SetWatchlistDefinitions(edition.definitions));
+                .send(EngineCommand::SetWatchlistDefinitions {
+                    definitions: edition.definitions,
+                    // Le bandeau n'a pas de brouillon : une entrée qu'il retire disparaît de la
+                    // liste dans la foulée, son compteur part avec elle (rien à oublier en plus),
+                    // et il ne peut en recréer aucune.
+                    retirees: Vec::new(),
+                });
         }
         // Voir `render_content::RenderOutcome` (2026-09-08, §9 du plan) : bouton "+"/"Options"
         // cliqué dans le carré de contrôle de CETTE fenêtre Suivi, ou action de la modale
@@ -2878,20 +4796,84 @@ impl App {
         if let Some(url) = &outcome.open_url {
             let _ = open::that(url);
         }
+        // Le bouton de réinitialisation d'une tuile du bandeau (2026-09-18) : même confirmation
+        // que le Récap, par-dessus la fenêtre de jeu de CE bandeau, l'entrée retenue par l'hôte.
+        if let Some(entry) = outcome.watchlist_reset_requested {
+            post_redraw =
+                PostRedraw::OpenWatchlistResetConfirm(this_game_hwnd, this_game_rect, entry);
+        }
+        // Le glyphe de remise à zéro du bloc Récap (2026-09-17) : la confirmation s'ouvre
+        // par-dessus la fenêtre de jeu de CE bloc ; sa réponse, elle, arrive par la fenêtre de
+        // confirmation elle-même, une frame plus tard.
+        if outcome.recap_reset_requested {
+            post_redraw = PostRedraw::OpenResetConfirm(
+                this_game_hwnd,
+                this_game_rect,
+                ResetTarget::RecapSession,
+            );
+        }
+        // Le glyphe de replacement de la rangée d'actions (2026-09-17) : même fenêtre, même
+        // voile, autre question — « on remet le récap à son emplacement initial seulement si
+        // l'utilisateur appuie sur oui ».
+        if outcome.recap_restore_requested {
+            post_redraw = PostRedraw::OpenResetConfirm(
+                this_game_hwnd,
+                this_game_rect,
+                ResetTarget::RecapPosition,
+            );
+        }
+        // Le cadenas : la bascule est immédiate et persistée, sans confirmation — rien ne se
+        // perd, et le glyphe montre aussitôt l'état obtenu. Après le rendu comme tout ce qui
+        // touche `self` entier (la fenêtre est empruntée jusque-là).
+        if outcome.recap_toggle_lock {
+            post_redraw = PostRedraw::ToggleRecapLock;
+        }
+        // Les deux mêmes commandes pour le panneau Combat (2026-09-17) — replacement sous
+        // confirmation, cadenas immédiat.
+        if outcome.combat_restore_requested {
+            post_redraw = PostRedraw::OpenResetConfirm(
+                this_game_hwnd,
+                this_game_rect,
+                ResetTarget::CombatPosition,
+            );
+        }
+        if outcome.combat_toggle_lock {
+            post_redraw = PostRedraw::ToggleCombatLock;
+        }
+        if let OverlayKind::ResetConfirm(target) = overlay.kind {
+            match outcome.reset_choice {
+                overlay_ui::design::ConfirmChoice::Pending => {}
+                overlay_ui::design::ConfirmChoice::Yes => {
+                    post_redraw = PostRedraw::AnswerResetConfirm(target, true)
+                }
+                overlay_ui::design::ConfirmChoice::No => {
+                    post_redraw = PostRedraw::AnswerResetConfirm(target, false)
+                }
+            }
+        }
         match outcome.options_action {
             OptionsModalAction::None => {}
             OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
             OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
+            // Les sons d'essai se jouent par le même chemin qu'en jeu — c'est tout l'intérêt du
+            // bouton : entendre ce qu'on entendra.
             OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
             OptionsModalAction::TestChatSound => alert_sound::play_chat_alert(),
             OptionsModalAction::TestCountdownSound => alert_sound::play_countdown_alert(),
+            OptionsModalAction::TestTurnSound => alert_sound::play_turn_alert(),
             OptionsModalAction::Disconnect => post_redraw = PostRedraw::DisconnectAccount,
             OptionsModalAction::Validate(commit) => {
                 post_redraw = PostRedraw::ValidateOptions(commit)
             }
             OptionsModalAction::ResolveRecipe(id) => post_redraw = PostRedraw::ResolveRecipe(id),
             OptionsModalAction::CheckUpdate => post_redraw = PostRedraw::CheckUpdate,
+            // Déjà traduite en `outcome.open_url` par `render_content` (voir la variante) ;
+            // ne parvient jamais ici.
+            OptionsModalAction::OpenUrl(_) => {}
             OptionsModalAction::InstallUpdate => post_redraw = PostRedraw::InstallUpdate,
+            OptionsModalAction::PurgeLocalData => post_redraw = PostRedraw::PurgeLocalData,
+            OptionsModalAction::Quit => post_redraw = PostRedraw::Quit,
+            OptionsModalAction::Restart => post_redraw = PostRedraw::Restart,
         }
         // Voir `OverlayWindow::next_redraw_at` : egui a pu demander un redessin après un
         // délai (tooltip...) que rien d'autre ne redéclenchera dans cette architecture.
@@ -2899,12 +4881,29 @@ impl App {
         overlay.next_redraw_at = (repaint_delay < std::time::Duration::from_secs(3600))
             .then(|| std::time::Instant::now() + repaint_delay);
 
+        // Après la dernière ligne qui touche `overlay` : `persist_config` a besoin de tout
+        // `self`, fenêtres comprises.
+        if persist_recap_position || persist_combat_position {
+            self.persist_config();
+        }
+
         match post_redraw {
             PostRedraw::None => {}
             PostRedraw::OpenOptions(hwnd, rect, tab) => {
                 self.open_options_modal(event_loop, Some((hwnd, rect)), tab)
             }
             PostRedraw::CloseOptions => self.close_options_modal(id, "Annuler"),
+            PostRedraw::OpenResetConfirm(hwnd, rect, target) => {
+                self.open_reset_confirm(event_loop, hwnd, rect, target)
+            }
+            PostRedraw::AnswerResetConfirm(target, confirmed) => {
+                self.answer_reset_confirm(id, target, confirmed)
+            }
+            PostRedraw::OpenWatchlistResetConfirm(hwnd, rect, entry) => {
+                self.open_watchlist_reset_confirm(event_loop, hwnd, rect, entry)
+            }
+            PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
+            PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),
             PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
             // La déconnexion referme la fenêtre : l'overlay revient à son écran de connexion, et
             // ce qu'on y réglait (liste suivie, alertes) appartient au compte qu'on vient de
@@ -2929,6 +4928,55 @@ impl App {
                     install_if_available: true,
                 });
             }
+            // Même sortie que l'entrée « Quitter » de la zone de notification : la borne de fin
+            // de session d'abord (§11 du plan), puis la boucle s'arrête — les fenêtres, modale
+            // comprise, tombent avec elle.
+            PostRedraw::Quit => {
+                logging::log_session_end("Fermer l'overlay (fenêtre Options)");
+                event_loop.exit();
+            }
+            PostRedraw::PurgeLocalData => {
+                self.purge_local_data_and_quit(event_loop);
+            }
+            // Même sortie que « Fermer l'overlay », un process neuf en plus — lancé AVANT de
+            // sortir (voir `restart::relaunch`). Une relance impossible ne ferme rien : l'overlay
+            // en place reste ouvert, avec la cause au journal, plutôt que de laisser l'utilisateur
+            // sans overlay du tout.
+            PostRedraw::Restart => match overlay_ui::restart::relaunch() {
+                Ok(()) => {
+                    logging::log_session_end("Redémarrer l'overlay (fenêtre Options)");
+                    event_loop.exit();
+                }
+                Err(err) => {
+                    tracing::error!("[redémarrage] impossible de relancer l'overlay : {err}");
+                }
+            },
+            // Même chemin que « Mettre à jour vers X » de la fenêtre Options
+            // (`request_update_install`), sans fenêtre Options à refermer : le démarrage est
+            // rebloqué le temps du téléchargement, ce qui referme les overlays de jeu et laisse
+            // l'écran de mise à jour seul à l'écran, avec sa jauge.
+            PostRedraw::StartManualUpdate => {
+                tracing::info!(">>> Mise à jour demandée (écran de mise à jour).");
+                self.startup.set_update_blocking(true);
+                let _ = self.update_command_tx.send(UpdateCommand::Download);
+            }
+            PostRedraw::CloseManualUpdate => self.close_manual_update_window(event_loop),
+            PostRedraw::OpenManualUpdate => self.open_manual_update_window(event_loop),
+            PostRedraw::ApplyCardSettings(settings) => self.apply_card_settings(&settings),
+            PostRedraw::TestCardSound(sound) => match sound {
+                panels::login::CardSound::Turn => alert_sound::play_turn_alert(),
+                panels::login::CardSound::Countdown => alert_sound::play_countdown_alert(),
+                panels::login::CardSound::Alert => alert_sound::play_loot_alert(),
+                panels::login::CardSound::Chat => alert_sound::play_chat_alert(),
+            },
+            PostRedraw::CloseCard => {
+                tracing::info!(">>> Carte fermée par son bouton « Fermer ».");
+                self.close_login_window();
+            }
+            PostRedraw::DisconnectFromCard => {
+                tracing::info!(">>> Déconnexion du compte demandée (Carte).");
+                self.disconnect_account();
+            }
         }
     }
 }
@@ -2940,22 +4988,30 @@ impl ApplicationHandler<UserEvent> for App {
         self.sync_windows(event_loop);
         if !self.banner_printed {
             tracing::info!("=== wakfu-companion-overlay (L2, overlay-ui) ===");
-            tracing::info!("Suivi de {}", self.log_path.display());
+            // Chemin EXPURGÉ du nom d'utilisateur du système (constat C6 de
+            // `docs/analyse-rgpd.md`, `overlay_ingest::privacy`) : la forme du chemin — Steam,
+            // Wine, installation native, dossier déplacé — reste entière, c'est elle qu'on lit
+            // ici ; le chemin réel part en `debug` (« Journal détaillé »).
+            tracing::info!(
+                "Suivi de {}",
+                overlay_ingest::privacy::redact_path(&self.log_path)
+            );
+            tracing::debug!(path = %self.log_path.display(), "chemin de journal suivi");
             // Libellés LUS dans les raccourcis effectifs : une bannière qui annoncerait les
             // combinaisons par défaut à qui les a personnalisées serait un contresens.
             let bindings = self.hotkeys.bindings();
             tracing::info!(
                 "{} pour basculer interactif / clic-traversant. \
                  {} pour forcer un rafraîchissement (overlay bloqué/mal \
-                 positionné, ou Suivi resté vide). {} ou Ctrl+C (dans ce \
-                 terminal) pour quitter. {} pour la fenêtre Options — \
-                 son onglet « Raccourcis » personnalise tout ceci, et sa \
-                 section « Compte » déconnecte le compte lié. Un compte est \
-                 obligatoire : la fenêtre de connexion reste seule à l'écran \
-                 tant qu'aucun n'est lié.",
+                 positionné, ou Suivi resté vide). {} pour la fenêtre Options — \
+                 son onglet « Raccourcis » personnalise tout ceci, sa \
+                 section « Compte » déconnecte le compte lié, et son bouton \
+                 « Fermer l'overlay » quitte (comme la zone de notification, \
+                 ou Ctrl+C dans ce terminal). Un compte est obligatoire : la \
+                 fenêtre de connexion reste seule à l'écran tant qu'aucun \
+                 n'est lié.",
                 bindings.label(ShortcutAction::Toggle),
                 bindings.label(ShortcutAction::Refresh),
-                bindings.label(ShortcutAction::Quit),
                 bindings.label(ShortcutAction::Options),
             );
             self.banner_printed = true;
@@ -3023,37 +5079,49 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         _ => post_redraw = PostRedraw::CloseOptions,
                     }
+                } else if let OverlayKind::ResetConfirm(target) = overlay.kind {
+                    // Fermer la question, c'est répondre « Non ».
+                    post_redraw = PostRedraw::AnswerResetConfirm(target, false);
+                } else if overlay
+                    .login_state
+                    .as_ref()
+                    .is_some_and(|state| state.manual_update)
+                {
+                    // **La croix de l'écran de mise à jour ferme CET écran, pas l'overlay** — même
+                    // raison que la modale Options ci-dessus : cette fenêtre est focalisable, sa
+                    // croix est atteignable, et l'utilisateur qui vient de demander une recherche
+                    // de mise à jour ne demande pas à quitter sa session de jeu.
+                    post_redraw = PostRedraw::CloseManualUpdate;
                 } else {
                     logging::log_session_end("fermeture de fenêtre");
                     event_loop.exit();
                 }
             }
-            // Filet « Échap quitte l'overlay », **sauf pour la modale Options**.
+            // **Aucun filet « Échap quitte l'overlay ».** Il y en a eu un jusqu'au 2026-09-17
+            // (`Échap` → `event_loop.exit()` pour toute fenêtre autre que la modale Options, la
+            // fenêtre de connexion et la confirmation de remise à zéro), posé quand les fenêtres
+            // overlay étaient réputées ne jamais recevoir d'événement clavier — `WS_EX_NOACTIVATE`
+            // était censé les tenir hors du premier plan.
             //
-            // Il ne se déclenche en pratique jamais pour les autres fenêtres (voir la doc de
-            // `overlay_ui::shortcuts::ShortcutAction::Quit`) : elles portent `WS_EX_NOACTIVATE` et ne reçoivent donc jamais le
-            // focus clavier, quel que soit le mode. Laissé en place au cas où l'une d'elles
-            // redeviendrait focalisable, mais le raccourci « Quitter » reste le SEUL moyen fiable de
-            // quitter sans passer par le terminal.
+            // **Cette prémisse est fausse, et le filet a fermé l'overlay entier** (retour
+            // utilisateur, 2026-09-17 : « la touche Échap en ayant la modale Options ferme
+            // complètement l'overlay »). En mode interactif, un clic sur un bandeau Combat/Suivi
+            // fait bel et bien de SA PROPRE `HWND` la fenêtre au premier plan malgré
+            // `WS_EX_NOACTIVATE` — c'est le même constat, journaux à l'appui, qui a imposé le
+            // calcul par personnage de `sync_topmost` (voir son correctif 2026-09-06/07). Le
+            // geste qui déclenchait le défaut est donc parfaitement ordinaire : cliquer
+            // « Options » dans le bandeau Suivi (ce clic donne le premier plan AU BANDEAU), puis
+            // taper Échap pour refermer la modale — la touche partait au bandeau, pas à la
+            // modale, et tuait la session.
             //
-            // La modale Options, elle, EST focalisable et délibérément (§9.1 du plan :
-            // `WS_EX_NOACTIVATE` omis pour elle, il faut pouvoir taper dans le champ de chemin).
-            // Sans cette exclusion, taper Échap dedans tuait l'overlay entier au lieu d'annuler la
-            // saisie. Ses deux touches (`Échap` annule, `Entrée` valide) sont traitées par le
-            // panneau lui-même, qui les remonte en `OptionsModalAction` — voir
-            // `panels::options_modal::show`.
-            // La fenêtre de connexion est exclue aussi (2026-09-14) : Échap dans une fenêtre
-            // logicielle ordinaire ne quitte pas l'application — sa croix de barre des tâches
-            // et Alt+F4 (`CloseRequested` ci-dessus) le font, comme le menu de zone de
-            // notification.
-            WindowEvent::KeyboardInput { event, .. } => {
-                if !matches!(overlay.kind, OverlayKind::Options | OverlayKind::Login)
-                    && event.state == ElementState::Pressed
-                    && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
-                {
-                    event_loop.exit();
-                }
-            }
+            // Le filet disparaît plutôt que de s'allonger d'une exclusion de plus : une touche
+            // nue qui arrête le programme n'a pas sa place, exactement comme le raccourci global
+            // « Quitter l'overlay » retiré le même jour. Les sorties propres sont le bouton
+            // « Fermer l'overlay » de l'onglet « Paramètres » (confirmé), l'entrée « Quitter » de
+            // la zone de notification, Alt+F4 / la croix pour les fenêtres qui en ont une
+            // (`CloseRequested` ci-dessus) et Ctrl+C au terminal. Échap, lui, appartient
+            // désormais aux seuls panneaux qui le lisent : il annule la modale Options, répond
+            // « Non » à une confirmation, referme un sélecteur.
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
                 Self::reconfigure_surface(&mut overlay.gpu, size);
             }
@@ -3073,6 +5141,9 @@ impl ApplicationHandler<UserEvent> for App {
         if event_loop.exiting() {
             return;
         }
+        // **Les suivis qui viennent d'aboutir**, avant tout le reste du tick : leur retrait ne
+        // dépend ni d'une fenêtre visible ni d'un rendu (voir `tick_watchlist_completions`).
+        self.tick_watchlist_completions();
         // Hotkey global : thread OS dédié, sondé ici sans bloquer (voir S1). `while let` (pas un
         // simple `if`) : chaque appui PHYSIQUE produit deux événements (`Pressed` PUIS `Released`,
         // voir `HotKeyState`) — les deux peuvent être en file au même tick à ~20 Hz. Filtré sur
@@ -3089,10 +5160,6 @@ impl ApplicationHandler<UserEvent> for App {
             match action {
                 ShortcutAction::Toggle => self.toggle_interactive(),
                 ShortcutAction::Refresh => self.force_refresh(event_loop),
-                ShortcutAction::Quit => {
-                    logging::log_session_end(&self.hotkeys.bindings().label(ShortcutAction::Quit));
-                    event_loop.exit();
-                }
                 ShortcutAction::Details => self.open_details(),
                 ShortcutAction::Options => {
                     tracing::info!(
@@ -3213,7 +5280,7 @@ impl ApplicationHandler<UserEvent> for App {
         self.sync_windows(event_loop);
         // Apparition/disparition automatique du panneau Combat — entre les deux : `sync_windows`
         // vient peut-être de créer la fenêtre, `sync_topmost` doit voir son état final.
-        self.sync_combat_visibility();
+        self.sync_panel_visibility();
         self.sync_topmost();
         // Surveillance de tour (§9.1 decies) — après `sync_windows`, qui vient de mettre à jour
         // la liste des fenêtres de jeu qu'elle lit.
@@ -3293,7 +5360,14 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         .request_device(&wgpu::DeviceDescriptor {
             label: Some("overlay-ui-device"),
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+            // Plancher `webgl2` (l'overlay ne demande rien de plus), mais avec les limites
+            // de RÉSOLUTION de l'adaptateur : la swapchain de la confirmation de remise à
+            // zéro couvre la fenêtre de jeu ENTIÈRE (`OverlayKind::ResetConfirm`), et
+            // `downlevel_webgl2_defaults()` plafonne une texture 2D à 2048 px — un jeu en
+            // 2560×1392 faisait donc paniquer `Surface::configure` au clic sur le glyphe
+            // (2026-09-17). L'idiome est celui que wgpu documente sur `using_resolution`.
+            required_limits: wgpu::Limits::downlevel_webgl2_defaults()
+                .using_resolution(adapter.limits()),
             memory_hints: wgpu::MemoryHints::MemoryUsage,
             trace: wgpu::Trace::Off,
             ..Default::default()
@@ -3302,6 +5376,10 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         .expect("création du device");
 
     let size = window.inner_size();
+    // Même clamp défensif qu'à la reconfiguration (voir `reconfigure_surface` côté
+    // Windows, `WindowEvent::Resized` côté Linux) : une erreur wgpu est FATALE par défaut,
+    // une fenêtre plus grande que ce que le GPU accepte ne doit jamais tuer l'overlay.
+    let max_dim = device.limits().max_texture_dimension_2d;
     let caps = surface.get_capabilities(&adapter);
     let format = caps
         .formats
@@ -3313,8 +5391,8 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
     let config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format,
-        width: size.width.max(1),
-        height: size.height.max(1),
+        width: size.width.clamp(1, max_dim),
+        height: size.height.clamp(1, max_dim),
         present_mode: wgpu::PresentMode::Fifo,
         desired_maximum_frame_latency: 2,
         alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
@@ -3365,7 +5443,7 @@ fn resolve_path(config: &config::OverlayConfig, cli_arg: Option<PathBuf>) -> Pat
         None => {
             tracing::error!("wakfu.log introuvable aux emplacements connus. Chemins essayés :");
             for candidate in discovery::candidate_paths() {
-                tracing::error!("  - {}", candidate.display());
+                tracing::error!("  - {}", overlay_ingest::privacy::redact_path(&candidate));
             }
             tracing::error!(
                 "Précisez le chemin explicitement : cargo run -p overlay-ui -- <chemin>"
@@ -3377,23 +5455,66 @@ fn resolve_path(config: &config::OverlayConfig, cli_arg: Option<PathBuf>) -> Pat
 }
 
 fn main() {
+    // Avant TOUTE écriture sur le disque : `local_data::has_user_data` compare la date de
+    // `config.toml` à cet instant pour distinguer une installation déjà utilisée d'une première
+    // ouverture, et ce fichier est écrit par le démarrage en cours.
+    build_info::mark_process_start();
+    // En tout premier, avant la moindre ligne de journal : sans console propre (sous-système
+    // `windows`, voir l'attribut en tête de fichier), les couches console de `logging` n'ont un
+    // destinataire que si le terminal qui nous a lancés nous prête le sien.
+    logging::attach_parent_console();
     // Lancé par le clic d'un toast de tour (activation de protocole, voir
     // `turn_watch::notify`) : ce process n'existe que pour donner le premier plan à la fenêtre
     // du personnage, ce que l'overlay déjà en cours n'a pas le droit de faire. Rien d'autre n'est
     // initialisé — pas de journal, pas de moteur — et il se termine aussitôt.
-    if let Some(hwnd) = std::env::args()
-        .nth(1)
+    let first_arg = std::env::args().nth(1);
+    if let Some(hwnd) = first_arg
         .as_deref()
         .and_then(turn_watch::notify::parse_focus_uri)
     {
         turn_watch::notify::focus_window(hwnd);
         return;
     }
+    // Toute autre URI du protocole (une page web peut en lancer une, `wakfu-companion:x`) : jamais
+    // une seconde instance complète de l'overlay, qui prendrait l'URI pour un chemin de journal et
+    // partagerait la file de synchronisation et le jeton avec l'instance en cours.
+    if first_arg.as_deref().is_some_and(|arg| {
+        arg.get(..turn_watch::notify::PROTOCOL.len() + 1)
+            .is_some_and(|prefix| {
+                prefix.eq_ignore_ascii_case(&format!("{}:", turn_watch::notify::PROTOCOL))
+            })
+    }) {
+        return;
+    }
+    // **Une seule instance** (2026-09-23, `overlay_ui::single_instance`) : deux overlays
+    // partageraient le jeton et la file d'envoi, et enverraient chaque lot deux fois. Pris AVANT
+    // le journal, qu'une seconde instance ne doit pas toucher ; gardé jusqu'à la fin de `main`.
+    let _instance = match overlay_ui::single_instance::guard() {
+        overlay_ui::single_instance::Startup::Proceed(lock) => lock,
+        overlay_ui::single_instance::Startup::Exit => return,
+    };
     let log_dir = logging::init();
     logging::install_ctrlc_handler();
+    logging::install_panic_hook();
     if let Some(dir) = &log_dir {
-        tracing::info!("journal de session : {}", dir.display());
+        tracing::info!(
+            "journal de session : {}",
+            overlay_ingest::privacy::redact_path(dir)
+        );
+        tracing::debug!(dir = %dir.display(), "dossier du journal de session");
     }
+    // À quel déploiement cette session parle — figé par le profil de compilation
+    // (`overlay-sync/build.rs`) sauf surcharge `WAKFU_COMPANION_API_URL` : sans cette ligne, un
+    // 401 au journal ne dit pas si le jeton a été présenté au bon serveur (cas vécu le 2026-09-17).
+    tracing::info!(
+        "API : {} ({})",
+        overlay_sync::client::base_url(),
+        if std::env::var_os("WAKFU_COMPANION_API_URL").is_some() {
+            "surcharge WAKFU_COMPANION_API_URL"
+        } else {
+            "défaut du profil de compilation"
+        }
+    );
 
     // Référentiels de sorts (classes et monstres) construits DÈS LE DÉMARRAGE, jamais au premier
     // sort affiché en combat — décision utilisateur du 13 sept. 2026 : deux fichiers de quelques
@@ -3401,7 +5522,15 @@ fn main() {
     let (class_spells, monster_spells) = overlay_engine::preload_spell_indexes();
     tracing::info!("référentiels de sorts chargés : {class_spells} sorts de classe, {monster_spells} sorts de monstres");
 
+    // Une seule racine de dossiers depuis le 2026-09-19 (constat C13) : ce que l'ancienne
+    // contenait est déplacé avant toute lecture, et elle disparaît.
+    config::migrate_legacy_root();
     let saved_config = config::load();
+    // **Journal détaillé**, dès que la config est lue (constat C6 de `docs/analyse-rgpd.md`) :
+    // `logging::init` démarre toujours au niveau ordinaire — c'est le défaut voulu, rien de
+    // personnel dans le fichier tant que rien n'a été demandé — et c'est ici, et seulement si
+    // la case est cochée, que les `debug!` s'ouvrent.
+    logging::set_verbose(saved_config.verbose_log);
 
     // `--updated-from X` (relance après une mise à jour, voir `overlay_sync::update::apply`)
 
@@ -3424,6 +5553,11 @@ fn main() {
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
     let alert_profile = Arc::new(ArcSwap::from_pointee(None));
     let chat_filters: SharedChatFilters = Arc::new(ArcSwap::from_pointee(None));
+    let roster_draft: SharedRosterDraft = Arc::new(ArcSwap::from_pointee(None));
+    // Les serveurs de jeu ne sont pas un jalon de démarrage : voir la doc du thread.
+    let game_servers: Arc<ArcSwap<GameServers>> =
+        Arc::new(ArcSwap::from_pointee(GameServers::default()));
+    spawn_game_servers_thread(Arc::clone(&game_servers));
     let roster: overlay_ui::engine_thread::SharedRoster = Arc::new(ArcSwap::from_pointee(None));
     let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
     let catalog_stale = Arc::new(AtomicBool::new(false));
@@ -3439,7 +5573,7 @@ fn main() {
     let (settings_tx, settings_rx) = mpsc::channel();
     let (auth_command_tx, auth_command_rx) = mpsc::channel();
     let (sync_tx, sync_rx) = mpsc::channel();
-    spawn_sync_thread(sync_rx);
+    spawn_sync_thread(sync_rx, auth_command_tx.clone());
     spawn_auth_thread(
         settings_tx.clone(),
         sync_tx.clone(),
@@ -3468,15 +5602,20 @@ fn main() {
         install_if_available: saved_config.auto_update,
     });
     let remote_icons = RemoteIconStore::spawn(proxy.clone());
+    // **Le canal des complétions** (2026-09-17) — voir `engine_thread::WatchlistCompleted` sur
+    // pourquoi un canal et pas un `ArcSwap` : une complétion perdue est une entrée jamais retirée.
+    let (completions_tx, completions_rx) = mpsc::channel();
     spawn_engine_thread(
         log_path.clone(),
         EngineHandles {
             snapshot: Arc::clone(&snapshot),
             watchlist: Arc::clone(&watchlist),
             watchlist_toast: Arc::clone(&watchlist_toast),
+            completions: completions_tx,
             alert_profile: Arc::clone(&alert_profile),
             chat_filters: Arc::clone(&chat_filters),
             roster: Arc::clone(&roster),
+            roster_draft: Arc::clone(&roster_draft),
             catalog: Arc::clone(&catalog),
             dungeons,
             startup: Arc::clone(&startup),
@@ -3487,6 +5626,9 @@ fn main() {
     );
     // Les réglages de la carte de chat sont locaux : le moteur les reçoit d'ici, pas du compte.
     let _ = settings_tx.send(EngineCommand::SetChatToast(saved_config.chat_toast()));
+    let _ = settings_tx.send(EngineCommand::SetCountdownToast(
+        saved_config.countdown_toast(),
+    ));
     // Les interrupteurs de fonctionnalité aussi — sans cet envoi, le thread Engine partirait sur
     // son défaut « tout actif » et jouerait les alertes d'une fonctionnalité coupée jusqu'à la
     // prochaine validation de la fenêtre Options.
@@ -3499,6 +5641,9 @@ fn main() {
     let mut app = App::new(AppState {
         log_path,
         combat_always_visible: saved_config.combat_always_visible,
+        combat_on_right: saved_config.combat_on_right,
+        combat_position_y: saved_config.combat_position_y,
+        combat_locked: saved_config.combat_locked,
         turn_notification: saved_config.turn_notification,
         turn_notification_muted: saved_config.turn_notification_muted,
         features: saved_config.features(),
@@ -3509,7 +5654,21 @@ fn main() {
         watchlist_toast,
         alert_profile,
         chat_filters,
+        roster_draft,
+        game_servers,
         chat_toast: saved_config.chat_toast(),
+        countdown_toast: saved_config.countdown_toast(),
+        completion: saved_config.completion(),
+        completions_rx,
+        // À côté des combats en cours (`fight-*.json`) — voir la doc de module de
+        // `recap_session` pour ce qui y est écrit et quand.
+        recap_session: RecapSession::load(
+            overlay_engine::fight_store::default_store_dir().join(recap_session::FILE_NAME),
+            saved_config.recap_resume(),
+            std::time::SystemTime::now(),
+        ),
+        recap_position: saved_config.recap_position(),
+        recap_locked: saved_config.recap_locked,
         catalog,
         catalog_stale,
         remote_icons,
@@ -3519,6 +5678,7 @@ fn main() {
         update_status,
         update_command_tx,
         auto_update: saved_config.auto_update,
+        verbose_log: saved_config.verbose_log,
         settings_tx,
     });
     event_loop.run_app(&mut app).expect("boucle d'événements");

@@ -17,7 +17,7 @@
 //!   « Paramètres » ;
 //! - "−" ouvre la **sélection multiple de la bande elle-même** ([`WatchlistSelection`]) : chaque
 //!   tuile gagne une case à cocher en ton destructif, un bouton de suppression groupée apparaît
-//!   sous la bande, et le retrait remonte à l'hôte ([`WatchlistOutcome::edit`]). `Ctrl+Shift+S`
+//!   sous la bande, et le retrait remonte à l'hôte ([`WatchlistOutcome::edit`]). `Ctrl+Shift+D`
 //!   fait le même geste au clavier. Le panneau reste en LECTURE SEULE sur les entrées (voir
 //!   `overlay_engine::watchlist` pour la frontière définitions/compteurs) : il demande, il
 //!   n'applique pas.
@@ -146,7 +146,7 @@
 //! DROITE (côté `Right`) — voir
 //! `control_button`, dont le côté d'infobulle dépend maintenant de la COLONNE (paramètre
 //! `TooltipSide`), pas du rôle inerte/cliquable du bouton. `CONTROL_TOOLTIP_RESERVE` (mesurée sur
-//! "Supprimer (Ctrl+Shift+S)", le plus long des quatre libellés — désormais sur la colonne DROITE)
+//! "Supprimer (Ctrl+Shift+D)", le plus long des quatre libellés — désormais sur la colonne DROITE)
 //! est réutilisée SYMÉTRIQUEMENT des deux côtés du carré (voir `content_width`) : plus un seul
 //! côté à réserver, il en faut désormais un de chaque, sans quoi l'infobulle du bouton de droite
 //! (« Supprimer »/« Options ») n'aurait pas la place de s'afficher entièrement à droite.
@@ -258,7 +258,7 @@ use crate::ui_icons::UiIcons;
 /// « manuelle » retire la minuterie ET « automatique » retire la croix.
 pub const TOAST_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Distingue les deux déclencheurs de toast possibles (miroir de `LootAlertEvent.reason`,
+/// Distingue les déclencheurs de toast possibles (miroir de `LootAlertEvent.reason`,
 /// `loot-alert.service.ts`) — seul le libellé affiché change (voir `toast_card`), le son a déjà
 /// été choisi par l'appelant (`main.rs::spawn_engine_thread`, `alert_sound::{play_countdown_alert,
 /// play_loot_alert}`) avant même la construction de ce toast.
@@ -266,6 +266,9 @@ pub const TOAST_DURATION: std::time::Duration = std::time::Duration::from_secs(5
 pub enum WatchlistToastReason {
     /// Un décompte de suivi (mode `down`) vient d'atteindre 0.
     Countdown,
+    /// Un objectif de suivi (mode `goal`, 2026-09-17) vient d'atteindre sa cible — même son que
+    /// le décompte (`alert_sound::play_countdown_alert`), seul le titre de la carte change.
+    Goal,
     /// Un objet à son activé (compte, voir `overlay_engine::profile`) vient d'être ramassé —
     /// `quantity` affichée seulement si > 1 (voir `toast_card`).
     Loot { quantity: i64 },
@@ -361,7 +364,8 @@ pub fn build_confetti() -> Vec<ConfettiPiece> {
         .collect()
 }
 
-/// Un décompte de suivi à 0 OU un ramassage à son activé (voir `WatchlistToastReason`) — construit
+/// Un décompte de suivi à 0, un objectif atteint OU un ramassage à son activé (voir
+/// `WatchlistToastReason`) — construit
 /// par `main.rs::spawn_engine_thread` à réception de l'alerte, publié via `ArcSwap` (comme
 /// `watchlist`/`snapshot`) pour que le thread UI l'affiche sans coupler le thread Engine au rendu.
 #[derive(Debug, Clone)]
@@ -509,7 +513,7 @@ const CONTROL_BUTTON_GAP: f32 = 4.0;
 /// plus rien à gauche non plus — la fenêtre démarre au premier pixel des boutons, décision de la
 /// veille — et la réserve ne vaut plus que pour la DROITE. Les quatre infobulles s'accrochent
 /// maintenant au carré entier (voir `control_button_row`), large de `control_row_width` = 60 px :
-/// « Supprimer (Ctrl+Shift+S) », le plus long des quatre libellés, mesure 140 px et se rabat
+/// « Supprimer (Ctrl+Shift+D) », le plus long des quatre libellés, mesure 140 px et se rabat
 /// alignée sur le bord GAUCHE du carré (`BOTTOM_START`, faute de place à gauche pour la centrer),
 /// il lui faut donc 140 − 60 = 80 px au-delà du carré. Arrondi à 88 px.
 ///
@@ -517,7 +521,7 @@ const CONTROL_BUTTON_GAP: f32 = 4.0;
 /// seule, la fenêtre gagne 12 px de large qu'elle ne peint pas — le prix d'une infobulle entière,
 /// et elle reste transparente.
 ///
-/// Le cas non couvert, assumé : « Quitter la sélection (Ctrl+Shift+S) », le libellé que « − »
+/// Le cas non couvert, assumé : « Quitter la sélection (Ctrl+Shift+D) », le libellé que « − »
 /// prend pendant la sélection multiple, est bien plus long. Il se rabat alors sur ce que la
 /// fenêtre offre — mais ce mode ouvre déjà sa propre bande sous les tuiles, et la fenêtre est
 /// alors plus large que ces 88 px.
@@ -530,7 +534,7 @@ const CONTROL_TOOLTIP_RESERVE: f32 = 88.0;
 ///
 /// Valeur mesurée (captures de `panels.rs::panneau_suivi_vide_boutons_en_ligne_infobulles_dessous`,
 /// diff pixel avec le rendu non survolé) sur le plus long des quatre libellés, « Supprimer
-/// (Ctrl+Shift+S) » : 140 px d'infobulle, soit 70 px de chaque côté du centre de son bouton ; le
+/// (Ctrl+Shift+D) » : 140 px d'infobulle, soit 70 px de chaque côté du centre de son bouton ; le
 /// centre du premier et du dernier bouton est à 16 px du bord de la rangée, il reste donc 54 px à
 /// couvrir hors rangée. Arrondi à 64 px pour la marge d'erreur (anticrénelage, arrondi du texte).
 const CONTROL_ROW_TOOLTIP_RESERVE: f32 = 64.0;
@@ -544,7 +548,7 @@ enum ControlLayout {
     /// Aucune entrée, Suivi ACTIF : rangée 1×4 « + », « − », « Détails », « Options », infobulles
     /// en dessous.
     Row,
-    /// Suivi DÉSACTIVÉ (case « Activer le Suivi » décochée) : rangée 1×2 « Détails », « Options »
+    /// Suivi DÉSACTIVÉ (case « Activer le suivi » décochée) : rangée 1×2 « Détails », « Options »
     /// — voir [`ControlLayout::for_state`] et la doc de module (2026-09-15).
     RowTrackingOff,
 }
@@ -596,7 +600,7 @@ impl ControlLayout {
         match self {
             ControlLayout::Square => CONTROL_TOOLTIP_RESERVE,
             // La rangée du Suivi coupé n'affiche que « Détails » et « Options », deux libellés
-            // plus courts que le « Supprimer (Ctrl+Shift+S) » sur lequel la réserve a été mesurée.
+            // plus courts que le « Supprimer (Ctrl+Shift+D) » sur lequel la réserve a été mesurée.
             ControlLayout::Row | ControlLayout::RowTrackingOff => CONTROL_ROW_TOOLTIP_RESERVE,
         }
     }
@@ -807,8 +811,116 @@ const BULK_BUTTON_MIN_WIDTH: f32 = 150.0;
 /// Gouttière entre la bande de tuiles et le bouton.
 const BULK_BUTTON_GAP: f32 = 8.0;
 
+/// **Une célébration en cours** — une entrée qui vient d'aboutir et que la bande fête avant de la
+/// laisser partir (2026-09-17, voir `design::item_slot::completion`).
+///
+/// Ce n'est pas la même chose que le toast : le toast dit CE QUI s'est passé, n'importe où à
+/// l'écran, et disparaît ; la célébration se joue SUR la tuile, et se termine par un retrait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Celebration {
+    /// Clé de l'entrée (`panels::suivi_tab::key_of`) — pas l'entrée elle-même : son compteur
+    /// vient justement de changer, et il changera encore si l'objet retombe.
+    key: String,
+    /// Instant du franchissement du seuil — l'origine de l'animation.
+    started_at: std::time::Instant,
+    /// La tuile joue-t-elle l'animation ? Faux quand la case « Activer l'animation de complétion »
+    /// est décochée — l'entrée est alors retirée sans rien montrer.
+    animate: bool,
+    /// Quand retirer l'entrée. `None` quand la case « Supprimer les éléments suivis lorsqu'ils
+    /// sont complétés » est décochée : la tuile célèbre (si elle le doit) et reste.
+    remove_at: Option<std::time::Instant>,
+}
+
+/// **Les célébrations en cours**, portées par l'hôte et prêtées à [`show`] — comme
+/// [`WatchlistSelection`], et pour une raison plus forte encore : le **retrait ne dépend pas du
+/// rendu**.
+///
+/// Décision utilisateur du 2026-09-17 : « le retrait est une conséquence du seuil, pas de
+/// l'animation ». Une célébration qui se joue pendant que la fenêtre Suivi est masquée, ou avec le
+/// Suivi coupé, doit quand même retirer l'entrée à son terme. C'est donc l'hôte qui fait avancer
+/// cette liste, sur son tick, et le panneau qui la consulte quand il peint — jamais l'inverse.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WatchlistCompletions {
+    en_cours: Vec<Celebration>,
+}
+
+impl WatchlistCompletions {
+    /// Note qu'une entrée vient d'aboutir — `now` est l'instant du franchissement, `delay` le
+    /// temps à laisser à la célébration (voir
+    /// `panels::suivi_tab::CompletionSettings::removal_delay_seconds`), et `remove` si l'entrée
+    /// doit partir au bout.
+    ///
+    /// **Une même clé ne célèbre qu'une fois à la fois** : un objet ramassé deux fois dans le même
+    /// lot ne peut pas franchir deux fois son seuil (le moteur n'alerte que sur le franchissement),
+    /// mais une entrée remise à sa cible depuis le site pendant la célébration le pourrait — la
+    /// seconde remplace alors la première plutôt que de superposer deux animations sur une tuile.
+    pub fn push(&mut self, key: String, now: std::time::Instant, delay: f32, remove: bool) {
+        let celebration = Celebration {
+            started_at: now,
+            animate: delay > 0.0,
+            remove_at: remove.then(|| now + std::time::Duration::from_secs_f32(delay)),
+            key,
+        };
+        match self.en_cours.iter_mut().find(|c| c.key == celebration.key) {
+            Some(deja) => *deja = celebration,
+            None => self.en_cours.push(celebration),
+        }
+    }
+
+    /// Depuis combien de secondes cette entrée célèbre — `None` si elle ne célèbre pas, ou si son
+    /// animation est finie (ou n'a jamais été demandée).
+    ///
+    /// C'est ce que [`show`] passe à `design::item_slot().completion(…)`.
+    pub fn elapsed(&self, key: &str, now: std::time::Instant) -> Option<f32> {
+        let celebration = self.en_cours.iter().find(|c| c.key == key)?;
+        if !celebration.animate {
+            return None;
+        }
+        let elapsed = now
+            .saturating_duration_since(celebration.started_at)
+            .as_secs_f32();
+        (elapsed < design::tokens::ITEM_SLOT_COMPLETION_DURATION).then_some(elapsed)
+    }
+
+    /// Y a-t-il une animation en cours à cet instant ? L'hôte s'en sert pour ne redessiner à
+    /// 60 Hz **que** le temps d'une célébration — le reste du temps, la bande garde son rythme.
+    pub fn is_animating(&self, now: std::time::Instant) -> bool {
+        self.en_cours
+            .iter()
+            .any(|c| self.elapsed(&c.key, now).is_some())
+    }
+
+    /// Retire de la liste tout ce qui est arrivé à terme, et **rend les clés des entrées à
+    /// supprimer** — à l'hôte de construire la liste amputée et de l'envoyer au moteur.
+    ///
+    /// Une célébration sans retrait (`remove_at` à `None`) est simplement oubliée quand son
+    /// animation est finie : elle n'a plus rien à dire, et la garder ferait grossir la liste à
+    /// chaque objet suivi jusqu'à la fin de la session.
+    pub fn drain_due(&mut self, now: std::time::Instant) -> Vec<String> {
+        let mut a_retirer = Vec::new();
+        self.en_cours
+            .retain(|celebration| match celebration.remove_at {
+                Some(echeance) if echeance <= now => {
+                    a_retirer.push(celebration.key.clone());
+                    false
+                }
+                Some(_) => true,
+                // Sans retrait : on la garde le temps de l'animation, pas au-delà. Le calcul est
+                // refait ici plutôt qu'appelé sur `self` — `retain` tient déjà la liste.
+                None => {
+                    celebration.animate
+                        && now
+                            .saturating_duration_since(celebration.started_at)
+                            .as_secs_f32()
+                            < design::tokens::ITEM_SLOT_COMPLETION_DURATION
+                }
+            });
+        a_retirer
+    }
+}
+
 /// **La sélection multiple du bandeau** — ouverte par le « − » du carré de contrôle ou par
-/// `Ctrl+Shift+S`, refermée par le même geste.
+/// `Ctrl+Shift+D`, refermée par le même geste.
 ///
 /// Porté par l'hôte et prêté à [`show`], comme tout état de cette UI : un panneau peint et rend
 /// compte, il ne retient rien (§17.3 bis du plan). Ici la raison est concrète — le raccourci
@@ -907,6 +1019,22 @@ pub struct WatchlistAssets<'a> {
     pub shortcuts: &'a ShortcutBindings,
 }
 
+/// **Ce que l'hôte retient du bandeau entre deux frames** — prêté à [`show`], qui ne garde rien
+/// (§17.3 bis du plan).
+///
+/// Deux états qui n'ont pas la même raison de vivre chez l'hôte, et les deux sont bonnes :
+/// [`WatchlistSelection`] parce que son raccourci clavier est **global** et arrive par la boucle
+/// d'événements, jamais par le `Ui` ; [`WatchlistCompletions`] parce que le retrait qu'elle
+/// déclenche **ne doit pas dépendre du rendu** (voir sa doc).
+///
+/// Une structure plutôt que deux paramètres de plus, pour la même raison que [`WatchlistAssets`] :
+/// `show` touchait la limite d'arguments de clippy. Les regrouper n'est pas qu'une commodité —
+/// ils voyagent ensemble depuis l'hôte et se lisent ensemble au rendu d'une tuile.
+pub struct WatchlistPanelState<'a> {
+    pub selection: &'a mut WatchlistSelection,
+    pub completions: &'a WatchlistCompletions,
+}
+
 /// Renvoie `true` quand l'utilisateur vient de fermer le toast affiché (clic sur la carte ou sur
 /// sa croix, voir `toast_card`) — `main.rs::window_event` est seul à détenir un accès en écriture
 /// à l'`ArcSwap` du toast, donc seul à pouvoir agir sur ce signal.
@@ -917,12 +1045,12 @@ pub struct WatchlistAssets<'a> {
 /// **2026-09-08 (modale Options)** : `show` renvoie désormais [`WatchlistOutcome`] plutôt qu'un
 /// simple `bool` — le clic sur "Options" (`control_button_row`) doit remonter jusqu'à
 /// `render_content::paint_content`, qui seul peut déclencher l'ouverture d'une fenêtre OS dédiée
-/// (`main.rs`/`bin/overlay-ui-x11.rs`, nouveau cas `OverlayKind::Options`) ; `close_toast` garde
-/// exactement son rôle d'avant (fermeture du toast, voir plus bas). Le clic sur "+" remonte de la
-/// même façon depuis le 2026-09-13 ([`WatchlistOutcome::open_watchlist`]) : même mécanisme, pour
-/// ouvrir la même fenêtre sur un autre onglet.
+/// (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`, nouveau cas `OverlayKind::Options`) ;
+/// `close_toast` garde exactement son rôle d'avant (fermeture du toast, voir plus bas). Le clic sur
+/// "+" remonte de la même façon depuis le 2026-09-13 ([`WatchlistOutcome::open_watchlist`]) : même
+/// mécanisme, pour ouvrir la même fenêtre sur un autre onglet.
 ///
-/// `tracking_enabled` : état de la case « Activer le Suivi » (`panels::feature_switch`). Décochée,
+/// `tracking_enabled` : état de la case « Activer le suivi » (`panels::feature_switch`). Décochée,
 /// `entries` est vide (l'hôte n'en transmet aucune, voir `main.rs`) ET les boutons « + »/« − »
 /// disparaissent du bandeau — retour utilisateur du 2026-09-15, voir [`control_button_row`]. Les
 /// deux informations ne se déduisent pas l'une de l'autre : un bandeau vide Suivi ACTIF garde ses
@@ -932,10 +1060,14 @@ pub fn show(
     assets: WatchlistAssets<'_>,
     entries: &[WatchlistEntry],
     tracking_enabled: bool,
-    selection: &mut WatchlistSelection,
+    etat: WatchlistPanelState<'_>,
     toast: Option<&WatchlistToast>,
     now: std::time::Instant,
 ) -> WatchlistOutcome {
+    let WatchlistPanelState {
+        selection,
+        completions,
+    } = etat;
     let WatchlistAssets {
         icons,
         catalog,
@@ -971,9 +1103,14 @@ pub fn show(
     let mut bascule_tuile: Option<String> = None;
     // Idem pour le glisser-déposer : le rang pris et le rang visé, lus à la frame du dépôt.
     let mut deplacement: Option<(usize, usize)> = None;
+    // Idem pour le bouton de réinitialisation d'une tuile — l'entrée, pour l'hôte.
+    let mut reset_counter: Option<WatchlistEntry> = None;
     // Union des tuiles peintes — le bouton de suppression se centre dessus, pas sur la fenêtre
     // (voir `bulk_button_row`).
     let mut tiles_rect: Option<egui::Rect> = None;
+    // Les gerbes de confettis des tuiles qui célèbrent — peintes après la `ScrollArea` (voir plus
+    // bas) : `(centre de la tuile, secondes écoulées)`.
+    let mut gerbes: Vec<(egui::Pos2, f32)> = Vec::new();
     let mut bascule_mode = false;
 
     // **Les boutons ne défilent pas, les tuiles si.** Le carré de contrôle est peint DEHORS, dans
@@ -1013,6 +1150,7 @@ pub fn show(
                         ui.add_space(TILE_GAP);
                     }
                     let cle = crate::panels::suivi_tab::entry_key(entry);
+                    let celebration = completions.elapsed(&cle, now);
                     let tuile = entry_tile(
                         ui,
                         icons,
@@ -1023,12 +1161,20 @@ pub fn show(
                         TileState {
                             index: i,
                             selection: selection.is_open().then(|| selection.contains(&cle)),
+                            completion: celebration,
                         },
                     );
                     tiles_rect = Some(match tiles_rect {
                         Some(deja) => deja.union(tuile.response.rect),
                         None => tuile.response.rect,
                     });
+                    // **La gerbe se peint plus tard, hors de la zone défilante** : ses confettis
+                    // partent jusqu'à une tuile et demie autour du centre, et seraient tranchés
+                    // net par le clip de la bande. On ne retient ici que d'où elle part et depuis
+                    // quand.
+                    if let Some(elapsed) = celebration {
+                        gerbes.push((tuile.response.rect.center(), elapsed));
+                    }
                     // **Le clic coche, il ne supprime pas.** Hors sélection, le geste de la tuile
                     // est de se déplacer (voir `entry_tile`) ; elle ne gagne le clic que le temps
                     // du mode.
@@ -1037,6 +1183,9 @@ pub fn show(
                     }
                     if let Some(depuis) = tuile.reorder.dropped {
                         deplacement = Some((depuis, i));
+                    }
+                    if tuile.reset_requested {
+                        reset_counter = Some(entry.clone());
                     }
                 }
             });
@@ -1061,7 +1210,7 @@ pub fn show(
             let visible = tuiles.intersect(strip_rect);
             if bulk_button_row(ui, selection, entries.len(), visible) {
                 let restantes: Vec<WatchlistEntry> = if selection.picked.is_empty() {
-                    // Aucune coche : « Supprimer tout » — la règle du web, voir `bulk_label`.
+                    // Aucune coche : « Supprimer tout » — la règle du web, voir `bulk_select::bulk_label`.
                     Vec::new()
                 } else {
                     entries
@@ -1094,6 +1243,12 @@ pub fn show(
         });
     }
 
+    // **Les gerbes de confettis des tuiles qui célèbrent**, une fois la bande peinte et hors de sa
+    // zone défilante — voir `completion_burst`.
+    for (centre, elapsed) in gerbes {
+        completion_burst(ui, centre, elapsed);
+    }
+
     ui.add_space(6.0);
 
     let (close_toast, whisper_to) =
@@ -1120,6 +1275,7 @@ pub fn show(
         open_options,
         open_web_app,
         edit,
+        reset_counter,
     }
 }
 
@@ -1151,7 +1307,7 @@ fn bulk_button_row(
     );
     ui.put(
         rect,
-        design::button(crate::panels::suivi_tab::bulk_label(
+        design::button(crate::panels::bulk_select::bulk_label(
             selection.picked.len(),
             total,
         ))
@@ -1184,6 +1340,12 @@ pub struct WatchlistOutcome {
     /// **Ce que le bandeau demande d'écrire**, à la frame où le geste est fait — `None` le reste
     /// du temps. Voir [`WatchlistEdit`].
     pub edit: Option<WatchlistEdit>,
+    /// **L'entrée dont le bouton de réinitialisation vient d'être cliqué** (2026-09-18) — `None`
+    /// le reste du temps. Le bandeau ne remet rien lui-même : l'hôte ouvre la confirmation
+    /// (`OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)`) et, sur « Oui », envoie
+    /// `EngineCommand::ResetWatchlistCounter`. L'entrée entière plutôt qu'une clé : la question
+    /// posée nomme l'objet, et le moteur veut son nom et son genre.
+    pub reset_counter: Option<WatchlistEntry>,
 }
 
 /// Une écriture demandée par le bandeau, et le geste qui l'a produite.
@@ -1362,6 +1524,7 @@ fn toast_card(
     }
     let title = match &toast.reason {
         WatchlistToastReason::Countdown => "COMPTEUR ÉPUISÉ !",
+        WatchlistToastReason::Goal => "OBJECTIF ATTEINT !",
         WatchlistToastReason::Loot { .. } | WatchlistToastReason::Chat { .. } => "OBJET OBTENU !",
     };
     let name_text = match &toast.reason {
@@ -1466,14 +1629,15 @@ fn toast_card(
             .as_ref()
             .and_then(|icon_ref| remote_icon_textures.resolve(ui.ctx(), remote_icons, icon_ref));
         let icon_tint = egui::Color32::from_white_alpha((255.0 * card_alpha) as u8);
-        match &remote_texture {
-            Some(texture) => egui::Image::new(texture)
-                .tint(icon_tint)
-                .paint_at(ui, icon_rect),
-            None => egui::Image::new(icons.unknown_entity_texture())
-                .tint(icon_tint)
-                .paint_at(ui, icon_rect),
-        }
+        // Inscrite dans le carré, à son rapport, comme partout ailleurs (`design::fit`) : une
+        // bannière de `wakassets/monsterIllustrations` y était étirée jusqu'au 2026-09-17.
+        let texture = remote_texture
+            .as_ref()
+            .unwrap_or(icons.unknown_entity_texture());
+        let peint = design::contain_rect(icon_rect, texture.size_vec2());
+        egui::Image::new(texture)
+            .tint(icon_tint)
+            .paint_at(ui, peint);
         icon_rect.right() + CARD_ICON_GAP
     };
     let text_top = card_rect.center().y - text_height / 2.0;
@@ -2027,6 +2191,8 @@ fn control_button(
 struct Tile {
     response: egui::Response,
     reorder: crate::panels::tile_reorder::Gesture,
+    /// Le bouton de réinitialisation du compteur vient d'être cliqué — voir [`reset_button`].
+    reset_requested: bool,
 }
 
 /// Ce qu'une tuile sait d'elle-même en plus de son entrée — les deux vont ensemble (ils décident du
@@ -2037,6 +2203,9 @@ struct TileState {
     index: usize,
     /// `None` hors du mode sélection, `Some(cochée)` dedans.
     selection: Option<bool>,
+    /// Depuis combien de secondes cette entrée célèbre son aboutissement — `None` si elle ne
+    /// célèbre pas (voir [`WatchlistCompletions::elapsed`]).
+    completion: Option<f32>,
 }
 
 fn entry_tile(
@@ -2048,7 +2217,11 @@ fn entry_tile(
     entry: &WatchlistEntry,
     etat: TileState,
 ) -> Tile {
-    let TileState { index, selection } = etat;
+    let TileState {
+        index,
+        selection,
+        completion,
+    } = etat;
     // Tout ce qui suit était peint à la main ici jusqu'au 2026-09-11 — fond, bordure de rareté,
     // icône, compteur, et surtout leur ORDRE. Il vit maintenant dans `design::item_slot`, qui
     // verrouille cet ordre par un test : la bordure sous l'icône pour un objet, le trait par-dessus
@@ -2062,8 +2235,8 @@ fn entry_tile(
         .as_ref()
         .and_then(|icon_ref| remote_icon_textures.resolve(ui.ctx(), remote_icons, icon_ref));
     let icon_id = match &remote_texture {
-        Some(texture) => texture.id(),
-        None => icons.unknown_entity_texture().id(),
+        Some(texture) => egui::load::SizedTexture::from_handle(texture),
+        None => egui::load::SizedTexture::from_handle(icons.unknown_entity_texture()),
     };
 
     let frame = match entry.kind {
@@ -2081,10 +2254,16 @@ fn entry_tile(
         // « Suivi » (`suivi_tab::tracked_tile`) — les deux écrans cochent les mêmes entrées pour
         // la même action, ils ne peuvent pas se le dire avec deux couleurs.
         .selection_tone(design::SelectionTone::Danger)
+        // **La célébration d'un aboutissement** (2026-09-17) — la couronne, l'éclat et la
+        // dissolution appartiennent au composant, qui les pose sur son propre anneau. Le panneau
+        // ne lui donne que le temps écoulé ; la gerbe de confettis, qui déborde largement du
+        // carré, reste à sa charge (voir `completion_burst`).
+        .completion(completion)
         .log_name("suivi.tuile");
     if let Some(count) = slot_count(entry) {
         slot = slot.count(count);
     }
+    slot = slot.glyph(slot_glyph(entry.mode));
     if let Some(cochee) = selection {
         slot = slot.selection(Some(cochee));
     }
@@ -2132,26 +2311,354 @@ fn entry_tile(
     // conventions du composant ». La barre étant passée AU-DESSUS (voir `strip_scroll_area`), il
     // n'y a plus rien à éviter dessous. Tue pendant un déplacement : un nom affiché sous le
     // pointeur masquerait le liseré de la tuile visée, qu'on essaie justement de lire.
-    if !reorder.in_flight() {
+    // **Le bouton de réinitialisation, au centre, révélé au survol** (2026-09-18) — voir
+    // [`reset_button`] pour ce qu'il est et quand il ne se montre pas.
+    let reset = (selection.is_none() && completion.is_none() && !reorder.in_flight())
+        .then(|| reset_button(ui, &response, rect, index))
+        .flatten();
+    let reset_requested = reset.as_ref().is_some_and(|bouton| bouton.clicked());
+    // **Le nom ne s'ouvre que si le bouton n'est pas visé** : deux infobulles à la fois se
+    // recouvriraient, et c'est « Réinitialiser » qu'on lit alors. Tue pendant un déplacement : un
+    // nom affiché sous le pointeur masquerait le liseré de la tuile visée, qu'on essaie justement
+    // de lire.
+    if !reorder.in_flight()
+        && !reset
+            .as_ref()
+            .is_some_and(|bouton| bouton.contains_pointer())
+    {
         design::tooltip(&response)
             .side(design::TooltipSide::Below)
-            .text(&entry.name);
+            .text(tile_tooltip(entry));
     }
-    Tile { response, reorder }
+    Tile {
+        response,
+        reorder,
+        reset_requested,
+    }
+}
+
+/// **Le bouton de réinitialisation d'une tuile** — la flèche `Undo` sur son disque, au centre de
+/// l'emplacement, révélée au survol : le même bouton, au même endroit, que le crayon de
+/// modification d'une carte de héros (`panels::tile_button`, demande du 2026-09-18 « avec le même
+/// design que l'icône bouton "modifier" »). `None` quand la tuile n'est pas survolée.
+///
+/// Ce qu'il fait, après confirmation par l'hôte : le compteur repart de ce que son mode impose —
+/// zéro en incrémental et en objectif, la cible en décompte (voir
+/// `WatchlistState::reset_counter`). La tuile, elle, ne dit rien de plus : le disque recouvre le
+/// centre de l'icône et laisse ses coins, où vivent le glyphe de mode et le compteur qu'on va
+/// remettre.
+///
+/// **Sans voile sur la tuile**, contrairement à la carte de héros : le voile y sert à détacher le
+/// crayon d'un buste clair ; ici l'icône est petite et le disque, presque opaque, se détache seul
+/// — et un voile grisait le compteur et le liseré de rareté, c'est-à-dire ce qu'on regarde.
+///
+/// Trois moments où il ne se montre pas, décidés par l'appelant :
+/// - en **mode sélection**, où la tuile est une case à cocher et n'a qu'un geste ;
+/// - pendant une **célébration**, où le compteur vient d'aboutir et la tuile s'en va ;
+/// - pendant un **déplacement**, où la tuile sous le pointeur est une destination.
+///
+/// Le disque prend le clic, la tuile garde le glissement (hit-test d'egui : le bouton, pur clic,
+/// est au-dessus ; la tuile, qui sent le glissement, reste dessous) — presser sur le disque et
+/// tirer déplace donc bien la tuile, comme sur la carte de héros. Le curseur, lui, est la main du
+/// bouton et non la croix de la tuile : posé après, il gagne.
+fn reset_button(
+    ui: &mut egui::Ui,
+    tuile: &egui::Response,
+    rect: egui::Rect,
+    index: usize,
+) -> Option<egui::Response> {
+    if !tuile.contains_pointer() {
+        return None;
+    }
+    let bouton = crate::panels::tile_button::disc_button(
+        ui,
+        rect.center(),
+        DsIcon::Undo,
+        egui::Id::new(("suivi.reinitialiser", index)),
+    );
+    // En dessous, comme le nom de la tuile — c'est la règle du bandeau (voir `entry_tile`).
+    design::tooltip(&bouton)
+        .anchor(rect)
+        .side(design::TooltipSide::Below)
+        .text("Réinitialiser le compteur");
+    Some(bouton)
+}
+
+/// Texte de l'infobulle d'une tuile : le nom, puis **le mode après un point médian** pour un
+/// suivi à cible — « Bottes Lantha · Objectif ». Forme choisie par l'utilisateur le 2026-09-17,
+/// avec le glyphe (voir [`slot_glyph`]) : la fraction seule ne dit pas dans quel sens elle se lit.
+/// L'incrémental garde le nom nu, il n'y a rien à lever.
+pub(crate) fn tile_tooltip(entry: &WatchlistEntry) -> String {
+    match entry.mode {
+        WatchlistMode::Down => format!("{} · Décompte", entry.name),
+        WatchlistMode::Goal => format!("{} · Objectif", entry.name),
+        WatchlistMode::Up => entry.name.clone(),
+    }
+}
+
+/// Le glyphe de mode d'une tuile — voir `design::SlotGlyph` : cible en décompte, drapeau en
+/// objectif, rien en incrémental. Partagé avec l'onglet « Suivi » de la fenêtre Options, qui
+/// marque les mêmes entrées de la même façon.
+pub(crate) fn slot_glyph(mode: WatchlistMode) -> Option<design::SlotGlyph> {
+    match mode {
+        WatchlistMode::Down => Some(design::SlotGlyph::Countdown),
+        WatchlistMode::Goal => Some(design::SlotGlyph::Goal),
+        WatchlistMode::Up => None,
+    }
 }
 
 /// Traduit une entrée de suivi en compteur du design system.
 ///
-/// Les deux modes du panneau se lisent directement : `Up` compte vers le haut sans cible, `Down`
-/// compte vers une cible et affiche la fraction. Ce qui est *présentation* — l'ancrage de la
+/// Les trois modes du panneau se lisent directement : `Up` compte vers le haut sans cible, `Down`
+/// et `Goal` comptent vers une cible et affichent la fraction — « restant/cible » pour l'un,
+/// « fait/cible » pour l'autre, le même `count` lu dans un sens opposé, et c'est la seule
+/// différence à l'écran. Ce qui est *présentation* — l'ancrage de la
 /// fraction, la couleur du nombre courant, le cerne — a migré dans `design::item_slot` le
 /// 2026-09-11 ; ce qui reste ici est la lecture du mode, qui est du métier.
+/// **La gerbe de confettis d'un suivi qui vient d'aboutir** — 34 pièces qui partent du centre de
+/// la tuile et retombent (2026-09-17).
+///
+/// **Ici et pas dans `design::item_slot`** : un emplacement ne peint pas hors de lui-même, et
+/// cette gerbe porte jusqu'à une tuile et demie autour de son centre. Le composant, lui, garde ce
+/// qui tient dans son carré — la couronne, l'éclat, la dissolution.
+///
+/// **Peinte sur une couche de premier plan**, pas dans le flux : les tuiles vivent dans une
+/// `ScrollArea` dont le clip tranche tout ce qui dépasse, et une gerbe tranchée au ras de la bande
+/// ne ressemble à rien. La couche prend le clip de la FENÊTRE, qui est déjà agrandie le temps
+/// qu'un toast s'affiche (`main.rs::watchlist_target_height`) — et un toast s'affiche toujours en
+/// même temps qu'une célébration, les deux naissent de la même alerte.
+///
+/// **La dispersion est déterministe**, tirée d'un hachage de l'index de la pièce comme les
+/// particules du composant : une même seconde de célébration rend deux fois la même image, ce
+/// qu'un test de capture exige. C'est la différence avec `build_confetti`, qui sème son générateur
+/// sur l'horloge — le toast, lui, n'est jamais capturé à un instant précis de sa chute.
+fn completion_burst(ui: &egui::Ui, centre: egui::Pos2, elapsed: f32) {
+    let depart = design::tokens::ITEM_SLOT_COMPLETION_SEAL_END - BURST_LEAD;
+    if elapsed < depart {
+        return;
+    }
+    let t = elapsed - depart;
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        ui.id().with("suivi-gerbe"),
+    ));
+    for i in 0..BURST_PIECES {
+        let (angle_brut, vitesse_brute, retard) = burst_seed(i);
+        let vie = BURST_LIFE_MIN + (BURST_LIFE_MAX - BURST_LIFE_MIN) * vitesse_brute;
+        let age = t - retard * BURST_STAGGER;
+        if age <= 0.0 || age >= vie {
+            continue;
+        }
+        // Vers le haut, en éventail : une gerbe qui part aussi vers le bas se confondrait avec la
+        // dissolution de la tuile, qui monte au contraire.
+        let angle =
+            -std::f32::consts::FRAC_PI_2 + (angle_brut - 0.5) * BURST_SPREAD * std::f32::consts::PI;
+        let vitesse = BURST_SPEED_MIN + (BURST_SPEED_MAX - BURST_SPEED_MIN) * vitesse_brute;
+        let position = egui::pos2(
+            centre.x + angle.cos() * vitesse * age,
+            centre.y + angle.sin() * vitesse * age + 0.5 * BURST_GRAVITY * age * age,
+        );
+        let fondu = 1.0 - age / vie;
+        let couleur = CONFETTI_COLORS[i % CONFETTI_COLORS.len()].gamma_multiply(fondu);
+        // Le battement d'un rectangle qui tourne sur lui-même : la hauteur se pince au lieu d'une
+        // vraie rotation, qui coûterait une `Shape::Path` par pièce.
+        let battement = (age * BURST_SPIN + angle_brut * std::f32::consts::TAU)
+            .cos()
+            .abs();
+        painter.rect_filled(
+            egui::Rect::from_center_size(
+                position,
+                egui::vec2(
+                    BURST_PIECE_SIZE.x,
+                    BURST_PIECE_SIZE.y * (0.35 + 0.65 * battement),
+                ),
+            ),
+            0.0,
+            couleur,
+        );
+    }
+}
+
+/// Angle, vitesse et retard d'une pièce de la gerbe, tirés de son seul index — voir
+/// [`completion_burst`] sur le pourquoi du déterminisme.
+fn burst_seed(i: usize) -> (f32, f32, f32) {
+    let hash = |graine: u64| {
+        let mut x = graine.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        x ^= x >> 29;
+        x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        x ^= x >> 32;
+        (x >> 40) as f32 / (1u32 << 24) as f32
+    };
+    let i = i as u64 + 1;
+    (hash(i * 5), hash(i * 5 + 1), hash(i * 5 + 2))
+}
+
+/// Ce dont la gerbe DEVANCE la fin de la condensation — elle part avec l'éclat, pas après lui :
+/// c'est le même instant qui scelle la rareté et fait éclater la tuile.
+const BURST_LEAD: f32 = 0.20;
+/// Nombre de pièces — un peu plus que le toast (`CONFETTI_PIECE_COUNT`), qui les étale sur toute
+/// sa largeur là où celles-ci partent d'un point.
+const BURST_PIECES: usize = 34;
+/// Ouverture de l'éventail, en demi-tours : 0,9 π de part et d'autre de la verticale.
+const BURST_SPREAD: f32 = 0.9;
+/// Vitesses de départ, en px/s.
+const BURST_SPEED_MIN: f32 = 170.0;
+/// Voir [`BURST_SPEED_MIN`].
+const BURST_SPEED_MAX: f32 = 310.0;
+/// Chute, en px/s² — assez forte pour que la gerbe retombe dans la seconde plutôt que de sortir de
+/// la fenêtre par le haut.
+const BURST_GRAVITY: f32 = 620.0;
+/// Durées de vie d'une pièce, en secondes.
+const BURST_LIFE_MIN: f32 = 0.85;
+/// Voir [`BURST_LIFE_MIN`].
+const BURST_LIFE_MAX: f32 = 1.35;
+/// Étalement des départs, en secondes — une gerbe dont tout part à la même image se lit comme un
+/// seul objet qui explose, pas comme des confettis.
+const BURST_STAGGER: f32 = 0.14;
+/// Vitesse du battement d'une pièce, en radians par seconde.
+const BURST_SPIN: f32 = 9.0;
+/// Taille d'une pièce — celle du toast (`CONFETTI_PIECE_SIZE` y vaut 8 px de côté), en un peu plus
+/// étroit : une gerbe est plus dense qu'une chute, des pièces carrées s'y empâtent.
+const BURST_PIECE_SIZE: egui::Vec2 = egui::vec2(5.0, 9.0);
+
 fn slot_count(entry: &WatchlistEntry) -> Option<design::SlotCount> {
     Some(match entry.mode {
-        WatchlistMode::Down => design::SlotCount::Fraction {
+        WatchlistMode::Down | WatchlistMode::Goal => design::SlotCount::Fraction {
             current: entry.count,
             target: entry.countdown_target,
         },
         WatchlistMode::Up => design::SlotCount::Simple(entry.count),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entree(mode: WatchlistMode) -> WatchlistEntry {
+        WatchlistEntry {
+            name: "Bottes Lantha".to_string(),
+            kind: WatchlistKind::Item,
+            catalog_id: None,
+            mode,
+            count: 2,
+            countdown_target: 5,
+        }
+    }
+
+    #[test]
+    fn l_infobulle_dit_le_mode_apres_le_nom_pour_un_suivi_a_cible() {
+        assert_eq!(
+            tile_tooltip(&entree(WatchlistMode::Goal)),
+            "Bottes Lantha · Objectif"
+        );
+        assert_eq!(
+            tile_tooltip(&entree(WatchlistMode::Down)),
+            "Bottes Lantha · Décompte"
+        );
+        assert_eq!(tile_tooltip(&entree(WatchlistMode::Up)), "Bottes Lantha");
+    }
+
+    #[test]
+    fn le_glyphe_suit_le_mode_et_manque_a_l_incremental() {
+        assert_eq!(
+            slot_glyph(WatchlistMode::Down),
+            Some(design::SlotGlyph::Countdown)
+        );
+        assert_eq!(
+            slot_glyph(WatchlistMode::Goal),
+            Some(design::SlotGlyph::Goal)
+        );
+        assert_eq!(slot_glyph(WatchlistMode::Up), None);
+    }
+
+    /// Instant de référence des tests ci-dessous — `Instant` n'a pas de constructeur public à
+    /// partir d'une date, on part donc de maintenant et on avance.
+    fn t0() -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    fn apres(origine: std::time::Instant, secondes: f32) -> std::time::Instant {
+        origine + std::time::Duration::from_secs_f32(secondes)
+    }
+
+    #[test]
+    fn une_completion_celebre_puis_rend_sa_cle_a_retirer() {
+        let t0 = t0();
+        let mut completions = WatchlistCompletions::default();
+        let duree = design::tokens::ITEM_SLOT_COMPLETION_DURATION;
+        completions.push("Larme::42".to_string(), t0, duree, true);
+
+        assert_eq!(completions.elapsed("Larme::42", t0), Some(0.0));
+        assert!(completions.is_animating(apres(t0, duree / 2.0)));
+        assert!(
+            completions.drain_due(apres(t0, duree / 2.0)).is_empty(),
+            "rien ne part avant la fin de la célébration",
+        );
+
+        let dues = completions.drain_due(apres(t0, duree + 0.01));
+        assert_eq!(dues, vec!["Larme::42".to_string()], "la clé part au terme");
+        assert!(
+            completions.drain_due(apres(t0, duree + 1.0)).is_empty(),
+            "et elle ne part qu'une fois — un second envoi réécrirait la clé du compte pour rien",
+        );
+    }
+
+    #[test]
+    fn sans_animation_le_retrait_est_immediat_et_aucune_tuile_ne_bouge() {
+        // Case « Activer l'animation de complétion » décochée : `removal_delay_seconds` rend 0.
+        // L'entrée doit partir au tick suivant, et la tuile ne doit rien jouer entre-temps.
+        let t0 = t0();
+        let mut completions = WatchlistCompletions::default();
+        completions.push("Bois::".to_string(), t0, 0.0, true);
+
+        assert_eq!(
+            completions.elapsed("Bois::", t0),
+            None,
+            "aucune célébration à peindre",
+        );
+        assert!(!completions.is_animating(t0));
+        assert_eq!(completions.drain_due(t0), vec!["Bois::".to_string()]);
+    }
+
+    #[test]
+    fn sans_retrait_la_tuile_celebre_et_reste() {
+        // Une célébration sans retrait : la célébration se joue, mais aucune clé ne part — et la
+        // liste ne grossit pas indéfiniment, la célébration finie est oubliée. Depuis le
+        // 2026-09-18, les réglages ne produisent plus ce cas (`CompletionSettings::animates`
+        // exige le retrait) ; la primitive, elle, reste indépendante des cases et le garantit.
+        let t0 = t0();
+        let mut completions = WatchlistCompletions::default();
+        let duree = design::tokens::ITEM_SLOT_COMPLETION_DURATION;
+        completions.push("Croc::7".to_string(), t0, duree, false);
+
+        assert!(completions.elapsed("Croc::7", apres(t0, 1.0)).is_some());
+        assert!(completions.drain_due(apres(t0, 1.0)).is_empty());
+
+        assert!(completions.drain_due(apres(t0, duree + 0.01)).is_empty());
+        assert!(
+            completions.en_cours.is_empty(),
+            "une célébration sans retrait doit être oubliée une fois jouée, sinon la liste \
+             grossit à chaque objet suivi jusqu'à la fin de la session",
+        );
+    }
+
+    #[test]
+    fn une_meme_entree_ne_celebre_pas_deux_fois_en_parallele() {
+        // Cas réel possible : l'entrée est remise à sa cible depuis le site pendant qu'elle
+        // célèbre, et franchit son seuil une seconde fois. La seconde remplace la première —
+        // deux animations superposées sur une tuile ne veulent rien dire.
+        let t0 = t0();
+        let mut completions = WatchlistCompletions::default();
+        let duree = design::tokens::ITEM_SLOT_COMPLETION_DURATION;
+        completions.push("Larme::42".to_string(), t0, duree, true);
+        completions.push("Larme::42".to_string(), apres(t0, 1.0), duree, true);
+
+        assert_eq!(completions.en_cours.len(), 1);
+        assert_eq!(
+            completions.elapsed("Larme::42", apres(t0, 1.0)),
+            Some(0.0),
+            "l'animation repart de la seconde complétion",
+        );
+    }
 }

@@ -20,10 +20,13 @@
 //!    SON ; l'emplacement de rareté dit ce qu'est l'OBJET. Cliquer bascule le son et ne touche que
 //!    le premier.
 //! 2. **Les dix objets par défaut n'ont pas de croix de retrait** (`SoundItemEntry::is_default`),
-//!    parce que le web refuse structurellement de les supprimer. Leur son, lui, se coupe.
-//! 3. **Le son et le toast sont deux canaux**, réglés séparément : « Tester le son » d'un côté,
-//!    « Fermeture de l'alerte » de l'autre. Les empiler laissait entendre que la durée
-//!    s'appliquait au son.
+//!    parce que le web refuse structurellement de les supprimer. Leur son, lui, se coupe. Depuis le
+//!    2026-09-16 ils n'ont pas non plus de **case à cocher** : la sélection multiple ne mène qu'au
+//!    retrait, cocher ce qui ne se retire pas promettrait une action qui n'existe pas.
+//! 3. **Le son et le toast sont deux canaux**, réglés séparément — règle tenue ailleurs depuis le
+//!    2026-09-15 : les deux blocs sont partis dans la section « Alertes » de l'onglet
+//!    « Paramètres » ([`crate::panels::notifications`]), où ils rejoignent ceux du Suivi, du Chat
+//!    et du Combat. Cet onglet ne garde que la liste des objets.
 //! 4. **Le retrait ne demande AUCUNE confirmation** — décision du 2026-09-13, qui revient sur la
 //!    boîte centrée que la maquette avait posée. La raison : cette fenêtre est déjà
 //!    transactionnelle, « Annuler » rattrape tout jusqu'à la validation, et « Valider » est une
@@ -43,12 +46,22 @@
 //!   que le nom, plus ce que le clic fera ;
 //! - **la croix permanente**, qui n'apparaît plus qu'au survol, avec un voile, et seulement sur un
 //!   objet retirable ;
-//! - **le pictogramme du son ACTIF** : le coin haut-gauche ne montre plus que le haut-parleur
-//!   barré. Une tuile sans marque est une tuile qui sonnera — c'est lui qui porte seul l'état
-//!   depuis que la bordure est partie.
+//! - **le pictogramme du son ACTIF** : la tuile ne montre plus que le haut-parleur barré — en
+//!   bas à droite depuis le 2026-09-16, le haut gauche étant le coin de la case du mode sélection.
+//!   Une tuile sans marque est une tuile qui sonnera — c'est lui qui porte seul l'état depuis que
+//!   la bordure est partie.
 //!
 //! Rien n'est ajouté au passage : pas de chiffre, pas de cible, pas de compteur. L'emplacement du
 //! Suivi sait en afficher un ([`design::SlotCount`]), une alerte n'en a aucun.
+//!
+//! ## La suppression multiple, 2026-09-16
+//!
+//! Demande utilisateur : « ajouter le système de la suppression multiple, comme dans l'onglet
+//! Suivi ». La mécanique — bouton corbeille qui ouvre le mode, bouton rouge dont le libellé dit ce
+//! qu'il retire, coches oubliées en quittant — est **partagée**, elle vit dans
+//! [`crate::panels::bulk_select`] ; cet onglet n'ajoute que ce qui lui est propre : les objets par
+//! défaut, qui ne se cochent pas (règle 2 ci-dessus), et donc un bouton qui disparaît quand la
+//! liste n'a plus qu'eux.
 //!
 //! ## Transactionnel, comme le reste de la fenêtre
 //!
@@ -60,8 +73,8 @@
 use egui::{Color32, Rect, RichText, Vec2};
 use overlay_engine::{AlertProfile, CatalogIndex, IconRef, WakfuItemCategory, WakfuRarity};
 
-use crate::design::{self, DsIcon, InputSize, SlotFrame};
-use crate::panels::{feature_switch, sound_row};
+use crate::design::{self, DsIcon, SlotFrame};
+use crate::panels::{bulk_select, feature_switch};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -118,7 +131,7 @@ const MUTE_BADGE: f32 = 20.0;
 /// demande était « à deux pixels des bordures noires », c'est-à-dire à l'intérieur, pas à
 /// l'extérieur : « elle doit vraiment être présente à l'intérieur du bord, pour qu'il y ait un
 /// tout petit espacement entre la bordure intérieure ». Le Suivi garde 5 px de son côté : il n'y
-/// a que la croix, et rien n'y est peint dans le coin opposé.
+/// a que la croix, et rien n'y est peint dans un autre coin.
 const TILE_BADGE_INSET: f32 = 8.0;
 
 /// Voile d'une tuile SURVOLÉE, sous sa croix — même teinte qu'au Suivi
@@ -137,14 +150,6 @@ const MUTE_SHADOW: Color32 = Color32::from_black_alpha(0xB0);
 /// Rouge de la croix sous le pointeur — `INFO_ALERT`, le seul rouge mesuré du jeu.
 const REMOVE_HOVER: Color32 = design::tokens::INFO_ALERT;
 
-/// Fond d'une ligne de réglage mise en valeur — l'idiome des lignes d'aptitude du jeu
-/// (`interface-personnage-aptitudes.png`, `#26282b` sur un fond de section plus sombre).
-const SETTING_ROW_FILL: Color32 = Color32::from_rgb(0x26, 0x28, 0x2B);
-const SETTING_ROW_RADIUS: u8 = 4;
-/// Hauteur d'une ligne de réglage — les lignes d'aptitude cadencent à 32, portée à 40 : la ligne
-/// porte une case à cocher de 20 px et un champ de 25, qu'un fond de 32 serrerait.
-const SETTING_ROW_HEIGHT: f32 = 40.0;
-
 const BODY_FONT_SIZE: f32 = 15.0;
 /// Aération autour d'un titre de section — 18 px, porté de 12 après un second retour utilisateur.
 const SECTION_GAP: f32 = 18.0;
@@ -155,18 +160,34 @@ const SECTION_GAP: f32 = 18.0;
 /// tuile ; deux corrections du 2026-09-13 :
 /// - **elle était incomplète** — un ramassage joue un son ET affiche une carte d'alerte à
 ///   l'écran (`panels::watchlist::toast_card`, confettis compris) ;
-/// - **la phrase sur le clic a déménagé** sous « Objets suivis » ([`LIST_DESC`]), où se trouvent
+/// - **la phrase sur le clic a déménagé** sous « Objets surveillés » ([`LIST_DESC`]), où se trouvent
 ///   justement les tuiles qu'elle décrit.
 const DESC: &str = "Au ramassage d'un des objets ci-dessous, un son est joué et une carte \
                     d'alerte s'affiche par-dessus le jeu.";
 
-/// La phrase sous le titre « Objets suivis » — le geste, à côté des tuiles qu'il concerne.
+/// La phrase sous le titre « Objets surveillés » — le geste, à côté des tuiles qu'il concerne.
 const LIST_DESC: &str = "Cliquez une tuile pour couper ou rétablir son alerte.";
+
+/// La même phrase **en mode sélection multiple**, où le clic ne veut plus dire la même chose : il
+/// coche. La laisser telle quelle décrirait un geste que le mode a justement remplacé — un même
+/// appui ne peut pas vouloir dire deux choses (règle reprise du Suivi).
+const LIST_DESC_SELECTION: &str = "Cliquez une tuile pour la cocher. Les objets par défaut ne \
+                                   peuvent pas être retirés.";
 
 /// Le libellé de la légende, à droite du pictogramme.
 const LEGEND_LABEL: &str = "silencieux";
 /// Écart entre le pictogramme de la légende et son libellé.
 const LEGEND_GAP: f32 = 8.0;
+/// Hauteur de la bande de légende — **celle du pictogramme, exactement** : c'est le bas du glyphe
+/// qui doit tomber à [`LEGEND_MARGIN`] du bord, pas celui d'une ligne de texte plus haute que lui.
+/// Le libellé, plus bas que 20 px, se centre sur cette bande.
+const LEGEND_HEIGHT: f32 = MUTE_BADGE;
+/// Marge entre la légende et les bords du panneau — **la même en bas qu'à droite, et c'est celle
+/// des côtés** ([`design::tokens::PANEL_PAD_CONTROL_X`], 19 px). Demande du 2026-09-16, en deux
+/// temps : d'abord « fixe à 5 px du bas », puis « le même écart en bas que latéralement, alignée à
+/// droite, et le même écart entre la fin du mot et la bordure ». Elle sépare aussi la bande de la
+/// grille au-dessus (voir [`design::PanelZones::footer`]).
+const LEGEND_MARGIN: f32 = design::tokens::PANEL_PAD_CONTROL_X;
 
 // -------------------------------------------------------------------------------------------
 // État et contrat
@@ -180,14 +201,30 @@ const LEGEND_GAP: f32 = 8.0;
 pub struct AlertsTabState {
     /// Saisie du champ d'ajout.
     pub search: String,
-    /// Durée de fermeture **telle que tapée** — une chaîne, pas un nombre.
-    ///
-    /// **Bornée à la validation, jamais à la frappe.** Une version antérieure de la maquette la
-    /// bornait à chaque frame, ce qui rendait le champ inutilisable : taper `0.75` donnait `0` →
-    /// borné à `0.5` sous les doigts, puis `0.5.` → non parsable → `3.5`. Toute saisie décimale
-    /// passe par un état transitoire non parsable ; l'écraser avant qu'elle soit finie interdit
-    /// d'écrire la valeur voulue.
+    /// Durée de fermeture **telle que tapée** — une chaîne, pas un nombre (voir
+    /// `panels::notifications::AutoClose::input`). **Le champ qu'elle alimente est peint dans
+    /// l'onglet « Paramètres »** depuis le 2026-09-15 ; elle reste ici, avec le brouillon dont
+    /// elle règle la carte.
     pub duration_input: String,
+    /// Mode « sélection multiple » ouvert — voir [`crate::panels::bulk_select`], partagé avec les
+    /// onglets « Suivi » et « Chat » (2026-09-16).
+    pub select_mode: bool,
+    /// Clés des tuiles cochées — voir [`entry_key`]. **Jamais un objet par défaut** : ceux-là ne se
+    /// retirent pas, ils n'ont donc pas de case à cocher.
+    pub selected: Vec<String>,
+}
+
+/// Identifie un objet de la liste, homonymes d'id différents compris — la clé de coche du mode
+/// sélection, jumelle de `panels::suivi_tab::entry_key`.
+///
+/// Le couple (nom, `catalog_id`) est ce qu'`AlertProfile::remove` prend lui-même : cocher et
+/// retirer désignent ainsi un objet de la même façon.
+pub(crate) fn entry_key(name: &str, catalog_id: Option<i64>) -> String {
+    format!(
+        "{}::{}",
+        name,
+        catalog_id.map(|id| id.to_string()).unwrap_or_default()
+    )
 }
 
 /// Ce que l'onglet a besoin de recevoir pour peindre de vraies données.
@@ -206,7 +243,7 @@ pub struct AlertsTabContext<'a> {
     /// Le rectangle de la FENÊTRE entière, pas du panneau : le voile d'une confirmation doit
     /// couvrir la bannière, les onglets et le pied de page — c'est lui qui dit qu'ils sont
     /// inertes.
-    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer les alertes » peinte tout
+    /// **La fonctionnalité est-elle active ?** — brouillon de la case « Activer la surveillance du drop » peinte tout
     /// en haut de l'onglet (voir `panels::feature_switch`), pas un réglage que cet onglet
     /// applique : c'est « Valider » qui l'emporte, comme le reste de la fenêtre. Décochée, tout le
     /// contenu sous la case est grisé et inerte.
@@ -232,25 +269,23 @@ pub enum AlertsAvailability {
     NoAccount,
 }
 
-/// Ce que l'utilisateur vient de demander et que l'onglet ne sait pas faire lui-même.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum AlertsTabAction {
-    #[default]
-    None,
-    /// Jouer le son d'alerte — l'appelant seul a le périphérique audio
-    /// (`alert_sound::play_loot_alert`).
-    TestSound,
-}
-
 /// Peint l'onglet dans le panneau de section de la fenêtre Options.
+///
+/// **Ne renvoie plus rien** : « Tester le son » était la seule intention que cet écran produisait,
+/// et il est parti dans l'onglet « Paramètres » avec le reste des réglages de notification
+/// (2026-09-15, voir `panels::notifications`).
 pub fn show(
     ui: &mut egui::Ui,
     panel: &design::PanelZones,
     state: &mut AlertsTabState,
     ctx: &mut AlertsTabContext<'_>,
-) -> AlertsTabAction {
-    let mut action = AlertsTabAction::None;
+) {
     let width = panel.inner.width();
+    // **La légende est fixe, en pied de panneau** (2026-09-16) : la bande lui est retirée AVANT
+    // tout le reste, pour que ni le rouage de chargement ni la grille qui défile ne passent
+    // dessous. Tout ce qui suit se cale sur les zones réduites.
+    let (panel, legend) = panel.footer(LEGEND_HEIGHT, LEGEND_MARGIN);
+    let panel = &panel;
 
     ui.add(design::heading("Alerte"));
     paragraph(ui, DESC);
@@ -260,36 +295,63 @@ pub fn show(
     feature_switch::show(
         ui,
         ctx.enabled,
-        "Activer les alertes",
+        "Activer la surveillance du drop",
         "Décoché, le ramassage d'un objet ne joue plus de son et n'affiche plus de carte \
          par-dessus le jeu. Votre liste d'objets est conservée.",
         "alertes.activer",
     );
 
-    // **Deux canaux, deux blocs** : le SON d'abord, le TOAST ensuite.
-    // La ligne d'essai vit dans `panels::sound_row` depuis le 2026-09-15 — voir sa doc : elle
-    // était écrite trois fois à l'identique. `None` : **pas de case « Couper le son » ici**, le son
-    // d'un ramassage se coupe déjà objet par objet, à la tuile.
-    if sound_row::show(ui, width, "alertes", None) {
-        action = AlertsTabAction::TestSound;
-    }
-    ui.add_space(SECTION_GAP);
-    close_settings_row(ui, state, ctx.profile, width);
-
-    ui.add_space(SECTION_GAP);
-    // **Sans compteur** : « (11) » n'apprend rien qu'un coup d'œil à la grille ne donne déjà.
-    ui.add(design::heading("Objets suivis"));
-    paragraph(ui, LIST_DESC);
-    legend_row(ui);
-    ui.add_space(SECTION_GAP);
-
+    // **Le champ d'ajout AVANT le titre de la liste** (demande du 2026-09-16) : on ajoute, puis
+    // on voit ce qu'on a — le titre coiffe la grille qu'il nomme, pas le champ qui l'alimente.
     add_field(ui, state, ctx, width);
+    ui.add_space(SECTION_GAP);
+
+    // **Sans compteur** : « (11) » n'apprend rien qu'un coup d'œil à la grille ne donne déjà.
+    //
+    // **Les commandes de suppression multiple sont dans cette ligne** depuis le 2026-09-16 (demande
+    // utilisateur : « comme dans l'onglet Suivi ») — mécanique partagée, voir
+    // `panels::bulk_select`. `removable` n'est PAS la longueur de la liste : les dix objets par
+    // défaut ne se retirent pas (règle 2), une liste qui n'aurait qu'eux n'a donc rien à supprimer
+    // et ne montre aucun bouton.
+    let retirables = ctx
+        .profile
+        .sound_items
+        .iter()
+        .filter(|entry| !entry.is_default)
+        .count();
+    let demande = bulk_select::show(
+        ui,
+        width,
+        bulk_select::BulkHeader {
+            title: "Objets surveillés",
+            removable: retirables,
+            bulk_tooltip: "Retire les tuiles cochées de la liste — annulable tant que la fenêtre \
+                           n'est pas validée. Les objets par défaut sont conservés.",
+            log_prefix: "alertes",
+            enabled: ctx.availability == AlertsAvailability::Ready,
+        },
+        bulk_select::BulkSelection {
+            mode: &mut state.select_mode,
+            keys: &mut state.selected,
+        },
+    );
+    apply_bulk(ctx.profile, demande);
+    ui.add_space(bulk_select::HEADER_TO_PARAGRAPH);
+
+    paragraph(
+        ui,
+        if state.select_mode {
+            LIST_DESC_SELECTION
+        } else {
+            LIST_DESC
+        },
+    );
     ui.add_space(SECTION_GAP);
 
     match ctx.availability {
         AlertsAvailability::Loading => {
             loading_row(ui, panel.inner);
-            return action;
+            return;
         }
         AlertsAvailability::NoAccount => {
             ui.add(
@@ -301,14 +363,13 @@ pub fn show(
                 .width(width)
                 .log_name("alertes.sans-compte"),
             );
-            return action;
+            return;
         }
         AlertsAvailability::Ready => {}
     }
 
-    tile_grid(ui, panel, ctx);
-
-    action
+    tile_grid(ui, panel, state, ctx);
+    legend_row(ui, legend);
 }
 
 // -------------------------------------------------------------------------------------------
@@ -332,106 +393,39 @@ fn paragraph(ui: &mut egui::Ui, text: &str) {
 ///
 /// Une tuile muette ne porte qu'un pictogramme de 14 px dans son coin ; rien ne dit ce qu'il
 /// signifie, et une tuile au son actif ne porte AUCUNE marque à comparer. Demande utilisateur du
-/// 2026-09-13, dans la foulée du déplacement de [`LIST_DESC`] : la légende suit la phrase qui
-/// décrit le geste, juste au-dessus des tuiles.
+/// 2026-09-13, dans la foulée du déplacement de [`LIST_DESC`].
+///
+/// **Fixe, en pied de panneau, alignée à droite** (2026-09-16) : elle suivait la phrase du
+/// geste, au-dessus des tuiles ; elle est maintenant peinte dans la bande que
+/// [`design::PanelZones::footer`] réserve sous la grille, calée dans le coin bas-droit à
+/// [`LEGEND_MARGIN`] des deux bords — le bas du pictogramme et la fin du mot à la même distance
+/// du cadre — et n'y bouge pas quand la grille défile. Peinte APRÈS la grille, avec un `Painter`
+/// dont le clip est posé sur la bande (celui du `Ui` s'arrête au bas de la zone défilable), et
+/// qui hérite du fondu de l'onglet grisé comme tout ce qui est peint après l'interrupteur.
 ///
 /// Le pictogramme y est peint **exactement comme sur une tuile** (même taille, même blanc, même
 /// cerné, voir [`paint_mute_badge`]) : une légende qui ne ressemblerait pas à ce qu'elle légende
 /// ne servirait à rien.
-fn legend_row(ui: &mut egui::Ui) {
-    let hauteur = MUTE_BADGE.max(BODY_FONT_SIZE * 1.4);
-    let (_, ligne) = ui.allocate_space(Vec2::new(ui.available_width(), hauteur));
+fn legend_row(ui: &egui::Ui, ligne: Rect) {
+    let mut painter = ui.painter().clone();
+    painter.set_clip_rect(ligne);
     let ds = design::DesignSystem::get(ui.ctx());
+    // Le mot d'abord, contre le bord droit ; le pictogramme se pose à sa gauche.
+    let mot = painter.text(
+        egui::pos2(ligne.right(), ligne.center().y),
+        egui::Align2::RIGHT_CENTER,
+        LEGEND_LABEL,
+        design::text::label_font(ui.ctx(), BODY_FONT_SIZE),
+        SUBDUED,
+    );
     let glyphe = Rect::from_center_size(
-        egui::pos2(ligne.left() + MUTE_BADGE / 2.0, ligne.center().y),
+        egui::pos2(mot.left() - LEGEND_GAP - MUTE_BADGE / 2.0, ligne.center().y),
         design::components::icon_button::glyph_fit(
             ds.icon_native_size(DsIcon::VolumeMute),
             MUTE_BADGE,
         ),
     );
-    paint_mute_badge(ui, &ds, glyphe);
-    ui.painter().text(
-        egui::pos2(glyphe.right() + LEGEND_GAP, ligne.center().y),
-        egui::Align2::LEFT_CENTER,
-        LEGEND_LABEL,
-        design::text::label_font(ui.ctx(), BODY_FONT_SIZE),
-        SUBDUED,
-    );
-}
-
-/// Le bloc « Fermeture de l'alerte » — le TOAST, pas le son.
-///
-/// Case à cocher plutôt que le switch « Auto | Manuelle » du web : le jeu n'a pas de switch à deux
-/// positions, son idiome pour un choix binaire est la case.
-fn close_settings_row(
-    ui: &mut egui::Ui,
-    state: &mut AlertsTabState,
-    profile: &mut AlertProfile,
-    width: f32,
-) {
-    let row = ui.allocate_space(Vec2::new(width, SETTING_ROW_HEIGHT)).1;
-    ui.painter()
-        .rect_filled(row, SETTING_ROW_RADIUS, SETTING_ROW_FILL);
-
-    // La case dit « fermeture AUTOMATIQUE », le profil stocke son contraire (`manual_close`, le
-    // nom du champ web). La négation vit ici, au plus près de la case, plutôt que dans le moteur
-    // où elle rendrait le miroir du web illisible.
-    let mut auto = !profile.manual_close;
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(Vec2::new(12.0, 0.0))));
-    cell.horizontal_centered(|ui| {
-        if ui
-            .add(design::checkbox(&mut auto, "Fermeture automatique").log_name("alertes.auto"))
-            .clicked()
-        {
-            profile.manual_close = !auto;
-        }
-        ui.add_space(12.0);
-        // **Le champ suit la case** : décochée, la fermeture est manuelle, il n'y a plus de délai
-        // et la valeur n'a plus d'effet — le champ est grisé et non modifiable.
-        let response = ui.add(
-            design::input(&mut state.duration_input)
-                .size(InputSize::Standard)
-                .width(52.0)
-                .enabled(auto)
-                .log_name("alertes.duree"),
-        );
-        // La borne se pose à la PERTE DE FOCUS, pas à la frappe — voir
-        // `AlertsTabState::duration_input`. C'est le moment où la saisie est finie, et le seul où
-        // corriger « 0 » en « 0,5 » n'empêche pas d'écrire « 0,75 ».
-        if response.lost_focus() {
-            profile.set_duration(parse_duration(
-                &state.duration_input,
-                profile.duration_seconds,
-            ));
-            state.duration_input = format_duration(profile.duration_seconds);
-        }
-        ui.label(RichText::new("sec.").color(SUBDUED).size(BODY_FONT_SIZE));
-    });
-}
-
-/// Lit une durée tapée — virgule décimale comprise.
-///
-/// **La virgule est le séparateur décimal d'un clavier français**, et ce champ est rempli en jeu,
-/// au pavé numérique. La refuser renverrait la valeur de repli sur une saisie parfaitement
-/// légitime.
-///
-/// Une saisie vide ou illisible garde la valeur en place plutôt que de retomber sur le défaut :
-/// vider un champ par mégarde ne doit pas réécrire un réglage.
-fn parse_duration(raw: &str, actuelle: f32) -> f32 {
-    raw.trim()
-        .replace(',', ".")
-        .parse::<f32>()
-        .unwrap_or(actuelle)
-}
-
-/// Écrit une durée dans le champ — sans décimale inutile (« 4 » plutôt que « 4.0 »), et avec la
-/// virgule française qu'on vient d'accepter en entrée.
-fn format_duration(seconds: f32) -> String {
-    if (seconds.fract()).abs() < f32::EPSILON {
-        format!("{}", seconds as i64)
-    } else {
-        format!("{seconds:.1}").replace('.', ",")
-    }
+    paint_mute_badge(&painter, &ds, glyphe);
 }
 
 /// Le champ d'ajout et son panneau de suggestions.
@@ -476,13 +470,13 @@ fn add_field(
     categories.dedup();
     let mut filters = vec![design::AutocompleteFilter::all(
         "Toutes les catégories",
-        texture_id(ui, ctx, &IconRef::for_all_categories()),
+        texture(ui, ctx, &IconRef::for_all_categories()),
     )];
     for category in categories {
         filters.push(design::AutocompleteFilter::category(
             category_key(category),
             category_label(category),
-            texture_id(ui, ctx, &IconRef::for_item_category(category)),
+            texture(ui, ctx, &IconRef::for_item_category(category)),
         ));
     }
 
@@ -503,11 +497,8 @@ fn add_field(
             // rapport (13 × 20 → 9 × 14, comme `object-fit: contain` sur le web). Sans elle, il
             // la prenait pour un carré et l'écrasait en 14 × 14 — « très fortement agrandies et
             // aplaties », retour du 2026-09-12 au soir.
-            if let Some((id, size)) = texture(ui, ctx, &IconRef::for_rarity(item.rarity)) {
-                entry.gem = Some(id);
-                entry.gem_size = size;
-            }
-            entry.image = texture_id(ui, ctx, &item.icon);
+            entry.gem = texture(ui, ctx, &IconRef::for_rarity(item.rarity));
+            entry.image = texture(ui, ctx, &item.icon);
             entry.disabled = deja;
             if deja {
                 entry.mention = Some("déjà dans vos alertes".to_string());
@@ -534,8 +525,40 @@ fn add_field(
     }
 }
 
+/// Applique ce que l'en-tête de suppression multiple a rendu.
+///
+/// **Les objets par défaut survivent aux deux cas.** `AlertProfile::remove` refuse déjà de les
+/// retirer (`retain(|e| e.is_default || …)`) et le mode sélection ne leur donne pas de case à
+/// cocher : la garde est double, parce que le web le refuse structurellement (règle 2).
+fn apply_bulk(profile: &mut AlertProfile, demande: bulk_select::BulkRequest) {
+    match demande {
+        bulk_select::BulkRequest::None => {}
+        bulk_select::BulkRequest::All => {
+            let retires = profile.sound_items.iter().filter(|e| !e.is_default).count();
+            profile.sound_items.retain(|entry| entry.is_default);
+            tracing::info!(retires, "[options] objets d'alerte retirés en bloc");
+        }
+        bulk_select::BulkRequest::Keys(cles) => {
+            let cochees: std::collections::HashSet<&String> = cles.iter().collect();
+            let avant = profile.sound_items.len();
+            profile.sound_items.retain(|entry| {
+                entry.is_default || !cochees.contains(&entry_key(&entry.name, entry.catalog_id))
+            });
+            tracing::info!(
+                retires = avant - profile.sound_items.len(),
+                "[options] objets d'alerte retirés en bloc"
+            );
+        }
+    }
+}
+
 /// La grille de tuiles, dans la zone défilable du panneau.
-fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabContext<'_>) {
+fn tile_grid(
+    ui: &mut egui::Ui,
+    panel: &design::PanelZones,
+    state: &mut AlertsTabState,
+    ctx: &mut AlertsTabContext<'_>,
+) {
     // Le rendu lit le profil et les gestes le modifient : les collecter d'abord évite d'emprunter
     // `ctx.profile` en lecture et en écriture dans la même boucle.
     let items: Vec<TileData> = ctx
@@ -554,6 +577,9 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabC
 
     let mut toggled: Option<(String, Option<i64>)> = None;
     let mut removal: Option<(String, Option<i64>)> = None;
+    let mut coche: Option<String> = None;
+    let select_mode = state.select_mode;
+    let cochees: std::collections::HashSet<&String> = state.selected.iter().collect();
 
     panel.scroll_area(ui, "alertes.grille", |ui, content_width| {
         ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
@@ -561,9 +587,11 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabC
         for chunk in items.chunks(per_row) {
             ui.horizontal(|ui| {
                 for item in chunk {
-                    match alert_item(ui, ctx, item) {
+                    let cle = entry_key(&item.name, item.catalog_id);
+                    match alert_item(ui, ctx, item, select_mode, cochees.contains(&cle)) {
                         TileClick::Toggle => toggled = Some((item.name.clone(), item.catalog_id)),
                         TileClick::Remove => removal = Some((item.name.clone(), item.catalog_id)),
+                        TileClick::Check => coche = Some(cle),
                         TileClick::None => {}
                     }
                 }
@@ -571,6 +599,9 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabC
         }
     });
 
+    if let Some(cle) = coche {
+        bulk_select::toggle(&mut state.selected, &cle);
+    }
     if let Some((name, catalog_id)) = toggled {
         ctx.profile.toggle(&name, catalog_id);
     }
@@ -579,6 +610,10 @@ fn tile_grid(ui: &mut egui::Ui, panel: &design::PanelZones, ctx: &mut AlertsTabC
     // réversible deux fois, une boîte de confirmation par-dessus n'ajoutait qu'un clic.
     if let Some((name, catalog_id)) = removal {
         ctx.profile.remove(&name, catalog_id);
+        // Une clé cochée qui ne désigne plus rien ferait mentir le compteur du bouton groupé
+        // (« Supprimer (3) » pour deux tuiles). Le Suivi tient la même règle.
+        let cle = entry_key(&name, catalog_id);
+        state.selected.retain(|k| *k != cle);
     }
 }
 
@@ -596,8 +631,12 @@ struct TileData {
 /// Ce qu'un clic sur une tuile signifie.
 enum TileClick {
     None,
+    /// Couper ou rétablir le son — le geste ORDINAIRE de la tuile.
     Toggle,
+    /// Retirer l'objet, à la croix du survol.
     Remove,
+    /// Cocher ou décocher — le geste de la tuile **en mode sélection**, où il remplace [`Self::Toggle`].
+    Check,
 }
 
 /// **La tuile d'un objet en alerte — un emplacement d'objet, et rien d'autre.**
@@ -605,20 +644,35 @@ enum TileClick {
 /// | Élément | Ce qu'il dit |
 /// | --- | --- |
 /// | Cadre | ce qu'est l'objet : la bordure de sa **rareté** |
-/// | Coin haut-gauche | le son est **coupé** — et rien du tout quand il est actif |
+/// | Coin bas-droit | le son est **coupé** — et rien du tout quand il est actif |
 /// | Coin haut-droit | retrait — **seulement sur une tuile retirable ET survolée**, rouge sous le pointeur |
 /// | Voile | le survol, et un fond assez sombre pour la croix — **retirables uniquement** |
+/// | Case haut-gauche | sélection — **seulement en mode sélection**, et elle remplace la croix |
+/// | Liseré rouge | la tuile est cochée — le ton destructif, la sélection ne mène qu'au retrait |
 ///
 /// Ni nom, ni chiffre : le nom se lit en infobulle, et une alerte n'a ni compteur ni cible
 /// (contrairement au Suivi, dont l'emplacement sait afficher une cible de décompte).
-fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData) -> TileClick {
+///
+/// **En mode sélection, une tuile par défaut est inerte** : elle ne se coche pas (elle ne se retire
+/// pas, règle 2) et son son ne bascule pas non plus — un même appui ne peut pas vouloir dire deux
+/// choses selon la tuile visée. Son infobulle le dit, plutôt que de laisser le clic ne rien faire
+/// sans explication.
+fn alert_item(
+    ui: &mut egui::Ui,
+    ctx: &mut AlertsTabContext<'_>,
+    item: &TileData,
+    select_mode: bool,
+    cochee: bool,
+) -> TileClick {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(TILE), egui::Sense::click());
 
     let icon_id = item
         .icon
         .as_ref()
-        .and_then(|icon| texture_id(ui, ctx, icon))
-        .unwrap_or_else(|| ctx.icons.unknown_entity_texture().id());
+        .and_then(|icon| texture(ui, ctx, icon))
+        .unwrap_or_else(|| {
+            egui::load::SizedTexture::from_handle(ctx.icons.unknown_entity_texture())
+        });
 
     // **`ui.put` dans un ENFANT, jamais sur le `ui` de la rangée** : `Ui::put` ouvre un scope, et
     // un scope avance le curseur du parent — la tuile suivante démarrerait au mauvais endroit.
@@ -629,6 +683,13 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
             .size(TILE)
             .frame(SlotFrame::Rarity(to_slot_rarity(item.rarity)))
             .icon(icon_id)
+            // **La sélection entière appartient au composant** — liseré ET case à cocher, posés
+            // sur le bon anneau et sans voler le clic de la tuile (voir `design::item_slot`). Un
+            // objet par défaut n'en reçoit aucun : il ne se retire pas, donc il ne se coche pas.
+            .selection((select_mode && !item.is_default).then_some(cochee))
+            // **Le ton destructif**, comme au Suivi et au bandeau : cocher ici ne mène qu'au
+            // bouton « Supprimer », jamais à une autre action.
+            .selection_tone(design::SelectionTone::Danger)
             .log_name(item.name.clone()),
     );
 
@@ -642,7 +703,10 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
     // **Et seulement sur un objet retirable** : les dix objets par défaut n'ont pas de croix, donc
     // rien à révéler — « le voile ne concerne que les objets pouvant être supprimés » (retour du
     // 2026-09-13). Un voile sans croix annoncerait une action qui n'existe pas.
-    let survol_retirable = !item.is_default && response.contains_pointer();
+    // **Rien de tout cela en mode sélection** : la case du composant remplace la croix, et deux
+    // marqueurs dans deux coins d'une tuile de 64 px reviendraient à demander de viser (règle
+    // reprise de `panels::suivi_tab::tracked_tile`).
+    let survol_retirable = !select_mode && !item.is_default && response.contains_pointer();
     if survol_retirable {
         ui.painter()
             .rect_filled(hover_scrim_rect(rect), 0.0, TILE_HOVER_SCRIM);
@@ -651,14 +715,19 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
     // Pictogramme du son — **peint APRÈS le voile**, sinon celui-ci l'assombrirait avec l'icône.
     // Affiché seulement quand le son est COUPÉ : une tuile sans marque est une tuile qui sonnera
     // (décision du 2026-09-13, en remplacement de la bordure d'état cyan/gris).
+    //
+    // **En bas à droite** (demande du 2026-09-16), et non plus en haut à gauche : ce coin-là est
+    // celui de la case à cocher du mode sélection (`item_slot`), qui recouvrait le haut-parleur
+    // d'une tuile coupée dès qu'on entrait dans le mode. La croix garde le haut droit ; le bas
+    // droit, lui, n'est pris par rien.
     if !item.enabled {
         paint_mute_badge(
-            ui,
+            ui.painter(),
             &ds,
             badge_rect(
                 ds.icon_native_size(DsIcon::VolumeMute),
                 rect,
-                Corner::Left,
+                Corner::BottomRight,
                 MUTE_BADGE,
             ),
         );
@@ -669,7 +738,7 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
         // **Sa propre zone cliquable, avec sa propre main et sa propre infobulle.** Elle mange
         // aussi le clic, pour qu'un retrait n'emporte pas au passage la bascule du son.
         let zone_rect = Rect::from_center_size(
-            badge_rect(Vec2::splat(TILE_BADGE), rect, Corner::Right, TILE_BADGE).center(),
+            badge_rect(Vec2::splat(TILE_BADGE), rect, Corner::TopRight, TILE_BADGE).center(),
             Vec2::splat(TILE_BADGE + 4.0),
         );
         let croix = ui
@@ -680,7 +749,7 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
             badge_rect(
                 ds.icon_native_size(DsIcon::Close),
                 rect,
-                Corner::Right,
+                Corner::TopRight,
                 TILE_BADGE,
             ),
             DsIcon::Close,
@@ -697,6 +766,16 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
         }
     }
 
+    if select_mode && item.is_default {
+        // Inerte, et qui le dit : ni main au survol, ni clic. Le nom reste, c'est la seule chose
+        // qui identifie la tuile.
+        design::tooltip(&response).text(format!(
+            "{} — objet par défaut, il ne peut pas être retiré",
+            item.name
+        ));
+        return TileClick::None;
+    }
+
     // **Le nom, et rien que le nom** (demande du 2026-09-13). L'infobulle disait aussi ce que le
     // clic ferait (« Cliquer pour couper ») ; le pictogramme porte déjà l'état, et le nom n'est
     // plus écrit nulle part ailleurs depuis qu'il a quitté la tuile. Du même coup disparaît
@@ -704,16 +783,23 @@ fn alert_item(ui: &mut egui::Ui, ctx: &mut AlertsTabContext<'_>, item: &TileData
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     design::tooltip(&response).text(&item.name);
     if response.clicked() {
-        clic = TileClick::Toggle;
+        // En mode sélection, le geste de la tuile est de COCHER : le son ne bascule plus, sans quoi
+        // le même appui voudrait dire deux choses.
+        clic = if select_mode {
+            TileClick::Check
+        } else {
+            TileClick::Toggle
+        };
     }
     clic
 }
 
-/// Le coin d'une tuile où se pose un badge.
+/// Le coin d'une tuile où se pose un badge — la croix en haut à droite, le haut-parleur en bas à
+/// droite (voir `alert_tile`). Le haut gauche est celui de la case du mode sélection.
 #[derive(Clone, Copy)]
 enum Corner {
-    Left,
-    Right,
+    TopRight,
+    BottomRight,
 }
 
 /// Où peindre un badge de [`TILE_BADGE`] px dans son coin, à [`TILE_BADGE_INSET`] des deux bords.
@@ -721,12 +807,13 @@ enum Corner {
 /// `native` est la taille native du glyphe : `glyph_fit` l'inscrit dans le carré du badge sans le
 /// déformer, exactement comme les boutons icône du design system.
 fn badge_rect(native: Vec2, tile: Rect, corner: Corner, side: f32) -> Rect {
-    let x = match corner {
-        Corner::Left => tile.left() + TILE_BADGE_INSET + side / 2.0,
-        Corner::Right => tile.right() - TILE_BADGE_INSET - side / 2.0,
+    let x = tile.right() - TILE_BADGE_INSET - side / 2.0;
+    let y = match corner {
+        Corner::TopRight => tile.top() + TILE_BADGE_INSET + side / 2.0,
+        Corner::BottomRight => tile.bottom() - TILE_BADGE_INSET - side / 2.0,
     };
     Rect::from_center_size(
-        egui::pos2(x, tile.top() + TILE_BADGE_INSET + side / 2.0),
+        egui::pos2(x, y),
         design::components::icon_button::glyph_fit(native, side),
     )
 }
@@ -742,16 +829,16 @@ fn badge_rect(native: Vec2, tile: Rect, corner: Corner, side: f32) -> Rect {
 /// d'`icon-volume-mute.png` mesure déjà plus d'un pixel, une passe de plus bouche le creux du
 /// haut-parleur et le glyphe devient une tache blanche. C'est la COTE qui le rend lisible, pas le
 /// gras.
-fn paint_mute_badge(ui: &egui::Ui, ds: &design::DesignSystem, rect: Rect) {
+fn paint_mute_badge(painter: &egui::Painter, ds: &design::DesignSystem, rect: Rect) {
     for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
         ds.paint_icon(
-            ui.painter(),
+            painter,
             rect.translate(Vec2::new(dx, dy)),
             DsIcon::VolumeMute,
             MUTE_SHADOW,
         );
     }
-    ds.paint_icon(ui.painter(), rect, DsIcon::VolumeMute, TEXT);
+    ds.paint_icon(painter, rect, DsIcon::VolumeMute, TEXT);
 }
 
 /// La fenêtre de l'icône — **tout ce que le voile de survol a le droit de couvrir**.
@@ -805,52 +892,25 @@ fn category_label(category: WakfuItemCategory) -> &'static str {
     }
 }
 
-/// La texture d'une icône distante, si elle est déjà descendue du CDN — `None` sinon, et
-/// l'appelant se peint sans elle.
-fn texture_id(
-    ui: &egui::Ui,
-    ctx: &mut AlertsTabContext<'_>,
-    icon: &IconRef,
-) -> Option<egui::TextureId> {
-    texture(ui, ctx, icon).map(|(id, _)| id)
-}
-
-/// La texture ET sa taille native, pour ce qui doit être peint à son rapport — la gemme de rareté.
+/// La texture d'une icône distante **avec sa taille native**, si elle est déjà descendue du CDN —
+/// `None` sinon, et l'appelant se peint sans elle.
+///
+/// La taille n'est pas un supplément : tout ce qui vient du CDN est peint à son rapport
+/// (`design::fit`), gemme de 13 × 20 comme bannière de `monsterIllustrations`. C'est pourquoi les
+/// composants prennent une `SizedTexture` et non un `TextureId` nu.
 fn texture(
     ui: &egui::Ui,
     ctx: &mut AlertsTabContext<'_>,
     icon: &IconRef,
-) -> Option<(egui::TextureId, Vec2)> {
+) -> Option<egui::load::SizedTexture> {
     ctx.remote_icon_textures
         .resolve(ui.ctx(), ctx.remote_icons, icon)
-        .map(|handle| (handle.id(), handle.size_vec2()))
+        .map(|handle| egui::load::SizedTexture::from_handle(&handle))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn une_duree_se_tape_a_la_virgule_comme_au_point() {
-        // Le champ est rempli en jeu, au pavé numérique d'un clavier français : refuser la virgule
-        // renverrait la valeur de repli sur une saisie parfaitement légitime.
-        assert_eq!(parse_duration("1,5", 3.5), 1.5);
-        assert_eq!(parse_duration("1.5", 3.5), 1.5);
-        assert_eq!(parse_duration(" 2 ", 3.5), 2.0);
-    }
-
-    #[test]
-    fn une_saisie_vide_garde_la_valeur_en_place() {
-        // Vider un champ par mégarde ne doit pas réécrire un réglage.
-        assert_eq!(parse_duration("", 2.0), 2.0);
-        assert_eq!(parse_duration("abc", 2.0), 2.0);
-    }
-
-    #[test]
-    fn une_duree_entiere_s_ecrit_sans_decimale() {
-        assert_eq!(format_duration(4.0), "4");
-        assert_eq!(format_duration(3.5), "3,5");
-    }
 
     #[test]
     fn chaque_categorie_a_sa_propre_cle_de_filtre() {

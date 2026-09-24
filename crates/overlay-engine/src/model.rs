@@ -150,6 +150,15 @@ pub enum LogEntry {
     CombatStart {
         time: String,
     },
+    /// « Stopping cFC... » / « Starting cFC... » — arrêt ou lancement du client Wakfu lui-même.
+    /// L'overlay détecte la coupure en amont du parseur (`Engine::is_client_cut_line`, qui
+    /// reconnaît aussi la perte de connexion et la bannière de démarrage) : cette variante ne sert
+    /// qu'à refermer une session marchand/HDV restée ouverte, voir
+    /// `session::SessionState::in_market_occupation`.
+    ClientLifecycle {
+        time: String,
+        event: ClientLifecycleEvent,
+    },
     CombatEnd {
         time: String,
         #[serde(rename = "fightId")]
@@ -166,6 +175,19 @@ pub enum LogEntry {
     MarketOccupation {
         time: String,
         active: bool,
+    },
+    /// « Vous avez perdu Nx <objet> . » — signal d'adjacence du cycle de démantèlement d'objet,
+    /// jamais une statistique en soi : voir `session::SessionState::pending_item_loss`.
+    ItemLoss {
+        time: String,
+        item: String,
+        quantity: i64,
+    },
+    /// « Action [WALKON] performed on interactive element : <id> » — le joueur marche sur un
+    /// élément interactif du décor (le pacte notamment, mais le signal est générique). Ouvre ou
+    /// prolonge la fenêtre d'extraction de pacte, voir `session::SessionState::open_or_extend_pact_window`.
+    InteractiveWalkon {
+        time: String,
     },
     ChallengeResult {
         time: String,
@@ -202,6 +224,14 @@ pub enum LogEntry {
 // `Serialize` sert à la persistance disque du combat en cours (voir `fight_store.rs`) —
 // `FightSnapshot::result` doit rester (re)sérialisable même si sa valeur reste `None` tant que le
 // combat n'est pas terminé (seuls les combats `ongoing` sont persistés, voir `fight_store::save_fight`).
+/// Miroir de `ClientLifecycleEntry.event`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClientLifecycleEvent {
+    Shutdown,
+    Startup,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FightResult {
@@ -229,7 +259,10 @@ impl LogEntry {
             | LogEntry::CombatStart { time }
             | LogEntry::CombatEnd { time, .. }
             | LogEntry::Loot { time, .. }
+            | LogEntry::ClientLifecycle { time, .. }
             | LogEntry::MarketOccupation { time, .. }
+            | LogEntry::ItemLoss { time, .. }
+            | LogEntry::InteractiveWalkon { time }
             | LogEntry::ChallengeResult { time, .. }
             | LogEntry::LogDateAnchor { time, .. }
             | LogEntry::FighterJoined { time, .. }

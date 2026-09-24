@@ -36,14 +36,14 @@ pub const CLICK_THROUGH_OPACITY: f32 = 0.3;
 /// jamais s'attaquer à la cause : l'absence de place elle-même).
 ///
 /// Valeur choisie par observation du rendu offscreen (`overlay-testkit`, §17.1 du plan) : le popup
-/// par défaut d'egui (`design::tooltip`, fond plein, `inner_margin` 8px) contenant
-/// une étiquette courte ("Alliés"/"Ennemis") sur une seule ligne tient sur ~30px de haut, plus
+/// par défaut d'egui (`design::tooltip`, fond plein, `inner_margin` 8px) contenant une étiquette
+/// courte ("Alliés"/"Ennemis") sur une seule ligne tient sur ~30px de haut, plus
 /// `design::tokens::TOOLTIP_GAP` (5px) d'écart avec le widget — 44px laisse une marge confortable
-/// au-dessus de ce total. Seul CE côté du panneau Combat gagne une marge (demande explicite :
-/// « agrandis légèrement l'overlay ») : gauche/droite/bas restent collés au bord de la fenêtre de
+/// au-dessus de ce total. Seul CE côté du panneau Combat gagne une marge (demande explicite : «
+/// agrandis légèrement l'overlay ») : gauche/droite/bas restent collés au bord de la fenêtre de
 /// jeu, décision non remise en cause ici (voir `main.rs::GAME_EDGE_MARGIN_PX`) — `main.rs`/`bin/
-/// overlay-ui-x11.rs` agrandissent `WINDOW_SIZE` de ce même montant pour que le reste du panneau ne
-/// soit pas compressé d'autant.
+/// wakfu-companion-overlay-x11.rs` agrandissent `WINDOW_SIZE` de ce même montant pour que le reste
+/// du panneau ne soit pas compressé d'autant.
 pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 
 /// Espace réservé **sous** la bande du panneau Suivi, pour ses infobulles — voir
@@ -66,7 +66,7 @@ pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 /// de sa fenêtre.
 ///
 /// Valeur inchangée, la mesure ne dépend pas du côté : une infobulle d'une ligne (« Supprimer
-/// (Ctrl+Shift+S) ») occupe 27 px de haut, plus `design::tokens::TOOLTIP_GAP` (5 px) d'écart, soit
+/// (Ctrl+Shift+D) ») occupe 27 px de haut, plus `design::tokens::TOOLTIP_GAP` (5 px) d'écart, soit
 /// 32 px ; la marge basse de `paint_content` (6 px) en fournit déjà une partie, 28 px complètent
 /// avec 2 px de garde.
 ///
@@ -74,6 +74,44 @@ pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 /// fenêtre (`main.rs::GAME_TOP_MARGIN_PX`, 28 px sous le bord haut du client, calé sur les boutons
 /// d'interface du jeu) plus les 6 px de marge interne — 34 px au lieu de 62.
 pub const WATCHLIST_TOOLTIP_RESERVE: f32 = 28.0;
+
+/// Espace réservé **au-dessus** du bloc Récap (`OverlayKind::Recap`) pour ses cinq infobulles,
+/// qui s'ouvrent au-dessus de la case survolée (`TooltipSide::Above`, voir
+/// `panels::recap::paint_cell`) — le même principe que [`COMBAT_TOP_MARGIN`] : sans place là-haut,
+/// `RectAlign::TOP` retombe sur un repli en dessous.
+///
+/// **Ce fut une réserve BASSE** (28 px, le soir du 2026-09-16, infobulles `Below`) : le bloc est
+/// posé sous les boutons du jeu, une infobulle ouverte au-dessus de sa première ligne recouvre
+/// donc la zone où le jeu ouvre les siennes, et le Suivi venait de faire le chemin inverse. Retour
+/// utilisateur le même soir : « toutes les infobulles au-dessus des éléments, à l'image de la
+/// durée » — la durée, dernière ligne, retombait déjà au-dessus faute de place en dessous, et
+/// c'est ce rendu-là qui a plu. La réserve change donc de côté ; c'est une marge HAUTE du contenu
+/// (voir `paint_content`), et l'hôte remonte l'ancrage de la fenêtre d'autant
+/// (`main.rs::GAME_RECAP_TOP_MARGIN_PX` reste l'ordonnée du BLOC, pas de la fenêtre) pour que le
+/// bloc ne bouge pas d'un pixel.
+///
+/// Valeur relevée sur la capture `recap_tooltip_kamas_au_dessus` (`overlay-testkit`) : une
+/// infobulle d'une ligne (« Kamas gagnés ») fait 33 px de haut, plus `design::tokens::TOOLTIP_GAP`
+/// (5 px) d'écart avec la case, soit 38 px au-dessus de la première ligne ; `panels::recap::
+/// PADDING_Y` (6 px) en fournit déjà une partie, 32 px complètent, et 4 px de garde font 36.
+///
+/// Un seul jeton partagé avec [`WATCHLIST_TOOLTIP_RESERVE`] aurait été tentant ; deux constantes
+/// distinctes disent que ce sont deux panneaux dont les infobulles divergent (de côté, déjà).
+pub const RECAP_TOOLTIP_RESERVE: f32 = 36.0;
+
+/// **Place gardée SOUS le bloc Récap pour sa rangée d'actions** (2026-09-17) — le cadenas et le
+/// glyphe de replacement, quand la bande est posée trop haut dans la fenêtre de jeu pour que la
+/// rangée tienne au-dessus (voir `panels::recap::paint_actions_row`).
+///
+/// La rangée mesure `panels::recap::ACTIONS_HEIGHT` ; au-dessus, elle loge dans la réserve
+/// d'infobulle, plus haute qu'elle — en dessous, il n'y avait rien, d'où cette constante. La
+/// fenêtre OS la garde **en permanence**, de quelque côté que la rangée tombe : sa taille ne doit
+/// pas dépendre d'un côté qui dépend de sa position (voir `recap_placement::Band::actions`).
+///
+/// Le prix, en mode interactif, est une lisière de 24 px sous la bande qui capte les clics au
+/// lieu de les laisser au jeu — la même dépense que les 36 px du haut, et pour une raison du même
+/// ordre : ce que le bloc peint hors de son fond doit être dans sa fenêtre.
+pub const RECAP_ACTIONS_RESERVE: f32 = crate::panels::recap::ACTIONS_HEIGHT;
 
 /// Émis par le thread Engine (§3 du plan) ou le thread Auth (`spawn_auth_thread`) quand un nouvel
 /// état est disponible — réveille le main thread, en `ControlFlow::Wait` le reste du temps (§6.1 :
@@ -108,8 +146,39 @@ pub enum OverlayKind {
     /// `Combat`/`Watchlist`, jamais créée automatiquement par `sync_windows` (une par fenêtre de
     /// jeu trouvée) : cette fenêtre OS est ouverte/fermée à la demande (clic sur le bouton
     /// "Options" du carré de contrôle, ou raccourci `Ctrl+Shift+O`), voir
-    /// `main.rs::App::open_options_modal`/`bin/overlay-ui-x11.rs` (même méthode dupliquée).
+    /// `main.rs::App::open_options_modal`/`bin/wakfu-companion-overlay-x11.rs` (même méthode
+    /// dupliquée).
+    ///
+    /// **Rattachée à une fenêtre de jeu, elle la couvre entière** (2026-09-17, décision
+    /// utilisateur) : un voile sur le jeu et ses overlays, la modale centrée dedans à sa taille
+    /// habituelle — même forme que `ResetConfirm`, par le même composant (`design::scrim`). Ouverte
+    /// SANS client à l'écran, elle reste une fenêtre à la taille de la modale, sans voile. C'est
+    /// [`RenderContent::veiled`] qui distingue les deux au rendu.
     Options,
+    /// **Récap de session** (2026-09-16, demande utilisateur) — la bande XP / Kamas / Combats /
+    /// Challenges / Durée posée en haut à gauche de la fenêtre de jeu, sous les boutons
+    /// d'interface du client. Voir `panels::recap`.
+    ///
+    /// Créée par `sync_windows` comme `Combat`/`Watchlist` (une par fenêtre de jeu trouvée), et
+    /// masquée — jamais détruite — quand la case « Activer le récap de session » est décochée,
+    /// même mécanique que le panneau Combat (`main.rs::App::sync_panel_visibility`).
+    Recap,
+    /// **Confirmation de remise à zéro du Récap** (2026-09-17) — la boîte du design system
+    /// (`design::confirm_dialog`) sous un voile qui couvre TOUTE la fenêtre de jeu, overlays
+    /// compris, centrée sur elle. Décision utilisateur : « impose une confirmBox centrée au jeu
+    /// (verticalement et horizontalement) avec un fond voilé sur toute la fenêtre du jeu et des
+    /// overlays (sauf cette confirmBox) ». Une fenêtre OS de la taille de la fenêtre de jeu,
+    /// ouverte par l'hôte quand le glyphe du bloc est cliqué (`RenderOutcome::
+    /// recap_reset_requested`), fermée à la réponse (`RenderOutcome::reset_choice`) — le
+    /// modèle est `Options` : à la demande, focalisable (Échap répond « Non »), toujours
+    /// interactive.
+    ///
+    /// **Elle porte sa cible depuis le 2026-09-17 au soir** ([`ResetTarget`]) : la même fenêtre,
+    /// le même voile et le même composant servent aussi à confirmer le retour de la bande à son
+    /// ancrage d'origine (glyphe `Undo` de la rangée d'actions). Deux variantes d'`OverlayKind`
+    /// auraient dédoublé, dans les deux hôtes, tout le cycle « ouvrir / centrer / voiler / fermer »
+    /// pour ne changer qu'une phrase.
+    ResetConfirm(ResetTarget),
     /// Fenêtre de connexion (2026-09-14, §9.1 undecies du plan) — voir `panels::login`. **La
     /// première interface de l'overlay**, et la seule tant que `AuthStatus` n'est pas `Connected` :
     /// une fenêtre logicielle classique (barre des tâches, focus, centrée sur l'écran), jamais un
@@ -117,6 +186,40 @@ pub enum OverlayKind {
     /// n'est pas lié et la retire dès qu'il l'est ; aucun `Combat`/`Watchlist` n'existe pendant
     /// qu'elle est affichée. Il n'y a pas de mode invité : un compte est obligatoire.
     Login,
+}
+
+/// **Ce qu'une confirmation remet à son état d'origine** (2026-09-17) — voir
+/// `OverlayKind::ResetConfirm`, qui la porte.
+///
+/// Quatre cibles, une seule fenêtre : le voile, le centrage sur le jeu et le composant
+/// (`design::confirm_dialog`) sont les mêmes, seule la phrase change. Autant de variantes
+/// d'`OverlayKind` auraient dédoublé, dans les DEUX hôtes, tout le cycle « ouvrir / centrer /
+/// voiler / fermer ».
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResetTarget {
+    /// Les **compteurs** de la session : XP, kamas, combats, challenges, chrono. Le glyphe `Undo`
+    /// au bout de la dernière ligne du bloc (`panels::recap::paint_reset_button`).
+    RecapSession,
+    /// La **position de la bande Récap** : elle retourne sous les boutons du jeu et la config
+    /// oublie ses deux clés. Le glyphe `Undo` de la rangée d'actions
+    /// (`panels::recap::paint_actions_row`), affiché seulement si la bande a été déplacée.
+    RecapPosition,
+    /// La **hauteur du panneau Combat** (2026-09-17, soir) : il retrouve son centrage vertical et
+    /// la config oublie sa clé. Le glyphe `Undo` de sa rangée d'actions
+    /// (`panels::combat::paint_actions_row`), affiché seulement si le panneau a été déplacé.
+    ///
+    /// Le CÔTÉ, lui, n'est jamais remis par là : c'est une case des Options, pas un geste — « pas
+    /// en termes de droite-gauche, juste en termes de hauteur » (demande utilisateur).
+    CombatPosition,
+    /// Le **compteur d'une entrée suivie** (2026-09-18) : il repart de ce que son mode impose —
+    /// zéro en incrémental et en objectif, la cible en décompte. Le glyphe `Undo` au centre d'une
+    /// tuile du bandeau, révélé au survol (`panels::watchlist::reset_button`).
+    ///
+    /// **L'entrée n'est pas ici**, et c'est une contrainte assumée : `OverlayKind` est `Copy`, et
+    /// il l'est dans les deux hôtes à chaque tour de boucle. L'hôte la retient de son côté
+    /// (`App::watchlist_reset_pending`) et la prête au rendu par [`RenderContent::watchlist_reset`],
+    /// pour que la question la nomme.
+    WatchlistCounter,
 }
 
 /// État de la connexion au compte (lot L4, §7.2 du plan) — publié par le thread Auth
@@ -178,6 +281,10 @@ pub struct AuthFailure {
 /// - `Disconnect` — bouton « Déconnecter » de la fenêtre Options ou de l'icône de zone de
 ///   notification : efface le jeton, l'overlay revient à sa fenêtre de connexion. Sans effet si
 ///   pas connecté (mais vaut annulation pendant un appairage).
+/// - `SessionExpired` — émise par le thread Sync (`background::spawn_sync_thread`), jamais par
+///   l'interface : le serveur a refusé le jeton en 401 en cours de session (révoqué depuis « Mon
+///   compte », ou expiré — plafond de 180 jours depuis l'appairage). Le jeton est effacé et la
+///   fenêtre de connexion revient sur « Se connecter ». Sans effet si pas connecté.
 ///
 /// Un seul thread Auth, un seul point d'attente (`command_rx.recv()`) : toutes les origines
 /// convergent sur ce même type.
@@ -186,6 +293,7 @@ pub enum AuthCommand {
     Retry,
     CancelPairing,
     Disconnect,
+    SessionExpired,
 }
 
 /// Puits pour les commandes émises par `build_ui` vers le thread Auth — abstraction minimale
@@ -224,19 +332,57 @@ pub struct RenderContent<'a> {
     pub portraits: &'a PortraitAtlas,
     pub combat_frame: &'a CombatFrame,
     pub icons: &'a UiIcons,
+    /// Les bustes de classe de l'onglet « Personnages » — `Some` pour la seule fenêtre Options,
+    /// qui est la seule à les charger (voir `crate::avatars`, doc de module).
+    pub avatars: Option<&'a crate::avatars::AvatarAtlas>,
+    /// Les serveurs de jeu (`crate::game_servers`), pour le sélecteur de compte du même onglet.
+    pub game_servers: &'a crate::game_servers::GameServers,
     pub combat_side: &'a mut CombatSide,
     /// Grandeur mesurée par le panneau Combat (dégâts / armure donnée / soins) — même statut que
     /// `combat_side` : un état par fenêtre overlay, porté par l'hôte (voir `CombatMetric`).
     pub combat_metric: &'a mut CombatMetric,
     pub watchlist: &'a [WatchlistEntry],
-    /// État de la case « Activer le Suivi » (`panels::feature_switch`) — `false` retire les boutons
+    /// État de la case « Activer le suivi » (`panels::feature_switch`) — `false` retire les boutons
     /// « + » et « − » du bandeau (retour utilisateur 2026-09-15, voir
     /// `panels::watchlist::control_button_row`). Distinct de `watchlist.is_empty()`, que l'hôte
     /// force déjà dans ce cas : un bandeau vide Suivi ACTIF garde bien ses quatre boutons.
     pub watchlist_enabled: bool,
+    /// Le suivi des sorts est-il actif ? — case « Activer le suivi des sorts » de la section
+    /// « Combat » des Options (2026-09-15). `false` retire le bloc « ligne de sorts » du panneau
+    /// Combat et les marques qu'il pose sur les médaillons (voir `panels::combat::show`).
+    ///
+    /// **Déjà combiné avec la case dont il dépend** par l'hôte
+    /// (`panels::feature_switch::FeatureToggles::spells_visible`) : le panneau reçoit ce qu'il
+    /// doit peindre, pas deux booléens à recroiser. Le détail des combats coupé, lui, ne se voit
+    /// pas ici — la fenêtre Combat n'est alors pas montrée du tout
+    /// (`panels::combat::should_show`).
+    pub spells_enabled: bool,
+    /// **Le panneau Combat est-il posé à droite de la fenêtre de jeu ?** — case « Afficher le
+    /// panneau de combat à droite de la fenêtre de jeu » de la section « Combat » des Options
+    /// (2026-09-17, `config::OverlayConfig::combat_on_right`).
+    ///
+    /// `true` retourne TOUT le contenu de cette fenêtre en miroir vertical (voir [`crate::mirror`],
+    /// qui explique pourquoi c'est un miroir de rendu et pas une mise en page paramétrée) ; l'hôte,
+    /// lui, ancre la fenêtre au bord droit du client (`main.rs::App::anchor_position`). Sans objet
+    /// pour les autres zones : seule la fenêtre Combat change de côté.
+    pub combat_on_right: bool,
+    /// Ce que l'hôte sait de la fenêtre Combat et que le panneau ne peut pas savoir (`kind ==
+    /// Combat`) : verrou de la hauteur, panneau déplacé — voir `panels::combat::CombatChrome`.
+    /// Sans objet pour les autres zones, qui laissent son défaut.
+    pub combat_chrome: panels::combat::CombatChrome,
     /// Sélection multiple du bandeau (2026-09-13) — l'état vit chez l'hôte, qui seul reçoit le
-    /// raccourci global `Ctrl+Shift+S` : voir `panels::watchlist::WatchlistSelection`.
+    /// raccourci global `Ctrl+Shift+D` : voir `panels::watchlist::WatchlistSelection`.
     pub watchlist_selection: &'a mut panels::watchlist::WatchlistSelection,
+    /// Les célébrations de complétion en cours (2026-09-17) — l'état vit chez l'hôte pour la même
+    /// raison que la sélection, en plus fort : c'est lui qui les fait avancer sur son tick, et le
+    /// retrait qu'elles déclenchent ne doit pas dépendre du rendu (voir
+    /// `panels::watchlist::WatchlistCompletions`).
+    pub watchlist_completions: &'a panels::watchlist::WatchlistCompletions,
+    /// **L'entrée dont la réinitialisation attend confirmation** (2026-09-18) — `Some` pour la
+    /// seule fenêtre `ResetConfirm(ResetTarget::WatchlistCounter)`, qui la nomme dans sa question ;
+    /// `None` partout ailleurs. Voir [`ResetTarget::WatchlistCounter`] sur pourquoi elle ne voyage
+    /// pas dans la cible elle-même.
+    pub watchlist_reset: Option<&'a WatchlistEntry>,
     pub watchlist_toast: Option<&'a WatchlistToast>,
     pub catalog: &'a CatalogIndex,
     pub catalog_stale: bool,
@@ -267,19 +413,50 @@ pub struct RenderContent<'a> {
     /// tout appelant (`overlay-testkit`) qui n'exerce pas encore ce panneau. `&mut` : la frappe
     /// dans le champ de chemin (`egui::TextEdit`) doit persister d'une frame à l'autre, voir
     /// `panels::options_modal::OptionsModalState`.
+    /// Totaux de la session tels que le moteur les tient (`overlay_engine::SessionTotals`) — ce
+    /// Les cases facultatives de la bande Récap — durée, combats, challenges (cases « Afficher
+    /// … » de la section « Recap » des Options, 2026-09-16). Voir `panels::recap::RecapCells`.
+    /// L'interrupteur de la bande lui-même ne se voit pas ici : la fenêtre Récap n'est alors pas
+    /// montrée du tout (même règle que le détail des combats).
+    pub recap_cells: panels::recap::RecapCells,
+    /// La vue de la session (`crate::recap_session::RecapSession`, 2026-09-17) : compteurs et
+    /// chrono de LA SESSION — pas ceux du fichier relu ni du processus —, heure de début et
+    /// nombre de reprises. Construite par l'hôte à chaque frame, ce qui la rend figeable par un
+    /// harnais de test, comme `now`.
+    pub recap: &'a panels::recap::RecapView,
     pub options: Option<&'a mut OptionsModalState>,
+    /// **La fenêtre Options couvre la fenêtre de jeu entière** (2026-09-17, décision utilisateur :
+    /// « un voile qui recouvre toute la fenêtre du jeu et les overlays lorsque l'utilisateur ouvre
+    /// la modale d'options alors que la fenêtre de jeu est ouverte ») : `paint_content` voile
+    /// alors toute la fenêtre (`design::scrim`) et centre la modale dedans, à sa taille
+    /// habituelle (`panels::options_modal::WINDOW_SIZE`). `false` quand elle est ouverte SANS
+    /// client Wakfu à l'écran (`main.rs::OverlayWindow::is_detached`) : la fenêtre OS est alors
+    /// à la taille de la modale, et il n'y a rien à voiler — « si l'utilisateur ouvre la modale
+    /// d'options sans le jeu, aucun voile ne doit être appliqué ». Sans objet pour les autres
+    /// zones ; la confirmation de remise à zéro (`ResetConfirm`) voile toujours, c'est sa raison
+    /// d'être.
+    pub veiled: bool,
+    /// Ce que l'hôte sait de la bande Récap et que le bloc ne peut pas savoir (`kind == Recap`) :
+    /// verrou, bande déplacée, côté de la rangée d'actions — voir `panels::recap::RecapChrome`.
+    /// Sans objet pour les autres zones, qui laissent son défaut.
+    pub recap_chrome: panels::recap::RecapChrome,
     /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour
     /// `kind == OverlayKind::Login`, même règle que `options` ; `&mut` pour la même raison
     /// (l'horloge de l'anneau animé et le survol vivent d'une frame à l'autre).
     pub login: Option<&'a mut panels::login::LoginState>,
+    /// Les réglages que le volet « Paramètres » de la Carte modifie (2026-09-22) — `Some`
+    /// uniquement pour `kind == OverlayKind::Login`, même règle que `login`. L'hôte les construit
+    /// à partir de `config::OverlayConfig` avant la frame et les relit quand
+    /// `RenderOutcome::settings_changed` le lui dit : il n'y a rien à valider.
+    pub card_settings: Option<&'a mut panels::login::CardSettings>,
 }
 
 /// Ce qu'une frame de rendu a produit, au-delà de l'affichage lui-même — étend l'ancien simple
-/// `bool` (`close_toast` seul) depuis le 2026-09-08 : la modale Options ajoute deux autres
-/// signaux que `paint_content` doit remonter à l'appelant réel (`main.rs`/`bin/overlay-ui-x11.rs`,
-/// seuls capables de créer une fenêtre OS ou de lancer un dialogue de fichier natif) SANS que
-/// `paint_content`/`build_ui` eux-mêmes en dépendent — voir la doc de tête du module pour pourquoi
-/// ces deux fonctions restent PURES.
+/// `bool` (`close_toast` seul) depuis le 2026-09-08 : la modale Options ajoute deux autres signaux
+/// que `paint_content` doit remonter à l'appelant réel
+/// (`main.rs`/`bin/wakfu-companion-overlay-x11.rs`, seuls capables de créer une fenêtre OS ou de
+/// lancer un dialogue de fichier natif) SANS que `paint_content`/`build_ui` eux-mêmes en dépendent
+/// — voir la doc de tête du module pour pourquoi ces deux fonctions restent PURES.
 #[derive(Debug, Default)]
 pub struct RenderOutcome {
     /// Voir la doc historique de `build_ui` : fermeture du toast de suivi (clic sur la carte ou sa
@@ -307,6 +484,11 @@ pub struct RenderOutcome {
     /// (`EngineCommand::SetWatchlistDefinitions`), par le même chemin que la validation de l'onglet
     /// « Suivi » : voir `panels::watchlist::WatchlistOutcome::edit`.
     pub watchlist_edit: Option<panels::watchlist::WatchlistEdit>,
+    /// Le bouton de réinitialisation d'une tuile du bandeau vient d'être cliqué (`kind ==
+    /// Watchlist`, 2026-09-18) : l'entrée, pour que l'hôte ouvre la confirmation
+    /// `OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)` en la retenant. Voir
+    /// `panels::watchlist::WatchlistOutcome::reset_counter`.
+    pub watchlist_reset_requested: Option<WatchlistEntry>,
     /// URL que l'hôte doit ouvrir dans le navigateur, le cas échéant : clic sur "Détails" du
     /// panneau Suivi (la web app) ou sur "Ouvrir la page" de la carte d'appairage (l'URL de
     /// vérification).
@@ -323,9 +505,77 @@ pub struct RenderOutcome {
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion — l'hôte
     /// relance la vérification avec installation (voir `panels::login::LoginOutcome`).
     pub retry_update: bool,
+    /// **« Supprimer »** de l'écran de confirmation d'effacement de la fenêtre de connexion
+    /// (2026-09-18, constat C5 de `docs/analyse-rgpd.md`) : l'hôte efface les données locales
+    /// (`local_data::Scope::Everything`) puis arrête le programme — le même chemin que
+    /// `OptionsModalAction::PurgeLocalData`, pour un overlay sans compte lié où cette fenêtre est
+    /// la seule interface.
+    pub purge_local_data: bool,
+    /// Le cadenas du panneau Combat vient d'être cliqué (`kind == Combat`, 2026-09-17) : l'hôte
+    /// inverse le verrou et l'écrit dans la config (`config::OverlayConfig::combat_locked`). Voir
+    /// `panels::combat::CombatChrome`.
+    pub combat_toggle_lock: bool,
+    /// Le glyphe de replacement du panneau Combat vient d'être cliqué (`kind == Combat`) : l'hôte
+    /// ouvre la confirmation `OverlayKind::ResetConfirm(ResetTarget::CombatPosition)`.
+    pub combat_restore_requested: bool,
+    /// Le panneau Combat est saisi par sa poignée latérale (`kind == Combat`, 2026-09-17) : l'hôte
+    /// déplace la fenêtre OS **en hauteur seulement**, la borne à la fenêtre de jeu et persiste la
+    /// hauteur au relâchement. Voir `panels::drag::PanelDrag` et `combat_placement`.
+    pub combat_drag: crate::panels::drag::PanelDrag,
+    /// Hauteur que le bloc Récap vient d'occuper (`kind == Recap`), pour que l'hôte ajuste sa
+    /// fenêtre OS au contenu — même mécanique que [`Self::login_height`], et pour la même raison
+    /// qu'elle : une fenêtre plus haute que son bloc capterait les clics sur du vide en mode
+    /// interactif. La largeur, elle, est fixe (`panels::recap::WIDTH`) ; c'est la hauteur qui
+    /// bouge, quand une ligne trop large s'empile. Voir `panels::recap::show`.
+    pub recap_height: Option<f32>,
+    /// Le glyphe de remise à zéro du bloc Récap vient d'être cliqué (`kind == Recap`) : l'hôte
+    /// ouvre la fenêtre de confirmation (`OverlayKind::ResetConfirm`). Voir `panels::recap`.
+    pub recap_reset_requested: bool,
+    /// Le cadenas de la bande vient d'être cliqué (`kind == Recap`, 2026-09-17) : l'hôte inverse
+    /// le verrou et l'écrit dans la config (`config::OverlayConfig::recap_locked`). Voir
+    /// `panels::recap::RecapChrome`.
+    pub recap_toggle_lock: bool,
+    /// Le glyphe de replacement de la bande vient d'être cliqué (`kind == Recap`, 2026-09-17) :
+    /// l'hôte ouvre la confirmation `OverlayKind::ResetConfirm(ResetTarget::RecapPosition)`.
+    pub recap_restore_requested: bool,
+    /// La bande Récap est saisie à la souris (`kind == Recap`, 2026-09-17) : l'hôte déplace la
+    /// fenêtre OS, la borne à la fenêtre de jeu et persiste la position au relâchement. Voir
+    /// `panels::recap::RecapDrag`, qui dit pourquoi ce sont des POSITIONS et non des écarts.
+    ///
+    /// Le pendant, pour la Récap, de [`Self::drag_window`] côté fenêtre de connexion — mais
+    /// l'hôte ne peut pas s'en remettre ici à `Window::drag_window` : cette boucle-là appartient
+    /// à l'OS, elle ne rend la main qu'au relâchement (donc plus un pixel redessiné pendant le
+    /// geste sous Windows) et ne dit pas où la fenêtre a atterri, alors que c'est précisément ce
+    /// qu'il faut écrire dans la config.
+    pub recap_drag: crate::panels::recap::RecapDrag,
+    /// Ce que la fenêtre de confirmation vient d'obtenir (`kind == ResetConfirm`) : `Yes` remet la
+    /// session à zéro et ferme la fenêtre, `No` la ferme seulement, `Pending` la garde.
+    pub reset_choice: crate::design::ConfirmChoice,
+    /// « Rechercher à nouveau » de l'écran de mise à jour manuelle — une vérification sans
+    /// installation (voir `panels::login::LoginOutcome::check_update`).
+    pub check_update: bool,
+    /// « Mettre à jour maintenant » / « Réessayer » de l'écran de mise à jour manuelle — l'hôte
+    /// lance le téléchargement (voir `panels::login::LoginOutcome::install_update`).
+    pub install_update: bool,
+    /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle — l'hôte sort du mode manuel
+    /// (voir `panels::login::LoginOutcome::close_update`).
+    pub close_update: bool,
     /// Hauteur de contenu que la fenêtre de connexion vient de mesurer (`kind == Login`), pour que
     /// l'hôte ajuste la fenêtre OS à l'état affiché — voir `panels::login::show`.
     pub login_height: Option<f32>,
+    /// « Fermer » d'un écran de compte de la Carte — voir
+    /// `panels::login::LoginOutcome::close_window`.
+    pub close_login_window: bool,
+    /// Déconnexion confirmée dans la boîte de la Carte — voir
+    /// `panels::login::LoginOutcome::disconnect`.
+    pub disconnect_account: bool,
+    /// Un réglage du volet « Paramètres » de la Carte vient de changer : l'hôte écrit
+    /// `config.toml` et applique.
+    pub settings_changed: bool,
+    /// « Parcourir » de la section « Fichier » du volet — l'hôte ouvre le sélecteur natif.
+    pub browse_log_path: bool,
+    /// Un bouton d'essai du son du volet vient d'être cliqué.
+    pub test_sound: Option<panels::login::CardSound>,
 }
 
 /// **Refonte 2026-09-01** (retour utilisateur, capture d'écran à l'appui) : le nom du personnage,
@@ -359,10 +609,19 @@ pub struct RenderOutcome {
 /// `main.rs::render`) détient un accès en écriture à l'`ArcSwap` correspondant.
 pub fn build_ui(
     ctx: &egui::Context,
-    raw_input: egui::RawInput,
+    mut raw_input: egui::RawInput,
     mut content: RenderContent<'_>,
 ) -> (egui::FullOutput, RenderOutcome) {
     let mut outcome = RenderOutcome::default();
+    // **Panneau Combat posé à droite** (2026-09-17) : le pointeur réel est à droite, egui met en
+    // page à gauche — les événements sont donc traduits AVANT d'entrer, pendant que les formes
+    // peintes sont réfléchies à la sortie (voir `crate::mirror` et la fin de `paint_content`).
+    // Survol, clic, glisser et placement des infobulles tombent juste sans qu'aucun panneau ne
+    // sache qu'il est affiché en miroir.
+    if content.kind == OverlayKind::Combat && content.combat_on_right {
+        let axis_x = crate::mirror::axis_of_input(ctx, &raw_input);
+        crate::mirror::mirror_input(ctx, &mut raw_input, axis_x);
+    }
     // Reconstruit un `RenderContent` FRAIS à chaque appel de la fermeture plutôt que de déplacer
     // `content` (capturé par la fermeture) directement dans `paint_content` : `ctx.run_ui` exige
     // `FnMut`, et déplacer un agrégat non-`Copy` hors de l'environnement capturé d'une fermeture ne
@@ -387,11 +646,17 @@ pub fn build_ui(
                 portraits: content.portraits,
                 combat_frame: content.combat_frame,
                 icons: content.icons,
+                avatars: content.avatars,
+                game_servers: content.game_servers,
                 combat_side: &mut *content.combat_side,
                 combat_metric: &mut *content.combat_metric,
                 watchlist: content.watchlist,
                 watchlist_enabled: content.watchlist_enabled,
+                spells_enabled: content.spells_enabled,
+                combat_on_right: content.combat_on_right,
                 watchlist_selection: &mut *content.watchlist_selection,
+                watchlist_completions: content.watchlist_completions,
+                watchlist_reset: content.watchlist_reset,
                 watchlist_toast: content.watchlist_toast,
                 catalog: content.catalog,
                 catalog_stale: content.catalog_stale,
@@ -402,8 +667,14 @@ pub fn build_ui(
                 interactive: content.interactive,
                 shortcuts: content.shortcuts,
                 now: content.now,
+                recap_cells: content.recap_cells,
+                recap: content.recap,
                 options: content.options.as_deref_mut(),
+                veiled: content.veiled,
+                recap_chrome: content.recap_chrome,
+                combat_chrome: content.combat_chrome,
                 login: content.login.as_deref_mut(),
+                card_settings: content.card_settings.as_deref_mut(),
             },
         );
     });
@@ -423,13 +694,20 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         kind,
         fight,
         portraits,
+        avatars,
+        game_servers,
         combat_frame,
         icons,
         combat_side,
         combat_metric,
         watchlist,
         watchlist_enabled,
+        spells_enabled,
+        combat_on_right,
+        combat_chrome,
         watchlist_selection,
+        watchlist_completions,
+        watchlist_reset,
         watchlist_toast,
         catalog,
         catalog_stale,
@@ -440,11 +718,27 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         interactive,
         shortcuts,
         now,
+        recap_cells,
+        recap,
         options,
+        veiled,
+        recap_chrome,
         login,
+        card_settings,
     } = content;
 
     let mut outcome = RenderOutcome::default();
+    // **Panneau Combat posé à droite** (2026-09-17) : le miroir est ARMÉ avant la première forme
+    // du panneau et APPLIQUÉ après la dernière (voir la fin de cette fonction et `crate::mirror`,
+    // qui porte la décision et son pourquoi). Entre les deux, les panneaux peignent comme
+    // d'habitude et déclarent seulement leurs blocs de lecture (`mirror::upright`) — une
+    // déclaration qui ne coûte rien tant que le miroir n'est pas armé, donc rien du tout quand le
+    // panneau est à gauche.
+    let mirrored = kind == OverlayKind::Combat && combat_on_right;
+    if mirrored {
+        let ctx = ui.ctx();
+        crate::mirror::arm(ctx, crate::mirror::axis_of(ctx));
+    }
     // Marge interne nulle pour Combat sur trois côtés (refonte 2026-09-04, retour utilisateur :
     // collé au bord de la fenêtre de jeu, sans le moindre vide, pour simuler une interface qui
     // ferait partie du jeu — voir aussi `main.rs::GAME_EDGE_MARGIN_PX`, ramené à 0 pour la même
@@ -483,6 +777,19 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
             bottom: 6,
         },
         OverlayKind::Options => egui::Margin::ZERO,
+        // La confirmation couvre sa fenêtre entière : le voile va bord à bord.
+        OverlayKind::ResetConfirm(_) => egui::Margin::ZERO,
+        // Récap : calé à gauche de sa fenêtre, et SEUL le haut gagne une marge, celle des
+        // infobulles ([`RECAP_TOOLTIP_RESERVE`], même principe que `COMBAT_TOP_MARGIN`) — le bloc
+        // peint son propre fond et se place lui-même sous cette marge (voir `panels::recap::show`).
+        // Cette marge ne décale PAS le bloc dans le jeu : l'hôte ancre la fenêtre d'autant plus
+        // haut (voir `main.rs::anchor_position`), le bloc reste à `GAME_RECAP_TOP_MARGIN_PX`.
+        OverlayKind::Recap => egui::Margin {
+            left: 0,
+            right: 0,
+            top: RECAP_TOOLTIP_RESERVE as i8,
+            bottom: 0,
+        },
         // La fenêtre de connexion peint sa carte jusqu'aux bords de sa fenêtre OS (fond
         // translucide, anneau animé sur le pourtour) — voir `panels::login`.
         OverlayKind::Login => egui::Margin::ZERO,
@@ -531,7 +838,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         ui.add_space(4.0);
                     }
 
-                    panels::combat::show(
+                    let combat_outcome = panels::combat::show(
                         ui,
                         fight,
                         portraits,
@@ -543,7 +850,12 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         combat_side,
                         combat_metric,
                         shortcuts,
+                        spells_enabled,
+                        combat_chrome,
                     );
+                    outcome.combat_toggle_lock = combat_outcome.toggle_lock;
+                    outcome.combat_restore_requested = combat_outcome.restore_requested;
+                    outcome.combat_drag = combat_outcome.drag;
                 }
                 // Zone Suivi — fenêtre INDÉPENDANTE de Combat (demande utilisateur explicite
                 // 2026-09-01) : bande de tuiles façon `tracker-strip` du web, voir
@@ -570,7 +882,10 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         },
                         watchlist,
                         watchlist_enabled,
-                        watchlist_selection,
+                        panels::watchlist::WatchlistPanelState {
+                            selection: watchlist_selection,
+                            completions: watchlist_completions,
+                        },
                         watchlist_toast,
                         now,
                     );
@@ -579,6 +894,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     outcome.open_watchlist = watchlist_outcome.open_watchlist;
                     outcome.open_options = watchlist_outcome.open_options;
                     outcome.watchlist_edit = watchlist_outcome.edit;
+                    outcome.watchlist_reset_requested = watchlist_outcome.reset_counter;
                     if watchlist_outcome.open_web_app {
                         outcome.open_url = Some(overlay_sync::client::base_url().to_string());
                     }
@@ -587,41 +903,132 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // est `Some` uniquement pour ce `kind` (voir la doc de `RenderContent::options`) ;
                 // un appelant qui créerait une fenêtre `OverlayKind::Options` sans fournir cet état
                 // ne verrait simplement rien peint ici plutôt que de paniquer — jamais souhaitable
-                // en pratique (voir `main.rs`/`bin/overlay-ui-x11.rs`, qui le fournissent toujours
-                // pour ce cas), mais plus sûr qu'un `expect` sur un chemin de rendu.
-                // Fenêtre de connexion (2026-09-14) — voir `panels::login`. `login` est `Some`
-                // uniquement pour ce `kind` (même règle et même repli silencieux que `options`).
+                // en pratique (voir `main.rs`/`bin/wakfu-companion-overlay-x11.rs`, qui le
+                // fournissent toujours pour ce cas), mais plus sûr qu'un `expect` sur un chemin de
+                // rendu. Fenêtre de connexion (2026-09-14) — voir `panels::login`. `login` est
+                // `Some` uniquement pour ce `kind` (même règle et même repli silencieux que
+                // `options`).
                 OverlayKind::Login => {
                     if let Some(state) = login {
+                        // Les réglages sont facultatifs pour la même raison que l'état : un
+                        // appelant qui ne les fournit pas voit un volet « Paramètres » sur des
+                        // valeurs par défaut plutôt qu'une panique sur un chemin de rendu.
+                        let mut repli = panels::login::CardSettings::default();
+                        let settings = card_settings.unwrap_or(&mut repli);
                         let login_outcome = panels::login::show(
                             ui,
                             state,
                             icons,
                             auth_status,
                             auth_command_tx,
+                            settings,
                             now,
                         );
                         outcome.open_url = login_outcome.open_url;
                         outcome.drag_window = login_outcome.drag_window;
                         outcome.retry_update = login_outcome.retry_update;
+                        outcome.check_update = login_outcome.check_update;
+                        outcome.install_update = login_outcome.install_update;
+                        outcome.close_update = login_outcome.close_update;
+                        outcome.purge_local_data = login_outcome.purge_local_data;
+                        outcome.close_login_window = login_outcome.close_window;
+                        outcome.disconnect_account = login_outcome.disconnect;
+                        outcome.settings_changed = login_outcome.settings_changed;
+                        outcome.browse_log_path = login_outcome.browse_log_path;
+                        outcome.test_sound = login_outcome.test_sound;
                         outcome.login_height = Some(login_outcome.content_height);
                     }
+                }
+                // Récap de session (2026-09-16) — voir `panels::recap`. Deux choses remontent :
+                // la hauteur qu'il vient d'occuper, dont l'hôte se sert pour redimensionner la
+                // fenêtre OS, et le clic sur son glyphe de remise à zéro (2026-09-17).
+                OverlayKind::Recap => {
+                    let recap_outcome = panels::recap::show(ui, recap, recap_cells, recap_chrome);
+                    outcome.recap_height = Some(recap_outcome.height);
+                    outcome.recap_reset_requested = recap_outcome.reset_requested;
+                    outcome.recap_toggle_lock = recap_outcome.toggle_lock;
+                    outcome.recap_restore_requested = recap_outcome.restore_requested;
+                    outcome.recap_drag = recap_outcome.drag;
+                }
+                // La confirmation de remise à zéro (2026-09-17) — voir `OverlayKind::ResetConfirm`.
+                // `over(max_rect)` : le voile couvre la fenêtre entière, qui est celle du jeu.
+                OverlayKind::ResetConfirm(target) => {
+                    let (question, log_name) = match target {
+                        ResetTarget::RecapSession => (
+                            "Remettre le récap de session à zéro ?".to_string(),
+                            "recap.remise-a-zero",
+                        ),
+                        ResetTarget::RecapPosition => (
+                            "Replacer le récap à son emplacement d'origine ?".to_string(),
+                            "recap.replacement",
+                        ),
+                        // « Sa zone initiale » ne parle que de HAUTEUR : le côté reste celui que
+                        // la case des Options a choisi, et la phrase ne doit pas laisser croire
+                        // qu'un « Oui » ramènerait aussi le panneau à gauche.
+                        ResetTarget::CombatPosition => (
+                            "Replacer le panneau de combat à sa hauteur d'origine ?".to_string(),
+                            "combat.replacement",
+                        ),
+                        // La question nomme l'objet : « ce compteur » ne dirait pas lequel une
+                        // fois le voile posé sur le bandeau. Sans entrée prêtée par l'hôte (ne
+                        // devrait pas arriver), la question reste posable.
+                        ResetTarget::WatchlistCounter => (
+                            match watchlist_reset {
+                                Some(entry) => {
+                                    format!("Réinitialiser le compteur de « {} » ?", entry.name)
+                                }
+                                None => "Réinitialiser ce compteur ?".to_string(),
+                            },
+                            "suivi.reinitialisation",
+                        ),
+                    };
+                    outcome.reset_choice = crate::design::confirm_dialog(question)
+                        .over(ui.max_rect())
+                        .log_name(log_name)
+                        .show(ui);
                 }
                 OverlayKind::Options => {
                     if let Some(state) = options {
                         // Les mêmes dépendances que le bandeau Suivi : depuis le 2026-09-12,
                         // l'onglet « Alertes » liste de vrais objets, avec leur rareté lue au
                         // catalogue et leur icône descendue du même CDN.
-                        outcome.options_action = panels::options_modal::show(
-                            ui,
-                            state,
-                            &mut panels::options_modal::OptionsModalContext {
-                                catalog,
-                                remote_icons,
-                                remote_icon_textures,
-                                icons,
-                            },
-                        );
+                        let mut context = panels::options_modal::OptionsModalContext {
+                            catalog,
+                            remote_icons,
+                            remote_icon_textures,
+                            icons,
+                            avatars,
+                            game_servers,
+                        };
+                        outcome.options_action = if veiled {
+                            // La fenêtre est celle du jeu (voir `RenderContent::veiled`) : voile
+                            // bord à bord, modale centrée dedans à sa taille de toujours.
+                            // `ScrimLayer::Current` : le voile est le FOND de cette fenêtre,
+                            // rien n'est peint dessous — et les sélecteurs de la modale, en
+                            // `Foreground`, restent au-dessus d'elle.
+                            let (w, h) = panels::options_modal::WINDOW_SIZE;
+                            crate::design::scrim(ui.max_rect())
+                                .layer(crate::design::ScrimLayer::Current)
+                                .centered(egui::vec2(w, h))
+                                .log_name("options.voile")
+                                .show(ui, |ui| {
+                                    panels::options_modal::show(ui, state, &mut context)
+                                })
+                                .inner
+                        } else {
+                            panels::options_modal::show(ui, state, &mut context)
+                        };
+                        // Un lien de l'onglet « À propos » (2026-09-18) suit le même chemin que
+                        // « Détails » du panneau Suivi : l'intention devient une URL à ouvrir
+                        // par l'hôte (voir `RenderOutcome::open_url`), et l'action de la
+                        // modale est consommée ici — les hôtes ne la voient jamais.
+                        if let panels::options_modal::OptionsModalAction::OpenUrl(url) =
+                            &outcome.options_action
+                        {
+                            outcome.open_url = Some(url.clone());
+                            outcome.options_action =
+                                panels::options_modal::OptionsModalAction::None;
+                        }
                     }
                 }
             }
@@ -629,5 +1036,11 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
     // Curseur du jeu à la place du curseur système (voir `crate::cursor`) — APRÈS tout le contenu,
     // une fois que chaque widget survolé a dit ce qu'il voulait (`PlatformOutput::cursor_icon`).
     crate::cursor::apply(ui.ctx(), now);
+    // Le miroir s'applique en tout DERNIER, infobulles comprises : une forme peinte après
+    // resterait de l'autre côté. L'ENTRÉE fait le chemin inverse, en amont (`build_ui`) : le clic
+    // réel, à droite, est traduit en coordonnées de mise en page avant qu'egui ne le voie.
+    if mirrored {
+        crate::mirror::apply(ui.ctx());
+    }
     outcome
 }

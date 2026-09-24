@@ -13,13 +13,16 @@
 //! mutations — ajout, retrait, bascule, durée du toast, fermeture manuelle — et la reconstruction
 //! de l'objet à renvoyer au compte.
 //!
-//! **Le piège de cette écriture, et la raison d'être de [`AlertProfile::patch_value`]** : côté
-//! serveur, `PATCH /api/v1/settings` remplace la valeur ENTIÈRE d'une clé (voir
-//! `functions/api/v1/settings.ts::onRequestPatch`), et la clé `profile` ne contient pas que les
-//! alertes — elle porte aussi le pseudo, l'avatar et le mode d'affichage des personnages, que
-//! l'overlay ne connaît pas et n'affiche nulle part. Renvoyer un objet reconstruit de mémoire les
-//! effacerait du compte. La réécriture repart donc TOUJOURS de l'objet brut reçu au `GET`, dont
-//! elle ne remplace que les trois champs qu'elle possède.
+//! **L'écriture est PARTIELLE depuis le 2026-09-19** (constat C9 de `docs/analyse-rgpd.md`,
+//! minimisation) : l'entrée du `PATCH` porte `patch` au lieu de `value`, et le serveur fusionne
+//! champ par champ (`server/settings/patch.ts`, dépôt `wakfu-companion`). L'overlay n'envoie donc
+//! que les trois champs qu'il possède — [`AlertProfile::patch_fields`] — et le reste de la clé
+//! `profile` (pseudo, avatar, mode d'affichage des personnages, qu'il n'affiche nulle part) n'a
+//! plus à transiter par lui : ni reçu et conservé en mémoire, ni renvoyé.
+//!
+//! Jusque-là, le serveur remplaçant la valeur ENTIÈRE de la clé, la réécriture repartait de
+//! l'objet brut reçu au `GET` pour n'en remplacer que ces trois champs — un objet reconstruit de
+//! mémoire aurait effacé le pseudo et l'avatar du compte.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -43,8 +46,14 @@ pub const DEFAULT_SOUND_ITEM_NAMES: [&str; 10] = [
     "Plan \"Epée d'Amakna\"",
 ];
 
-/// Durée d'affichage du toast d'alerte, en secondes — `DEFAULT_ALERT_DURATION_SECONDS` du web.
-pub const DEFAULT_ALERT_DURATION_SECONDS: f32 = 3.5;
+/// Durée d'affichage du toast d'alerte, en secondes.
+///
+/// **5 s, et non les 3,5 s de `DEFAULT_ALERT_DURATION_SECONDS` du web** (demande utilisateur du
+/// 2026-09-16) : c'est le défaut de TOUTES les lignes « Fermeture automatique » de l'overlay —
+/// alertes de ramassage (ce profil), carte de chat et carte de décompte (config locale, voir
+/// `overlay_ui::config`). Le web garde son 3,5 ; un compte qui a déjà réglé sa durée n'est pas
+/// concerné, seul un profil sans `alertDurationSeconds` reçoit cette valeur.
+pub const DEFAULT_ALERT_DURATION_SECONDS: f32 = 5.0;
 
 /// Plancher de la durée réglable — `MIN_ALERT_DURATION_SECONDS` du web.
 pub const MIN_ALERT_DURATION_SECONDS: f32 = 0.5;
@@ -75,15 +84,30 @@ pub struct SoundItemEntry {
 }
 
 /// Émis par `Engine::ingest_batch` quand un objet ramassé (`LogEntry::Loot`) correspond à une
-/// [`SoundItemEntry`] activée — distinct de `WatchlistAlert` (files de drain séparées sur
-/// `Engine`, voir `drain_loot_alerts`/`drain_watchlist_alerts`) : les deux mécanismes sont
+/// [`SoundItemEntry`], **activée ou non** — distinct de `WatchlistAlert` (files de drain séparées
+/// sur `Engine`, voir `drain_loot_alerts`/`drain_watchlist_alerts`) : les deux mécanismes sont
 /// indépendants côté web (un objet peut être suivi sans avoir son son activé, et réciproquement),
 /// pas un type unique artificiellement partagé.
+///
+/// ## Un objet silencieux alerte quand même — écart voulu avec le site (2026-09-17)
+///
+/// Côté web, `registerLoot` ne déclenche rien pour une entrée `enabled: false` : « Son
+/// désactivé » y coupe le son ET le toast. L'overlay présente cette même bascule comme un mode
+/// **silencieux** (tuile de `panels::alerts_tab`, haut-parleur barré), et tient partout la règle
+/// « couper le son, ce n'est pas couper la fonctionnalité » (`panels::notifications`) : la sourdine
+/// du Suivi et celle du Chat gardent leur carte. Jusqu'à ce jour la liste d'alertes faisait
+/// exception sans le dire — un objet silencieux ne produisait ni toast ni confettis, signalé comme
+/// bug par l'utilisateur. L'alerte est donc émise pour toute entrée de la liste, et c'est
+/// [`Self::sound_enabled`] qui dit à l'hôte s'il doit jouer le son ; retirer l'objet de la liste
+/// reste le geste qui coupe tout.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LootAlert {
     pub name: String,
     pub quantity: i64,
     pub catalog_id: Option<i64>,
+    /// `SoundItemEntry::enabled` de l'entrée qui a déclenché l'alerte : `false` = objet en mode
+    /// silencieux, la carte s'affiche sans son.
+    pub sound_enabled: bool,
 }
 
 /// Tout ce que la clé `profile` du compte porte d'alertes — la liste des objets **et** les deux
@@ -239,56 +263,40 @@ impl AlertProfile {
 
     /// L'entrée activée dont le nom correspond, le cas échéant — miroir exact de
     /// `ProfileService.findEnabledSoundItem` : nom insensible à la casse et aux espaces
-    /// superflus, seule une entrée `enabled` déclenche une alerte.
+    /// superflus. **Ce n'est pas le déclencheur d'alerte** de l'overlay, qui alerte aussi pour une
+    /// entrée silencieuse (voir [`find_sound_item`] et la doc de [`LootAlert`]).
     pub fn find_enabled(&self, item_name: &str) -> Option<&SoundItemEntry> {
         find_enabled_sound_item(&self.sound_items, item_name)
     }
 
-    /// L'objet `profile` à renvoyer dans un `PATCH /api/v1/settings`, construit **sur celui reçu
-    /// au `GET`**.
-    ///
-    /// Voir la doc de module : le serveur remplace la valeur entière de la clé, et cette clé porte
-    /// aussi le pseudo, l'avatar et le mode d'affichage des personnages — que l'overlay ne
-    /// connaît pas. Ils sont donc recopiés tels quels depuis `stored`, dont seuls les trois champs
-    /// d'alerte sont remplacés. Un `stored` absent ou d'un autre type JSON donne un objet neuf
-    /// avec les seuls champs d'alerte, ce qui est le bon comportement pour un compte qui n'avait
-    /// pas encore de profil.
-    pub fn patch_value(&self, stored: Option<&Value>) -> Value {
-        let mut profile = match stored {
-            Some(Value::Object(map)) => Value::Object(map.clone()),
-            _ => Value::Object(serde_json::Map::new()),
-        };
-        let map = profile
-            .as_object_mut()
-            .expect("objet construit juste avant");
-        map.insert(
-            "soundItems".to_string(),
-            serde_json::to_value(&self.sound_items).unwrap_or(Value::Null),
-        );
-        map.insert(
-            "alertDurationSeconds".to_string(),
-            serde_json::json!(self.duration_seconds),
-        );
-        map.insert(
-            "alertManualClose".to_string(),
-            Value::Bool(self.manual_close),
-        );
-        profile
+    /// Les trois champs d'alerte, tels que le correctif `profile` d'un `PATCH /api/v1/settings`
+    /// les porte — voir la doc de module : le serveur fusionne champ par champ, tout ce qui n'est
+    /// pas ici (pseudo, avatar, mode d'affichage) reste tel quel sur le compte. `soundItems` est
+    /// remplacé en bloc (pas de fusion récursive côté serveur), et c'est le comportement voulu :
+    /// c'est la liste entière que l'onglet « Alertes » édite.
+    pub fn patch_fields(&self) -> Value {
+        serde_json::json!({
+            "soundItems": self.sound_items,
+            "alertDurationSeconds": self.duration_seconds,
+            "alertManualClose": self.manual_close,
+        })
     }
 }
 
-/// Construit l'entrée `PATCH /api/v1/settings` (`{ key, value, updatedAt }`) pour la clé
+/// Construit l'entrée `PATCH /api/v1/settings` (`{ key, patch, updatedAt }`) pour la clé
 /// `"profile"` — symétrique de [`AlertProfile::from_settings_json`], et jumeau de
-/// `watchlist::watchlist_patch_entry`.
+/// `watchlist::watchlist_patch_entry` (qui, lui, envoie une `value` entière : une liste plate n'a
+/// pas de sous-clé à fusionner).
 ///
-/// `profile` est l'objet ENTIER produit par [`AlertProfile::patch_value`], jamais les seuls champs
-/// d'alerte : le serveur remplace la valeur de la clé, il ne fusionne pas. `updatedAt` arbitre le
-/// « dernier écrivain gagne », horodaté à l'instant de l'appel — miroir de
-/// `RemoteUserDataRepository.sendPending()` côté web.
-pub fn profile_patch_entry(profile: &Value) -> Value {
+/// `fields` est le correctif produit par [`AlertProfile::patch_fields`] : le serveur le fusionne
+/// dans la valeur en compte. `updatedAt` arbitre le « dernier écrivain gagne », horodaté à
+/// l'instant de l'appel — miroir de `RemoteUserDataRepository.sendPending()` côté web ; pour une
+/// fusion, le serveur exige de plus que la clé n'ait pas bougé depuis sa propre lecture, et
+/// renvoie sinon la version du compte dans `rejected` (voir `overlay_sync::client::patch_settings`).
+pub fn profile_patch_entry(fields: &Value) -> Value {
     serde_json::json!({
         "key": "profile",
-        "value": profile,
+        "patch": fields,
         "updatedAt": chrono::Utc::now().to_rfc3339(),
     })
 }
@@ -329,16 +337,29 @@ fn merge_with_defaults(stored: Option<Vec<SoundItemEntry>>) -> Vec<SoundItemEntr
     items
 }
 
-/// Miroir exact de `ProfileService.findEnabledSoundItem` : nom insensible à la casse et aux
-/// espaces superflus, seule une entrée `enabled` déclenche une alerte.
-pub fn find_enabled_sound_item<'a>(
+/// L'entrée dont le nom correspond, **activée ou non** — nom insensible à la casse et aux espaces
+/// superflus, comme `ProfileService.findEnabledSoundItem` côté web, sans son filtre `enabled`.
+///
+/// C'est le déclencheur d'alerte de l'overlay (`Engine::ingest_batch`) : une entrée silencieuse
+/// alerte sans son, voir la doc de [`LootAlert`]. La première entrée de ce nom l'emporte, comme
+/// côté web.
+pub fn find_sound_item<'a>(
     items: &'a [SoundItemEntry],
     item_name: &str,
 ) -> Option<&'a SoundItemEntry> {
     let normalized = item_name.trim().to_lowercase();
     items
         .iter()
-        .find(|entry| entry.enabled && entry.name.trim().to_lowercase() == normalized)
+        .find(|entry| entry.name.trim().to_lowercase() == normalized)
+}
+
+/// Miroir exact de `ProfileService.findEnabledSoundItem` : [`find_sound_item`] restreint aux
+/// entrées `enabled`. **Pas le déclencheur d'alerte** de l'overlay (voir [`LootAlert`]).
+pub fn find_enabled_sound_item<'a>(
+    items: &'a [SoundItemEntry],
+    item_name: &str,
+) -> Option<&'a SoundItemEntry> {
+    find_sound_item(items, item_name).filter(|entry| entry.enabled)
 }
 
 #[cfg(test)]
@@ -367,6 +388,18 @@ mod tests {
     fn une_entree_desactivee_ne_declenche_jamais_rien() {
         let items = vec![entry("Pierre d'aventure", false)];
         assert_eq!(find_enabled_sound_item(&items, "Pierre d'aventure"), None);
+    }
+
+    #[test]
+    fn une_entree_silencieuse_est_trouvee_sans_filtre_de_son() {
+        // Le déclencheur de l'overlay : l'objet silencieux alerte (carte), sans son — voir
+        // `LootAlert`. Le filtre `enabled` reste réservé au miroir web.
+        let items = vec![entry("Pierre d'aventure", false)];
+        assert_eq!(
+            find_sound_item(&items, "  PIERRE D'AVENTURE  "),
+            Some(&items[0])
+        );
+        assert_eq!(find_sound_item(&items, "Larve Bleue"), None);
     }
 
     #[test]
@@ -470,9 +503,10 @@ mod tests {
     }
 
     #[test]
-    fn la_reecriture_preserve_les_champs_que_l_overlay_ne_connait_pas() {
-        // **Le test qui garde le pseudo et l'avatar de l'utilisateur.** Le serveur remplace la
-        // valeur entière de la clé : un objet reconstruit de mémoire les effacerait du compte.
+    fn le_correctif_ne_porte_que_les_trois_champs_d_alerte() {
+        // **Le test qui garde le pseudo et l'avatar de l'utilisateur.** Le serveur fusionne le
+        // correctif dans la valeur en compte : tout champ envoyé ici remplacerait le sien. Un
+        // objet reconstruit de mémoire avec `pseudo: ""` ou `avatarIndex: 0` les effacerait.
         let recu = serde_json::json!({
             "pseudo": "Oumbra",
             "avatarIndex": 12,
@@ -484,29 +518,39 @@ mod tests {
         });
         let mut profil = AlertProfile::from_settings_json(&serde_json::json!({ "profile": recu }));
         profil.manual_close = true;
-        let patch = profil.patch_value(Some(&recu));
-        assert_eq!(patch["pseudo"], "Oumbra");
-        assert_eq!(patch["avatarIndex"], 12);
-        assert_eq!(patch["avatarSchemaVersion"], 2);
-        assert_eq!(patch["characterViewMode"], "grid");
+        let patch = profil.patch_fields();
+        let mut cles: Vec<&str> = patch
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        cles.sort_unstable();
+        assert_eq!(
+            cles,
+            ["alertDurationSeconds", "alertManualClose", "soundItems"]
+        );
         assert_eq!(patch["alertManualClose"], true);
+        assert_eq!(patch["alertDurationSeconds"], 1.0);
         assert_eq!(patch["soundItems"].as_array().map(Vec::len), Some(10));
     }
 
     #[test]
-    fn la_reecriture_d_un_compte_sans_profil_ne_panique_pas() {
-        let profil = AlertProfile::default();
-        for stored in [None, Some(&Value::Null), Some(&serde_json::json!("brisé"))] {
-            let patch = profil.patch_value(stored);
-            assert!(patch["soundItems"].is_array());
-        }
+    fn l_entree_du_patch_porte_un_correctif_et_jamais_une_valeur() {
+        // `value` et `patch` sont exclusifs côté serveur, et seul `patch` déclenche la fusion :
+        // une `value` effacerait le pseudo et l'avatar exactement comme avant le 2026-09-19.
+        let entree = profile_patch_entry(&AlertProfile::default().patch_fields());
+        assert_eq!(entree["key"], "profile");
+        assert!(entree["patch"].is_object());
+        assert!(entree.get("value").is_none());
+        assert!(entree["updatedAt"].is_string());
     }
 
     #[test]
     fn le_champ_is_default_part_bien_dans_le_json_ecrit() {
         // Le web s'en sert pour masquer le bouton de suppression : l'omettre rendrait les dix
         // objets protégés supprimables depuis le site après un enregistrement par l'overlay.
-        let patch = AlertProfile::default().patch_value(None);
+        let patch = AlertProfile::default().patch_fields();
         assert_eq!(patch["soundItems"][0]["isDefault"], true);
         assert_eq!(patch["soundItems"][0]["enabled"], true);
     }

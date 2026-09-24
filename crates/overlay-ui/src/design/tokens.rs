@@ -346,6 +346,186 @@ pub const TAB_LABEL_OUTLINE_FACTOR: f32 = 0.205;
 pub const TAB_FONT_SIZE: f32 = 17.0;
 
 // ---------------------------------------------------------------------------------------------
+// Switch à deux cases — mesuré le 2026-09-16 sur les deux captures du sélecteur de genre du jeu
+// (`switch-first-slot-active.png` / `switch-second-slot-active.png`, 88 × 44 une fois détourées et
+// générifiées) et sur le relevé `ui-blueprint` qui en a été tiré. Détail dans
+// `design::components::switch`.
+
+/// Hauteur de la **capture** du switch — **44px**, celle des deux textures du jeu. Comme pour un
+/// onglet, la hauteur est celle de la texture, jamais déduite de la largeur.
+///
+/// Ce n'est plus la hauteur à laquelle le composant se peint : depuis le 2026-09-16 (demande
+/// utilisateur, « passer les boutons du composant switch en 36 par 36 de manière générique »),
+/// toute case est servie à [`SWITCH_SLOT_SIZE`], et ce jeton ne sert qu'à en déduire le rapport
+/// de réduction (`36 / 44`) appliqué aux marges du 9-slice, au séparateur, au liseré et aux
+/// glyphes — voir `design::components::switch`. `Switch::scale` multiplie ce rapport ;
+/// `Switch::height` impose la hauteur seule.
+pub const SWITCH_HEIGHT: f32 = 44.0;
+
+/// Largeur d'une case dans la **capture** — **43px**, la moitié des 88px du switch du jeu une
+/// fois le séparateur déduit : liseré 2 + case active 40 + séparateur 2 + case inactive 42 +
+/// liseré 2. Même statut que [`SWITCH_HEIGHT`] : une mesure du jeu, pas la largeur servie — celle-ci
+/// est [`SWITCH_SLOT_SIZE`], et `Switch::width` l'étire.
+///
+/// 43 et non 40 ou 42 : la case active du jeu fait 40 de remplissage, l'inactive 42, et chacune
+/// porte un liseré de 2 à son extrémité. Donner la même largeur aux deux laisse le 9-slice
+/// absorber un pixel de chaque côté. La capture « première case active » mesurait 87px (case
+/// inactive à 41) contre 88 pour l'autre : écart de rendu du jeu, égalisé à 88 au traitement de
+/// l'asset.
+pub const SWITCH_SLOT_WIDTH: f32 = 43.0;
+
+/// Côté d'une case de switch, **dans les deux variantes** — **36px**, [`ICON_BUTTON_SIZE`].
+///
+/// **Décision utilisateur du 2026-09-16** : « passer les boutons du composant switch en 36 par 36
+/// de manière générique ». Jusque-là, seule la variante premier plan était à 36 (son socle EST un
+/// bouton icône) ; la variante cadre se peignait aux 43 × 44 de sa capture, et les deux
+/// contrôles ne tombaient pas sur la même grille dès qu'ils cohabitaient. Une case est désormais
+/// un carré de 36, quelle que soit sa matière : le cadre du jeu y est ramené par un 9-slice à
+/// l'échelle `36 / 44` (`DesignSystem::paint_scaled`) — coins, liseré et biseaux réduits ensemble,
+/// comme le jeu réduit son interface —, et non par un corps comprimé entre des marges figées.
+///
+/// Un switch à `n` cases fait donc `36 × n` plus ses gouttières : `+ 2 × (n − 1)` en cadre (74
+/// pour deux, 112 pour trois), `− 2 × (n − 1)` en premier plan, dont les socles se chevauchent
+/// ([`SWITCH_FIRST_PLAN_OVERLAP`] : 70 et 104).
+pub const SWITCH_SLOT_SIZE: f32 = ICON_BUTTON_SIZE;
+
+/// Largeur du séparateur entre les deux cases — **2px**, colonnes x 42–43 de la capture.
+pub const SWITCH_SEPARATOR_WIDTH: f32 = 2.0;
+
+/// Épaisseur du liseré haut et bas — **2px**. Le séparateur ne court qu'entre ces deux liserés
+/// (y 2..42), comme celui d'une barre d'onglets.
+pub const SWITCH_BORDER_Y: f32 = 2.0;
+
+/// Liseré du cadre — **`#221f24`**, `uispec.py palette` sur les colonnes x 0–1 (79 % à
+/// `#221f24`, le reste à un niveau près). Peint dans la gouttière, où aucune texture de case ne
+/// le porte : sans lui, le cadre serait entaillé de deux encoches au droit du séparateur.
+pub const SWITCH_BORDER: Color32 = Color32::from_rgb(0x22, 0x1F, 0x24);
+
+/// Séparateur entre les deux cases — **`#312d2d`**, 100 % de la palette des colonnes x 42–43
+/// entre les deux liserés. Un aplat, pas un dégradé : contrairement au trait entre deux onglets,
+/// la colonne est constante à deux niveaux près de y=4 à y=39 (les extrémités reçoivent le
+/// biseau de la case active, un pixel plus clair).
+pub const SWITCH_SEPARATOR: Color32 = Color32::from_rgb(0x31, 0x2D, 0x2D);
+
+/// Glyphe de la case ACTIVE — **`#f4d89f`**, couleur dominante des pixels pleins du ♂ et du ♀
+/// sur leurs captures respectives. C'est, à un niveau près, l'or de tout le design system
+/// ([`TEXT_GOLD`], [`ICON_TINT_HOVER`]).
+pub const SWITCH_ICON_ACTIVE: Color32 = Color32::from_rgb(0xF4, 0xD8, 0x9F);
+
+/// Glyphe de la case INACTIVE — **`#a9a5a2`**, gris clair légèrement chaud, couleur dominante des
+/// pixels pleins du ♀ inactif (capture 1) et du ♂ inactif (capture 2). Ce n'est pas
+/// [`ICON_TINT`] (`#c5cbcc`, gris froid du premier plan) : le jeu grise le glyphe non
+/// sélectionné plus franchement.
+pub const SWITCH_ICON_INACTIVE: Color32 = Color32::from_rgb(0xA9, 0xA5, 0xA2);
+
+/// Atténuation d'un glyphe **en couleurs** (`DsIcon::native_color`) là où un glyphe blanc serait
+/// teinté [`SWITCH_ICON_INACTIVE`] : multiplicateur 150/255 (≈ 59 %) sur ses trois canaux.
+///
+/// **Estimation, pas une mesure** : le jeu n'a pas de switch à glyphes en couleurs dans les
+/// interfaces relevées. 150 est le rapport de luminance entre [`SWITCH_ICON_INACTIVE`] et
+/// [`SWITCH_ICON_ACTIVE`] (`#a9a5a2` sur `#f4d89f`, ≈ 0,68) arrondi vers le bas pour que
+/// l'atténuation se lise aussi sur un glyphe déjà sombre (la dague des dégâts). Validé sur le
+/// rendu du panneau Combat (2026-09-16), à remplacer par une mesure si le jeu en fournit une.
+pub const ICON_NATIVE_DIM: Color32 = Color32::from_rgb(150, 150, 150);
+
+/// Côté du carré englobant d'un glyphe de switch — **16px**.
+///
+/// **Mesuré, avec une nuance.** Les deux glyphes du jeu sont peints à leur taille native dans
+/// leur case de 40px : ♂ 14 × 14 et ♀ 10 × 16, tous deux centrés (relevé `ui-blueprint`,
+/// centres à 22,22 et 66,22 pour des cases centrées en 22 et 65). 16 est la plus grande de ces
+/// deux encres. Le composant ne **grossit** donc pas un glyphe qui tient dans ce carré — le ♂
+/// reste à 14 — et ne réduit que ceux qui le dépassent. Un étalon commun (comme
+/// [`ICON_BUTTON_CONTENT`]) donnerait un ♂ à 16, deux pixels plus large que dans le jeu.
+pub const SWITCH_ICON_SIZE: f32 = 16.0;
+
+/// Côté natif d'une case de la variante [`SwitchVariant::FirstPlan`](crate::design::SwitchVariant)
+/// — **[`ICON_BUTTON_SIZE`], 36px**, parce qu'une case y EST un socle de bouton icône
+/// (`button-icon-first-plan.png`, 36 × 36). Lui donner une référence propre ferait diverger deux
+/// contrôles qui partagent leur texture, et l'écart se verrait dès qu'ils cohabitent dans une même
+/// barre de premier plan. Depuis le 2026-09-16, c'est aussi le côté d'une case de la variante
+/// cadre ([`SWITCH_SLOT_SIZE`]) : les deux variantes partagent leur grille.
+pub const SWITCH_FIRST_PLAN_SIZE: f32 = SWITCH_SLOT_SIZE;
+
+/// Liseré de la case CHOISIE en variante premier plan — **`#126068`, la teinte la plus vive de
+/// `button-icon-first-plan-hover.png`** (relevé de sa palette, 2026-09-16 : 10 px de la texture).
+///
+/// Il devient le signal de la case choisie depuis que le survol allume l'icône ET le socle : sans
+/// lui, une case survolée et la case choisie sont identiques. Ni or, ni gris — **une couleur de la
+/// texture elle-même**, choisie sur rendu comparatif des six teintes de son corps (artefact du
+/// 2026-09-16, décision utilisateur).
+///
+/// Le socle sélectionné est un **dégradé**, clair en haut (`#428087`) et sombre en bas
+/// (`#18383e`) : une teinte prise dans sa moitié basse (`#164047`, essayée) se dissout dans le
+/// haut de la case. `#126068` tient sur toute la hauteur.
+///
+/// **Il remplace la bordure du socle, il ne s'y ajoute pas** : même épaisseur
+/// ([`SWITCH_FIRST_PLAN_RIM_WIDTH`]), même arrondi ([`SWITCH_FIRST_PLAN_RIM_ROUNDING`]), posé SUR
+/// elle (retrait nul). Peint après toutes les cases, il recouvre aussi les bordures des voisines
+/// qui chevauchent la case choisie.
+pub const SWITCH_FIRST_PLAN_RIM: Color32 = Color32::from_rgb(0x12, 0x60, 0x68);
+
+/// Épaisseur du liseré de la case choisie — **2 px, celle de la bordure de la texture**, mesurée :
+/// sur `button-icon-first-plan.png`, les colonnes x 0–1 et les lignes y 0–1 sont à `#141519`, le
+/// corps commence en 2. Un liseré d'un pixel laisserait la moitié de la bordure noire visible.
+pub const SWITCH_FIRST_PLAN_RIM_WIDTH: f32 = 2.0;
+
+/// Opacité du liseré de la case choisie — **85 % (216/255)**, choisie sur rendu comparatif
+/// (100 / 85 / 70 %) : elle retire au trait ce qu'il a de tranchant sans l'effacer. Décision
+/// utilisateur du 2026-09-16.
+pub const SWITCH_FIRST_PLAN_RIM_ALPHA: u8 = 216;
+
+/// Opacité du halo d'un pixel peint juste à l'intérieur du liseré, de la même couleur —
+/// **35 % (90/255)**, choisie sur rendu comparatif (0 / 25 / 35 / 50 / 70 %).
+///
+/// Il adoucit la marche entre le liseré et le corps du socle. Au-delà de 50 %, il cesse d'être un
+/// halo : il se lit comme un liseré de trois pixels.
+pub const SWITCH_FIRST_PLAN_HALO_ALPHA: u8 = 90;
+
+/// Épaisseur du halo : **un pixel**, pas plus — demande utilisateur explicite.
+pub const SWITCH_FIRST_PLAN_HALO_WIDTH: f32 = 1.0;
+
+/// Arrondi du halo : celui du liseré moins son épaisseur, donc quasi nul ; 1 garde un coin adouci
+/// plutôt qu'un angle droit sous l'arrondi du liseré.
+pub const SWITCH_FIRST_PLAN_HALO_ROUNDING: u8 = 1;
+
+/// Arrondi du liseré de la case choisie — **2, celui des coins de la texture**, mesuré sur le
+/// coin haut-gauche de `button-icon-first-plan.png` : l'alpha y vaut 24/255 en (0,0), 32 et 42 sur
+/// ses deux voisins, puis 236 en (0,2). Un liseré à angle droit dépasserait du socle dans les
+/// quatre coins.
+pub const SWITCH_FIRST_PLAN_RIM_ROUNDING: u8 = 2;
+
+/// Chevauchement de deux socles voisins en variante premier plan (2026-09-16).
+///
+/// Chaque socle porte un liseré de 2 px : deux socles côte à côte en alignent quatre, plus la
+/// gouttière du fond, soit 6 px de sombre entre deux glyphes (retour utilisateur : « ça fait comme
+/// s'il y avait une bordure de 2 pixels », là où le jeu n'en montre qu'une, fine). Les faire se
+/// chevaucher superpose les deux liserés en un seul.
+pub const SWITCH_FIRST_PLAN_OVERLAP: f32 = 2.0;
+
+/// Trait peint sur la jointure de deux socles qui se chevauchent. Un gris sombre
+/// mais franchement plus clair que le fond du socle (`#141519`) : superposés, les deux liserés
+/// noirs ne se distinguent plus de lui.
+pub const SWITCH_FIRST_PLAN_SEAM: Color32 = Color32::from_rgb(0x4A, 0x4E, 0x54);
+
+/// Glyphe de la case CHOISIE en variante premier plan — **blanc pur**, donc la couleur vraie du
+/// fichier.
+///
+/// C'est la distinction qui sépare la case choisie de la case survolée, qui partagent leur socle
+/// (`button-icon-first-plan-hover.png`) : même règle que la barre d'onglets, où l'actif et le
+/// survolé partagent leur fond et ne se distinguent que par la couleur de leur libellé (voir
+/// [`TAB_LABEL_ACTIVE`]). Le couple gris clair → or du contexte premier plan ([`ICON_TINT`] /
+/// [`ICON_TINT_HOVER`]) tient les deux autres états, il ne pouvait pas arbitrer celui-ci.
+pub const SWITCH_FIRST_PLAN_ICON_ACTIVE: Color32 = TAB_LABEL_ACTIVE;
+
+/// Corps du libellé d'une case **sans pictogramme** — 17px, le corps de tous les libellés du jeu
+/// ([`TAB_FONT_SIZE`]).
+///
+/// **Inventé, faute de référence** : le jeu n'a pas de switch à libellé texte dans les captures
+/// relevées, seulement le sélecteur de genre à pictogrammes. La valeur reprend le corps d'onglet,
+/// la case la plus proche par sa hauteur (44px, la même). À mesurer dès qu'une capture existera.
+pub const SWITCH_FONT_SIZE: f32 = TAB_FONT_SIZE;
+
+// ---------------------------------------------------------------------------------------------
 // Case à cocher — mesurée sur `releve-section-options.json` (nœuds `cb1` à `cb3`) et sur les deux
 // assets, qui font exactement la taille relevée. Détail dans `design::components::checkbox`.
 // ---------------------------------------------------------------------------------------------
@@ -1507,6 +1687,98 @@ pub const ITEM_SLOT_COUNT_CURRENT: Color32 = Color32::from_rgb(0xFF, 0xD7, 0x00)
 /// qu'elle portait avant.
 pub const ITEM_SLOT_TARGET_TEXT: Color32 = Color32::from_rgb(0xB0, 0xB0, 0xB0);
 
+/// Côté du **glyphe de mode** (cible du décompte, drapeau de l'objectif — voir
+/// `item_slot::SlotGlyph`) — 8 px, un peu moins que les 9 px de la maquette validée : « un tout
+/// petit peu réduit pour qu'il ne déborde pas sur la bordure » (2026-09-17).
+pub const ITEM_SLOT_GLYPH_SIZE: f32 = 8.0;
+
+/// Retrait du glyphe depuis le coin **haut-gauche**, sur les deux axes — 8 px, un de plus que la
+/// case à cocher ([`ITEM_SLOT_SELECTION_INSET`]), qui occupe ce même coin en mode sélection.
+///
+/// Le liseré finit au pixel 4 (voir [`ITEM_SLOT_BORDER_INSET_RATIO`]), et son antialiasing en
+/// mord un cinquième. Contrairement à la case, le glyphe est **cerné de noir** d'un pixel tout
+/// autour : à 7, sa forme n'avait qu'un pixel de fond entre son cerne et le liseré, et se lisait
+/// collée. À 8, le cerne se pose là où commence la case (7) et la forme garde trois pixels de
+/// fond depuis le liseré. Retour utilisateur du 2026-09-17 : « en haut à gauche, avec deux à
+/// trois pixels d'écart de la bordure, en haut et sur le côté, pour qu'il ne soit pas collé » —
+/// le coin bas-gauche de la première version, sur la ligne de base de la fraction, se lisait
+/// comme un morceau du compteur.
+pub const ITEM_SLOT_GLYPH_INSET: f32 = ITEM_SLOT_SELECTION_INSET + 1.0;
+
+// ---------------------------------------------------------------------------------------------
+// Sceau de complétion — `design::item_slot`, méthode `completion`
+//
+// Un décompte arrivé à 0 ou un objectif atteint ne disparaît pas sans rien dire : sa bordure
+// devient arc-en-ciel et tournoie, l'arc-en-ciel se **condense sur la couleur de rareté de
+// l'objet**, la tuile éclate et se dissout. Variante « Rareté scellée » choisie par l'utilisateur
+// le 2026-09-17 parmi quatre maquettes animées.
+//
+// **Les durées ci-dessous sont un découpage, pas une mesure** : rien dans le jeu ne les dicte.
+// Elles viennent du budget que l'utilisateur a posé — « pas plus de 4 secondes, quelque chose
+// qu'on remarque au moment où il y a le toast » — et de la maquette qu'il a validée, où elles
+// étaient jouées à cette vitesse. Elles se lisent comme des instants cumulés depuis le
+// franchissement du seuil, d'où les bornes croissantes.
+
+/// Fin du **soulèvement** — l'emplacement grandit de [`ITEM_SLOT_COMPLETION_LIFT_SCALE`] pour
+/// annoncer que quelque chose lui arrive.
+pub const ITEM_SLOT_COMPLETION_LIFT_END: f32 = 0.30;
+
+/// Fin de la **rotation arc-en-ciel** : trois tours, accélérés (voir `completion_phase`).
+pub const ITEM_SLOT_COMPLETION_SPIN_END: f32 = 1.80;
+
+/// Fin de la **condensation** : la couronne a fini de passer de l'arc-en-ciel à la couleur de
+/// rareté de l'objet.
+pub const ITEM_SLOT_COMPLETION_SEAL_END: f32 = 2.15;
+
+/// Début de la **dissolution** de l'emplacement en particules.
+pub const ITEM_SLOT_COMPLETION_DISSOLVE_START: f32 = 2.30;
+
+/// Fin de la dissolution : l'emplacement ne peint plus rien après cet instant.
+pub const ITEM_SLOT_COMPLETION_DISSOLVE_END: f32 = 3.35;
+
+/// **Durée totale de la célébration**, en secondes — ce que l'hôte attend avant de retirer
+/// l'entrée (`main.rs`), et la borne au-delà de laquelle `completion_phase` rend une phase vide.
+///
+/// Les 0,15 s qui séparent cette valeur de [`ITEM_SLOT_COMPLETION_DISSOLVE_END`] ne sont pas un
+/// arrondi : elles laissent la gerbe de confettis du panneau (`panels::watchlist`) finir sa chute
+/// sur un emplacement déjà vide, plutôt que de la couper net.
+pub const ITEM_SLOT_COMPLETION_DURATION: f32 = 3.50;
+
+/// Échelle atteinte au sommet du soulèvement — +9 %, assez pour que la tuile se détache de ses
+/// voisines sans bousculer la rangée (le panneau ne réserve aucune place pour ce dépassement).
+pub const ITEM_SLOT_COMPLETION_LIFT_SCALE: f32 = 1.09;
+
+/// Nombre de tours de la couronne pendant la phase de rotation.
+pub const ITEM_SLOT_COMPLETION_TURNS: f32 = 3.0;
+
+/// Largeur de la couronne au repos puis au plus fort de la rotation, en px à
+/// [`ITEM_SLOT_SIZE`] — elle s'épaissit en tournant, puis se resserre en se scellant sur la
+/// rareté. Proportionnelles au côté de l'emplacement, comme tout le reste du composant.
+pub const ITEM_SLOT_COMPLETION_CROWN_MIN: f32 = 2.0;
+/// Voir [`ITEM_SLOT_COMPLETION_CROWN_MIN`].
+pub const ITEM_SLOT_COMPLETION_CROWN_MAX: f32 = 5.0;
+
+/// Nombre de segments qui composent la couronne. `egui` n'a pas de dégradé conique : l'arc-en-ciel
+/// est une suite de traits colorés posés le long du contour, et 48 suffisent pour qu'on n'en
+/// distingue aucun à 64 px (un par 1,3 px de périmètre à cette taille).
+pub const ITEM_SLOT_COMPLETION_CROWN_SEGMENTS: usize = 48;
+
+/// Saturation et valeur de l'arc-en-ciel de la couronne — pleines, à peine adoucies : cette
+/// couronne est peinte par-dessus un jeu, elle doit se voir.
+pub const ITEM_SLOT_COMPLETION_RAINBOW_SATURATION: f32 = 0.92;
+/// Voir [`ITEM_SLOT_COMPLETION_RAINBOW_SATURATION`].
+pub const ITEM_SLOT_COMPLETION_RAINBOW_VALUE: f32 = 1.0;
+
+/// Nombre de particules de la dissolution. Déterministes (voir `completion_phase`) : une capture
+/// de référence doit rendre deux fois la même image.
+pub const ITEM_SLOT_COMPLETION_MOTES: usize = 64;
+
+/// Hauteur dont une particule monte avant de s'éteindre, en fraction du côté de l'emplacement.
+pub const ITEM_SLOT_COMPLETION_MOTE_RISE: f32 = 0.42;
+
+/// Côté d'une particule de dissolution, en px.
+pub const ITEM_SLOT_COMPLETION_MOTE_SIZE: f32 = 2.0;
+
 // ---------------------------------------------------------------------------------------------
 // Jauge — `design::meter`
 //
@@ -1795,6 +2067,14 @@ pub const PAGINATION_ARROW_GAP: f32 = 4.0;
 // gagné un second appelant — la garde de fermeture de la fenêtre Options.
 // ---------------------------------------------------------------------------------------------
 
+// Les sept jetons qui suivent décrivaient la boîte de confirmation **peinte à la main**, avant que
+// `design::confirm_dialog` ne passe aux textures détourées (2026-09-15). Plus rien ne les peint :
+// le corps, la crête et le filet de pied viennent maintenant de `confirm-box-{body,crest,foot}.png`,
+// qui portent leur remplissage, leur liseré et leur arrondi dans leurs propres pixels.
+//
+// Ils sont conservés le temps que la comparaison avant/après soit validée — le skill `ui-component`
+// interdit de retirer les constantes de l'ancien rendu avant ce feu vert. À supprimer ensuite.
+
 /// Fond du corps — **`#585955`**, un gris CLAIR.
 ///
 /// Histogramme de x 40..410 / y 60..110 sur la capture : `#585955` dominant, puis `#595a56` et
@@ -1824,39 +2104,137 @@ pub const CONFIRM_CREST_GLYPH: f32 = 14.0;
 /// Largeur du corps — **420 px mesurés** (bords à x=13 et x=433 sur une capture de 449).
 pub const CONFIRM_WIDTH: f32 = 420.0;
 
-/// Hauteur du corps — 120 px.
+/// Hauteur du corps — **148 px mesurés** (y = 45..193 sur la capture).
 ///
-/// **Choix de mise en page, pas une mesure** : la capture donne ~144 px (y ≈ 47..191) pour une
-/// question sur deux lignes. Les questions posées ici tiennent sur une.
-pub const CONFIRM_HEIGHT: f32 = 120.0;
+/// C'était 120 px jusqu'au 2026-09-15, annoncé comme un « choix de mise en page, pas une mesure »
+/// au motif que les questions posées ici tiennent sur une ligne. Le relevé `ui-blueprint` a donné
+/// 148, et la texture du corps fait exactement cette hauteur : la garder évite d'étirer une bande
+/// médiane pour rien.
+pub const CONFIRM_HEIGHT: f32 = 148.0;
 
-/// Hauteur de la question, depuis le haut du corps — 46 px.
-pub const CONFIRM_QUESTION_TOP: f32 = 46.0;
+/// Largeur de la crête — 250 px, taille native de `confirm-box-crest.png`.
+///
+/// **Mesure, et volontairement figée** : sur la capture le bandeau doré s'arrête à 250 px quand le
+/// corps en fait 420. Une seule capture ne dit pas si le jeu l'allongerait sur une boîte plus
+/// large ; le figer est le choix retenu (décision utilisateur, 2026-09-15), cohérent avec les
+/// embouts de bouton qui ne s'étirent pas davantage.
+pub const CONFIRM_CREST_WIDTH: f32 = 250.0;
 
-/// Corps de la question — 15 px, celui du texte courant du jeu.
-pub const CONFIRM_FONT_SIZE: f32 = 15.0;
+/// Hauteur de la crête — 57 px, taille native de la texture.
+pub const CONFIRM_CREST_HEIGHT: f32 = 57.0;
 
-/// Marge latérale de la rangée de boutons — 26 px de chaque côté.
-pub const CONFIRM_BUTTONS_INSET: f32 = 26.0;
+/// De combien la crête descend **dans** le corps — 21 px.
+///
+/// La pointe basse du losange s'arrête à y = 53 sur la capture et son cerne sombre à 55, quand le
+/// corps commence à y = 36 (repère de l'image détourée). La crête se peint donc APRÈS le corps, et
+/// ne déborde au-dessus de lui que de `CONFIRM_CREST_HEIGHT - CONFIRM_CREST_OVERLAP` = 36 px.
+pub const CONFIRM_CREST_OVERLAP: f32 = 21.0;
 
-/// Hauteur de cette rangée, depuis le haut du corps — 68 px.
-pub const CONFIRM_BUTTONS_TOP: f32 = 68.0;
+/// Largeur du filet de pied — 98 px, taille native de `confirm-box-foot.png`.
+pub const CONFIRM_FOOT_WIDTH: f32 = 98.0;
 
-/// Hauteur des deux boutons.
+/// Hauteur de ce filet — 9 px, dont la totalité déborde sous le corps.
+pub const CONFIRM_FOOT_HEIGHT: f32 = 9.0;
+
+/// Centre du bloc de la question, depuis le haut du corps — 42 px.
+///
+/// Mesuré : le bloc occupe y = 58..98 sur la capture détourée, soit 22..62 sous le bord du corps,
+/// dont le milieu est à 42. C'est ce point que vise un `Align2::CENTER_CENTER`.
+pub const CONFIRM_QUESTION_TOP: f32 = 42.0;
+
+/// Corps de la question — 18 px.
+///
+/// **Ce jeton valait 15, sur une provenance fausse.** Elle invoquait « une hauteur de capitale
+/// mesurée de 12 px » et le ratio d'egui de 0,805 ; une hauteur de capitale se lit sur un seul
+/// glyphe, dépend de l'accent qui le surmonte et du seuil qui l'isole, et elle avait été relevée
+/// sur le rendu à la main d'avant le détourage — pas sur la capture. Retour utilisateur du
+/// 2026-09-15 : « un poil petite ».
+///
+/// La mesure qui le remplace ne dépend d'aucune conversion encre → corps, parce qu'elle compare
+/// deux rendus de la **même chaîne** : les deux lignes du jeu sont rejouées dans chaque police
+/// candidate par `cargo run -p overlay-testkit --example police-confirmation`, puis mesurées comme
+/// la capture l'a été.
+///
+/// | | « Êtes-vous sûr(e) de vouloir supprimer ce » | « build ? » |
+/// | --- | --- | --- |
+/// | jeu | 325 px | 51 px |
+/// | Light 15 (l'ancien corps) | 264 px | 41 px |
+/// | **Light 18** | **317 px** | **50 px** |
+/// | Light 19 | 334 px | 53 px |
+///
+/// Le corps 15 rendait la question **17 % trop courte**. Dix-huit l'amène à 2 % du jeu ; 19 la
+/// dépasse de 3 % et gonfle la hauteur d'encre de la seconde ligne à 15 px pour 13 mesurés.
+pub const CONFIRM_FONT_SIZE: f32 = 18.0;
+
+/// Couleur de l'encre de la question — **gris clair, pas blanc**.
+///
+/// Mesurée au cœur des lettres de la capture (érosion 2×2, 463 px) : R 208,5 G 208,8 B 208,4. Le
+/// composant demandait `Color32::WHITE`, ce qui rendait la question à 220 au cœur et 213 sur ses
+/// franges, contre 208 et 197 dans le jeu — plus claire et plus dense, donc plus accrocheuse juste
+/// sous l'or du médaillon.
+///
+/// **Elle est rigoureusement neutre**, et c'est la réponse à l'impression de jaune rapportée le
+/// 2026-09-15 : mesurés, le cœur, les franges d'antialiasing, le halo et le fond sont neutres à
+/// ±0,5 d'écart rouge − bleu **des deux côtés**. Le seul élément chaud de la boîte est la crête
+/// dorée posée au-dessus de la question (+8,2), et elle est conforme au jeu.
+pub const CONFIRM_INK: Color32 = Color32::from_rgb(0xD0, 0xD1, 0xD0);
+
+/// Largeur où la question passe à la ligne — 344 px, la largeur utile du corps.
+///
+/// `CONFIRM_WIDTH - 40 - 36`, les deux paddings mesurés sur la capture. Le jeu coupe bien dans cet
+/// intervalle : sa première ligne fait 325 px, et « build » (51 px) n'y tiendrait pas.
+///
+/// **Sans ce retour à la ligne, le passage au corps 18 déborderait.** La plus longue des trois
+/// questions posées par `panels::options_modal` — « Fermer l'overlay et installer la version X ? »
+/// — demande environ 356 px à ce corps, pour 344 disponibles.
+pub const CONFIRM_TEXT_WIDTH: f32 = 344.0;
+
+/// Interligne de la question — 23 px, mesuré de centre à centre entre les deux lignes de la
+/// capture. C'est plus que l'interligne naturel d'Ubuntu au corps 18 (≈ 21 px), d'où un réglage
+/// explicite plutôt que la valeur par défaut d'`egui`.
+pub const CONFIRM_LINE_HEIGHT: f32 = 23.0;
+
+/// Marge latérale de la rangée de boutons — 38 px de chaque côté.
+///
+/// **Centrage strict, là où la capture ne l'est pas** : elle donne 40 px à gauche et 36 à droite,
+/// un écart de 2 px qui tient au rendu du texte et non à une règle de mise en page — la deuxième
+/// ligne de la question est décalée du même côté et de la même quantité. 38 = (420 - 344) / 2,
+/// où 344 est la largeur du groupe.
+pub const CONFIRM_BUTTONS_INSET: f32 = 38.0;
+
+/// Hauteur de cette rangée, depuis le haut du corps — **82 px mesurés** (y = 118 sur la capture
+/// détourée, dont le corps commence à 36).
+pub const CONFIRM_BUTTONS_TOP: f32 = 82.0;
+
+/// Hauteur des deux boutons — 36 px mesurés, soit exactement [`ButtonSize::Compact`].
+///
+/// [`ButtonSize::Compact`]: crate::design::ButtonSize::Compact
 pub const CONFIRM_BUTTON_HEIGHT: f32 = 36.0;
 
-/// Largeur de chacun.
-pub const CONFIRM_BUTTON_WIDTH: f32 = 150.0;
-
-/// Gouttière entre les deux — 14 px.
-pub const CONFIRM_BUTTON_GAP: f32 = 14.0;
-
-/// Opacité du voile posé sur ce que la boîte interrompt.
+/// Largeur de chacun — **168 px mesurés**, et la même pour les deux.
 ///
-/// **Le voile n'est pas une teinte, c'est une information** : tant que le dialogue est ouvert, ce
+/// Le relevé de référence du skill `ui-blueprint` les donnait à 166 et 159 px, en attribuant
+/// l'écart au rendu du libellé : c'était une mesure prise sur le remplissage, liseré exclu.
+pub const CONFIRM_BUTTON_WIDTH: f32 = 168.0;
+
+/// Gouttière entre les deux — **8 px mesurés** (x = 208..216 sur la capture détourée).
+pub const CONFIRM_BUTTON_GAP: f32 = 8.0;
+
+// ---------------------------------------------------------------------------------------------
+// `design::scrim` — voile modal.
+// ---------------------------------------------------------------------------------------------
+
+/// Opacité du voile posé sur ce qu'une fenêtre modale interrompt.
+///
+/// **Le voile n'est pas une teinte, c'est une information** : tant que la fenêtre est ouverte, ce
 /// qu'il couvre est inerte. C'est pourquoi le composant le peint sur le rectangle que l'appelant
 /// lui donne — la FENÊTRE entière, pied de page compris — et non sur son seul panneau.
-pub const CONFIRM_SCRIM_ALPHA: u8 = 0x88;
+///
+/// Né `CONFIRM_SCRIM_ALPHA` avec la boîte de confirmation (2026-09-12), estimé à l'œil sur la
+/// capture `interface-confirm-box.png` du jeu (pas de mesure : le voile y couvre une scène dont on
+/// ne connaît pas la luminosité d'origine). Renommé le 2026-09-17 quand le voile est devenu un
+/// composant à part entière, partagé par quatre appelants.
+pub const SCRIM_ALPHA: u8 = 0x88;
 
 // ---------------------------------------------------------------------------------------------
 // `design::label` — libellé d'une ligne, élidé.
@@ -1911,6 +2289,13 @@ pub const LEGEND_TILE_PAD_X: f32 = 10.0;
 /// Voile d'une tuile survolée — le même noir à 40 % que les tuiles d'Alertes et du Suivi
 /// (`panels::alerts_tab::TILE_HOVER_SCRIM`).
 pub const LEGEND_TILE_HOVER_SCRIM: Color32 = Color32::from_black_alpha(0x66);
+/// Retrait de la case à cocher du mode sélection depuis le coin **haut-droit du cadre** — le coin
+/// de la croix de retrait, qu'elle remplace (2026-09-16).
+///
+/// 6 px, et non les 7 d'[`ITEM_SLOT_SELECTION_INSET`] : l'emplacement d'objet doit loger sa case à
+/// l'intérieur d'un liseré de rareté qui occupe les pixels 2 à 4 du bord, une tuile à légende n'a
+/// qu'un trait d'un pixel. La case y tombe à la même distance visible du cadre.
+pub const LEGEND_TILE_SELECTION_INSET: f32 = 6.0;
 
 // -------------------------------------------------------------------------------------------
 // Couleurs des canaux de chat

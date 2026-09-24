@@ -33,13 +33,20 @@
 
 use crate::design;
 
-/// **Les trois interrupteurs, ensemble** — Suivi, Alertes, Recherche de chat.
+/// **Les interrupteurs de fonctionnalité, ensemble** — Suivi, Alertes, Recherche de chat, et
+/// depuis le 2026-09-15 le détail des combats et le suivi des sorts.
 ///
-/// Un seul type plutôt que trois `bool` baladeurs, pour deux raisons : ils voyagent toujours
+/// Un seul type plutôt que des `bool` baladeurs, pour deux raisons : ils voyagent toujours
 /// ensemble (config persistée → fenêtre Options → hôte → thread Engine), et surtout leur défaut
-/// est `true`. Trois champs `bool` dans une structure `#[derive(Default)]` vaudraient `false`,
+/// est `true`. Des champs `bool` dans une structure `#[derive(Default)]` vaudraient `false`,
 /// c'est-à-dire « tout coupé » — le contraire de ce que doit faire une version neuve. Ici le
 /// défaut est écrit une fois, et tout ce qui dérive `Default` au-dessus l'hérite.
+///
+/// **Les trois premiers ouvrent chacun leur onglet** (voir [`show`], qui grise tout ce qui suit
+/// dans l'onglet) ; les deux derniers sont des cases de la section « Combat » de l'onglet
+/// « Paramètres » — même véhicule, parce qu'ils font la même chose (couper une fonctionnalité,
+/// sans rien détruire) et empruntent le même chemin jusqu'à l'hôte, mais il n'y a pas d'onglet
+/// « Combat » à griser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureToggles {
     /// Le bandeau de suivi et l'alerte de décompte à zéro.
@@ -48,6 +55,42 @@ pub struct FeatureToggles {
     pub alerts: bool,
     /// Le son et la carte quand un message du chat correspond à une recherche.
     pub chat: bool,
+    /// **Le panneau Combat lui-même** — case « Activer le détail des combats » (2026-09-15).
+    /// Décoché, aucune fenêtre Combat n'est montrée, combat en cours compris (voir
+    /// `panels::combat::should_show`) : le moteur, lui, continue de compter et de synchroniser
+    /// l'historique, exactement comme pour les trois interrupteurs ci-dessus.
+    pub combat: bool,
+    /// **Le bloc « ligne de sorts »** du panneau Combat (`panels::combat_spell_block`) — case
+    /// « Activer le suivi des sorts », **dépendante de [`Self::combat`]** : sans panneau, il n'y a
+    /// pas de colonne où peindre les sorts. Décoché, le panneau garde ses portraits et ses barres
+    /// et perd le bloc (et avec lui les marques sur les médaillons).
+    pub spells: bool,
+    /// **La bande Récap de session** — case « Activer le récap de session », en tête de la section
+    /// « Recap » de l'onglet « Paramètres » (2026-09-16).
+    ///
+    /// Décochée, aucune fenêtre Récap n'est montrée (elle est masquée, pas détruite — voir
+    /// `main.rs::App::sync_panel_visibility`, même politique que le panneau Combat). Le moteur
+    /// continue de compter : recocher la case retrouve les mêmes chiffres, sans relire le log.
+    /// La durée affichée, elle, reste celle de l'overlay depuis son lancement — couper la bande ne
+    /// met pas le chrono en pause (voir `panels::recap`).
+    pub recap: bool,
+    /// **Les cases facultatives de la bande Récap** — « Afficher la durée de la session »,
+    /// « Afficher les combats », « Afficher les challenges », sous l'interrupteur ci-dessus et
+    /// **dépendantes de [`Self::recap`]** comme le suivi des sorts l'est du détail des combats
+    /// (2026-09-16, tard). Décochée, une case disparaît de la bande, qui se resserre (voir
+    /// `panels::recap::RecapCells`) ; kamas et XP restent toujours affichés.
+    pub recap_cells: crate::panels::recap::RecapCells,
+}
+
+impl FeatureToggles {
+    /// **Le suivi des sorts est-il EFFECTIF ?** — sa case ET celle dont elle dépend.
+    ///
+    /// La case « Activer le suivi des sorts » garde sa valeur quand le détail des combats est
+    /// coupé (on la retrouve telle quelle en le rallumant, comme la sourdine de la notification
+    /// de tour) : c'est donc ici, et pas sur le champ nu, que se lit ce que l'overlay peint.
+    pub fn spells_visible(self) -> bool {
+        self.combat && self.spells
+    }
 }
 
 impl Default for FeatureToggles {
@@ -58,6 +101,10 @@ impl Default for FeatureToggles {
             suivi: true,
             alerts: true,
             chat: true,
+            combat: true,
+            spells: true,
+            recap: true,
+            recap_cells: crate::panels::recap::RecapCells::default(),
         }
     }
 }
