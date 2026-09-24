@@ -2,6 +2,8 @@
 paths:
   - "crates/overlay-sync/**"
   - ".github/workflows/release.yml"
+  - ".github/workflows/release-pr.yml"
+  - ".claude/skills/release/**"
   - "docs/plan-mise-a-jour.md"
   - "wakfu-overlay.pub"
   - "crates/overlay-ui/preview.*"
@@ -18,6 +20,15 @@ dans `CLAUDE.md`.
 Le plan de référence est [`docs/plan-mise-a-jour.md`](../../docs/plan-mise-a-jour.md) (décisions
 du mainteneur en §10) : GitHub Releases, workflow de release déclenché par la fusion sur `main`,
 manifeste `latest.json` signé `minisign`, module `overlay_sync::update`.
+
+Deux chemins mènent `dev` sur `main`, donc à une Release : la fusion à la main par le mainteneur
+(push sur `main`, qui déclenche `release.yml`), ou le skill `release` (2026-09-24) — branche
+`release-AAAA-MM-JJ` créée depuis `main` avec `dev` fusionnée dedans, puis `release-pr.yml` ouvre
+la PR, **appelle `ci.yml` en workflow réutilisable** (pas de `paths-ignore`, pas de dépendance à la
+version de la branche par défaut comme avec `workflow_run`), fusionne par le GITHUB_TOKEN et lance
+`release.yml` par `workflow_dispatch` (une fusion par ce jeton ne déclenche pas `push`). Si `main`
+reçoit un jour une règle de protection avec checks requis, ceux de ce chemin s'appellent
+`ci / <job>`.
 
 **Un binaire de Release vise toujours la prod** (`overlay_sync::client::DEFAULT_BASE_URL`) ; le
 déploiement dev (`claude-dev.wakfu-companion.com`) n'est utilisé qu'en local via

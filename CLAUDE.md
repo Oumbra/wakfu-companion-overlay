@@ -79,9 +79,11 @@ En session cloud, trois consignes propres au conteneur éphémère :
 ## Interdits
 
 - **Ne jamais pousser sur `master`/`main`.** Les fusions de `dev` vers la branche principale sont
-  faites **par le mainteneur**, jamais par une session Claude.
+  faites **par le mainteneur**, jamais par une session Claude de sa propre initiative. Seule
+  exception : le skill `release`, lancé à sa demande explicite (branche `release-AAAA-MM-JJ`
+  fusionnée par le workflow `release-pr.yml`).
 - Ne pas créer de branche supplémentaire (`feature/*`, `claude/*`…) pour y laisser du travail :
-  tout converge sur `dev`.
+  tout converge sur `dev` (hors branche `release-*` du skill `release`, supprimée par le workflow).
 - Pas de `push --force` sur `dev` (branche partagée entre sessions et avec le mainteneur).
 - Pas d'ouverture de pull request sans demande explicite de l'utilisateur.
 
@@ -170,3 +172,4 @@ jamais ici — ce fichier ne garde que ce qui vaut pour toute tâche.
 | `overlay-sync`, `release.yml`, mise à jour automatique, `preview.*`, clés de signature | `.claude/rules/release.md` |
 | panneau Combat (`panels/combat*.rs`), écart voulu avec le site | `.claude/rules/combat-panel.md` |
 | détourer un asset, relever une interface, construire un composant egui | skills `design-asset`, `ui-blueprint`, `ui-component` |
+| mise en production, publication d'une version (fusion `dev` → `main`) | skill `release` |
