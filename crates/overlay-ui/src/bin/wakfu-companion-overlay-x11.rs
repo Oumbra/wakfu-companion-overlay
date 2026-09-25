@@ -1523,7 +1523,9 @@ mod linux_main {
                 .collect();
             match chat_command::partner_character(&windows, &active) {
                 Ok(partner) => {
-                    tracing::info!(">>> {} ({label}) : {partner}", command.label());
+                    // Nom du partenaire en `debug` seulement — voir la même ligne dans `main.rs`.
+                    tracing::info!(">>> {} ({label})", command.label());
+                    tracing::debug!(%partner, ">>> {}", command.label());
                     chat_command::send(command, partner);
                 }
                 Err(err) => tracing::info!(">>> {} ({label}) : {}", command.label(), err.message()),

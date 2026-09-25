@@ -795,8 +795,8 @@ struct App {
     /// déjà journalisées (`sync_topmost`), si `GetForegroundWindow()` désignait réellement autre
     /// chose que le jeu pendant tout ce temps (l'utilisateur ayant réellement l'attention ailleurs)
     /// ou si la détection elle-même restait bloquée sur une valeur obsolète. Sert à borner un
-    /// battement de coeur périodique (voir `sync_topmost`) qui journalise le titre de la fenêtre
-    /// actuellement au premier plan — mais SEULEMENT tant qu'au moins un overlay reste
+    /// battement de coeur périodique (voir `sync_topmost`) qui journalise, en `debug`, le titre de
+    /// la fenêtre actuellement au premier plan — mais SEULEMENT tant qu'au moins un overlay reste
     /// `HWND_NOTOPMOST` (voir son appel), pour ne pas spammer le journal en usage normal.
     last_foreground_heartbeat: Option<std::time::Instant>,
     /// Dialogue de fichier natif (`rfd`) en cours, le cas échéant — voir `App::start_file_dialog`
@@ -2537,7 +2537,10 @@ impl App {
             .collect();
         match chat_command::partner_character(&windows, &foreground) {
             Ok(partner) => {
-                tracing::info!(">>> {} ({label}) : {partner}", command.label());
+                // Le nom du partenaire se journalise en `debug`, comme l'auteur d'une alerte de
+                // chat (constat C6 de `docs/analyse-rgpd.md`) : l'action suffit au niveau `info`.
+                tracing::info!(">>> {} ({label})", command.label());
+                tracing::debug!(%partner, ">>> {}", command.label());
                 chat_command::send(command, partner);
             }
             // Jamais une erreur remontée à l'utilisateur : il n'y a rien à réparer, seulement un
@@ -2632,7 +2635,12 @@ impl App {
                 .is_none_or(|t| now.duration_since(t) >= FOREGROUND_HEARTBEAT_INTERVAL);
             if due {
                 self.last_foreground_heartbeat = Some(now);
-                tracing::info!(
+                // **En `debug` depuis le 2026-09-25** : le titre est celui de N'IMPORTE quelle
+                // application au premier plan (onglet de navigateur, objet d'un courriel…), écrit
+                // toutes les 3 s — une donnée personnelle au niveau `info` par défaut, contraire
+                // au constat C6 de `docs/analyse-rgpd.md`. Le diagnostic reste disponible avec
+                // « Journal détaillé ».
+                tracing::debug!(
                     "[topmost] sondage (overlay(s) toujours rétrogradé(s)) : premier plan actuel = « {} »",
                     Self::window_title(foreground)
                 );
