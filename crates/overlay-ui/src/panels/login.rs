@@ -25,8 +25,9 @@
 //!   `crate::startup`) — et ne cède la place qu'à l'overlay (compte lié) ou à l'écran suivant ;
 //! - **non connecté** (`Disconnected { failure: None }`) : « Vous n'êtes pas connecté » + « Se
 //!   connecter », et dessous la ligne d'acceptation — « En vous connectant, vous acceptez » les
-//!   conditions d'utilisation et la politique de confidentialité du service, en liens (2026-09-18,
-//!   `docs/analyse-rgpd.md` §3.4 : l'information des personnes se donne avant le geste) ;
+//!   conditions d'utilisation et la politique de confidentialité du service, nommées sans lien
+//!   depuis le 2026-09-22 (née le 2026-09-18, constat C4 de `docs/analyse-rgpd.md` :
+//!   l'information des personnes se donne avant le geste) ;
 //! - **appairage** (`PairingStarted`) : le code en grand, le compte à rebours, « Copier le code »,
 //!   « Rouvrir la page », et le lien « Annuler l'appairage » ;
 //! - **erreur** (`Disconnected { failure: Some(_) }`) : « Connexion impossible », le titre court de
@@ -485,7 +486,7 @@ pub struct LoginOutcome {
     /// **L'écran de connexion en a un depuis le 2026-09-22** (demande utilisateur) : il n'avait
     /// aucune sortie, et la mention de consentement juste au-dessus engage sur les conditions
     /// d'utilisation et la politique de confidentialité. Un consentement qu'on ne peut pas
-    /// refuser n'en est pas un (`docs/analyse-rgpd.md` §3.4). L'overlay reste dans la zone de
+    /// refuser n'en est pas un (constat C4 de `docs/analyse-rgpd.md`). L'overlay reste dans la zone de
     /// notification, d'où l'entrée « Se connecter » le ramène.
     pub close_window: bool,
     /// Déconnexion **confirmée** dans la boîte de la Carte — voir [`CardConfirm`].
@@ -1139,8 +1140,14 @@ fn paint_confirm(
 ) {
     let CardConfirm::Disconnect = confirm;
     let question = "Déconnecter le compte de l'overlay ?";
-    let body = "La session enregistrée est effacée. L'overlay revient à son écran de connexion, \
-                et il faudra réappairer l'application pour le réutiliser.";
+    // Ce qu'efface la déconnexion, historique non envoyé compris — texte partagé avec la fenêtre
+    // Options (`a_propos_tab::DISCONNECT_INFO`, 2026-09-25).
+    let body = format!(
+        "{} L'overlay revient à son écran de connexion, et il faudra réappairer l'application \
+         pour le réutiliser.",
+        crate::panels::a_propos_tab::DISCONNECT_INFO
+    );
+    let body = body.as_str();
 
     // Le voile absorbe aussi les clics : rien de ce qu'il couvre ne doit répondre.
     ui.interact(
@@ -1845,7 +1852,14 @@ fn paint_settings_content(
             y,
             "L'overlay ne fonctionne qu'avec un compte connecté : c'est lui qui porte la liste \
              suivie, les alertes et l'historique synchronisé. Vous déconnecter ramène l'overlay \
-             à son écran de connexion.",
+             à son écran de connexion, et il faudra réappairer l'application pour le réutiliser.",
+        );
+        y = set_note(
+            ui,
+            left,
+            inner,
+            y,
+            crate::panels::a_propos_tab::DISCONNECT_INFO,
         );
         let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(inner, BUTTON_HEIGHT));
         if button(
@@ -2674,9 +2688,10 @@ fn paint_body(
                     ui,
                     Pos2::new(body_left, y),
                     body_width,
-                    "L'overlay va effacer de cet ordinateur tout ce qu'il y a écrit : réglages, \
-                 combats en cours, file d'envoi, gabarits de tour, journaux, caches et session \
-                 enregistrée.",
+                    "L'overlay va effacer de cet ordinateur ce qu'il y a écrit : réglages, \
+                 combats en cours, file d'envoi, gabarits de tour, journaux, caches, session \
+                 enregistrée, inscription au démarrage de l'ordinateur et entrées du registre \
+                 (Windows).",
                     &p_font,
                     TEXT_MUTED,
                     P_LINE,

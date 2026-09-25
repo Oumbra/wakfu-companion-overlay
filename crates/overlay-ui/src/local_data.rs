@@ -1,13 +1,13 @@
 //! **Effacement des données locales** — le droit à l'effacement (RGPD art. 17) rendu exerçable
 //! depuis l'overlay, constat **C5** de [`docs/analyse-rgpd.md`](../../../docs/analyse-rgpd.md)
-//! §3.5 : la déconnexion n'effaçait que le jeton, et rien dans l'interface ne purgeait les
+//! : la déconnexion n'effaçait que le jeton, et rien dans l'interface ne purgeait les
 //! combats en cours, la file d'envoi, les gabarits de tour, les journaux ni la configuration.
 //!
 //! ## Deux portées, jamais une seule
 //!
 //! | Portée | Déclencheur | Ce qui part |
 //! | --- | --- | --- |
-//! | [`Scope::OnDisconnect`] | toute déconnexion (fenêtre Options, zone de notification, jeton refusé) — `background::spawn_auth_thread` | les fichiers qui portent des **tiers** ou une **capture d'écran** : `data/` (combats en cours et récap de session), `watchlist-counts.json`, `turn-templates/`, plus le contenu des journaux (`logs/*` vidés, `focus.log` supprimé) |
+//! | [`Scope::OnDisconnect`] | toute déconnexion volontaire (fenêtre Options, Carte, zone de notification) — `background::spawn_auth_thread`. Un jeton refusé (401) n'efface que le jeton | les fichiers qui portent des **tiers** ou une **capture d'écran** : `data/` (combats en cours et récap de session), `watchlist-counts.json`, `turn-templates/`, plus le contenu des journaux (`logs/*` vidés, `focus.log` supprimé) |
 //! | [`Scope::Everything`] | bouton « Supprimer les données locales » (fenêtre Options › À propos › Vos données, écran de connexion) | la racine de dossiers en entier (et l'ancienne, si elle subsiste), les jetons du trousseau système (tous les déploiements, `token_store::clear_all_tokens`), l'inscription au démarrage de l'ordinateur et les clés de registre de l'overlay (Windows) — l'état d'une installation neuve |
 //!
 //! Les deux gestes commencent par **effacer la session côté serveur**
@@ -320,7 +320,7 @@ const SHUTDOWN_REVOKE_BUDGET: std::time::Duration = std::time::Duration::from_se
 /// (`background::spawn_auth_thread`), juste avant `token_store::clear_token` — sans le jeton, plus
 /// rien ne désigne la session à effacer. Aucune fenêtre n'attend ce thread.
 ///
-/// Best-effort de bout en bout : sans jeton (déjà effacé, mode invité) il n'y a rien à révoquer,
+/// Best-effort de bout en bout : sans jeton (déjà effacé) il n'y a rien à révoquer,
 /// et un échec réseau est journalisé sans rien interrompre. Un effacement local doit aboutir hors
 /// ligne ; la session, elle, finira par expirer côté serveur.
 pub fn revoke_server_session() {

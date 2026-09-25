@@ -727,7 +727,7 @@ pub fn spawn_auth_thread(
                                 "[compte] déconnecté — jeton effacé, retour à la fenêtre de connexion."
                             );
                             // **Les données locales à tiers partent avec le compte** (2026-09-18,
-                            // constat C5 de `docs/analyse-rgpd.md` §3.5) : combats en cours, récap
+                            // constat C5 de `docs/analyse-rgpd.md`) : combats en cours, récap
                             // de session, compteurs de Suivi, gabarits de tour, et le contenu des
                             // journaux. APRÈS les deux commandes ci-dessus, jamais avant : le
                             // moteur oublie sa session sur `EngineCommand::Disconnect`

@@ -405,8 +405,8 @@ pub struct OptionsModalState {
     /// jour », même mécanique de brouillon que les autres cases : initialisée par l'hôte au
     /// réglage en vigueur (`config::OverlayConfig::auto_update`), prise en compte à « Valider ».
     pub auto_update: bool,
-    /// **Journal détaillé ?** — case de la section « Journal » de l'onglet « À propos »
-    /// (2026-09-18, constat C6 de `docs/analyse-rgpd.md`). Brouillon comme ses voisines ;
+    /// **Journal détaillé ?** — case de la section « Fichier » de l'onglet « Paramètres » (née
+    /// le 2026-09-18 dans « À propos », repartie le 2026-09-21 ; constat C6 de `docs/analyse-rgpd.md`). Brouillon comme ses voisines ;
     /// l'hôte l'applique à chaud à « Valider » (`logging::set_verbose`) et le persiste
     /// (`config::OverlayConfig::verbose_log`).
     pub verbose_log: bool,
@@ -602,10 +602,11 @@ pub enum OptionsModalAction {
     /// par « Annuler ».
     Disconnect,
     /// **« Supprimer les données locales »**, depuis « Vos données » de l'onglet « À propos »
-    /// (**confirmée**, voir `show`) — 2026-09-18, constat C5 de `docs/analyse-rgpd.md` §3.5 : le droit à l'effacement
+    /// (**confirmée**, voir `show`) — 2026-09-18, constat C5 de `docs/analyse-rgpd.md` : le droit à l'effacement
     /// (RGPD art. 17) exercé depuis l'overlay.
     ///
-    /// L'hôte efface les deux racines de dossiers, le jeton du trousseau, l'inscription au
+    /// L'hôte efface les deux racines de dossiers, les jetons du trousseau (tous les déploiements,
+    /// constat C19), l'inscription au
     /// démarrage de l'ordinateur et les clés de registre (`local_data::Scope::Everything`), puis
     /// **arrête le programme** comme [`Self::Quit`] : les threads qui écrivent ces fichiers
     /// tiennent leur contenu en mémoire, et la seule façon de garantir que rien ne réécrit derrière
@@ -723,8 +724,8 @@ pub struct OptionsCommit {
 
 /// Ce que la modale doit recevoir de l'hôte pour peindre ses onglets.
 ///
-/// Seul l'onglet « Alertes » en a besoin — il liste de vrais objets, avec leurs icônes descendues
-/// du CDN et leur rareté lue au catalogue. L'onglet « Paramètres », lui, n'a jamais eu besoin de
+/// Seul l'onglet « Alertes » en a besoin — il liste de vrais objets, avec leurs icônes servies
+/// par l'API du service et leur rareté lue au catalogue. L'onglet « Paramètres », lui, n'a jamais eu besoin de
 /// rien : c'est pourquoi `show` s'en passait jusqu'au 2026-09-12.
 pub struct OptionsModalContext<'a> {
     pub catalog: &'a overlay_engine::CatalogIndex,
@@ -1449,8 +1450,9 @@ pub fn show(
                     "Lancer l'overlay au démarrage de l'ordinateur",
                 )
                 .tooltip(
-                    "L'overlay s'ouvre avec votre session, sans attendre que vous le lanciez. Il \
-                     reste sur son écran de connexion tant que le jeu n'est pas démarré.",
+                    "L'overlay s'ouvre avec votre session, sans attendre que vous le lanciez. Tant \
+                     que le jeu n'est pas démarré, il attend dans la zone de notification — ou sur \
+                     son écran de connexion si aucun compte n'est lié.",
                 )
                 .log_name("options-demarrage-auto"),
             );
@@ -1556,8 +1558,9 @@ pub fn show(
                 design::checkbox(&mut state.verbose_log, "Journal détaillé")
                     .tooltip(
                         "À cocher seulement pour diagnostiquer un problème. Le journal reçoit \
-                         alors aussi les noms de vos personnages, le chemin complet de wakfu.log \
-                         et le détail des erreurs. Rien n'est envoyé pour autant : ce fichier \
+                         alors aussi les noms de vos personnages et de ceux avec qui vous \
+                         interagissez, le titre de la fenêtre au premier plan, le chemin complet \
+                         de wakfu.log et le détail des erreurs. Rien n'est envoyé pour autant : ce fichier \
                          reste sur cet ordinateur.",
                     )
                     .log_name("options-journal-detaille"),
@@ -1583,6 +1586,16 @@ pub fn show(
                 .tone(design::InfoTone::Info)
                 .width(inner_width)
                 .log_name("options-compte-info"),
+            );
+            // **Ce qu'efface la déconnexion** (2026-09-25) : la confirmation qui suit n'a pas de
+            // corps (`design::confirm_dialog`), c'est donc ici qu'on le lit avant de cliquer —
+            // l'historique pas encore envoyé en fait partie, voir `a_propos_tab::DISCONNECT_INFO`.
+            ui.add_space(INFO_GAP);
+            ui.add(
+                design::info_text(a_propos_tab::DISCONNECT_INFO)
+                    .tone(design::InfoTone::Info)
+                    .width(inner_width)
+                    .log_name("options-compte-deconnexion"),
             );
             // **Jeton hors trousseau** (constat C7 de `docs/analyse-rgpd.md`, 2026-09-19) : quand
             // le trousseau du système a manqué, la session est dans un fichier en clair — le
@@ -1615,7 +1628,8 @@ pub fn show(
                 .size(ButtonSize::Height(ROW_HEIGHT))
                 .enabled(state.account_connected)
                 .tooltip(if state.account_connected {
-                    "Effacer la session enregistrée et revenir à l'écran de connexion"
+                    "Effacer la session et l'historique pas encore envoyé, puis revenir à l'écran \
+                     de connexion"
                 } else {
                     "Aucun compte connecté"
                 })

@@ -1284,7 +1284,7 @@ impl App {
             return;
         }
         let menu = Menu::new();
-        // « Options » et « Déconnecter » naissent grisés : rien à régler ni à quitter tant
+        // Toutes les entrées naissent actives ; celle du compte dit « Se connecter » tant
         // qu'aucun compte n'est lié (voir `sync_tray_menu`).
         let options = MenuItem::new("Paramètres", true, None);
         let update = MenuItem::new("Mise à jour", true, None);
@@ -1342,7 +1342,7 @@ impl App {
                 // « Se connecter » plutôt que de s'éteindre — une entrée grisée sans explication
                 // n'apprend rien, et c'est le seul menu de l'overlay.
                 tray.disconnect.set_text(if connected {
-                    "Déconnecter"
+                    "Se déconnecter"
                 } else {
                     "Se connecter"
                 });

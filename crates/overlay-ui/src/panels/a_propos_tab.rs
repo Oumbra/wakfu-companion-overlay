@@ -16,9 +16,9 @@
 //! Demande utilisateur : « alimenter l'onglet "À propos" avec les informations nécessaires par
 //! rapport au RGPD, aux CGU Wakfu et aux informations importantes du site/overlay, avant la
 //! section "Mise à jour" ». Elles répondent à deux constats du jour même —
-//! [`docs/analyse-rgpd.md`](../../../../docs/analyse-rgpd.md) C4 (« aucune information des
-//! personnes dans l'application ») et [`docs/analyse-cgu.md`](../../../../docs/analyse-cgu.md) §3.5
-//! (« aucune mention de non-affiliation à Ankama nulle part dans l'interface ») — et **décrivent
+//! [`docs/analyse-rgpd.md`](../../../../docs/analyse-rgpd.md) C4 (aucune information des
+//! personnes dans l'application) et [`docs/analyse-cgu.md`](../../../../docs/analyse-cgu.md) §3.5
+//! (aucune mention de non-affiliation à Ankama dans l'interface) — et **décrivent
 //! ce que le code fait, pas ce qu'on voudrait qu'il fasse** : la frappe de commandes dans le chat
 //! et la lecture d'image de la notification de tour y sont dites, parce qu'elles existent
 //! (analyse CGU §3.1 et §3.2). Un texte qui les tairait serait faux, et c'est exactement le
@@ -190,8 +190,9 @@ pub struct Section {
 }
 
 /// **Les trois sections d'information, dans l'ordre d'affichage.** Chaque phrase y décrit un
-/// comportement vérifié du code au 2026-09-18 (références dans `docs/analyse-rgpd.md` §2 et
-/// `docs/analyse-cgu.md` §3-4) ; **une fonctionnalité qui change ce que l'overlay lit, envoie ou
+/// comportement vérifié du code au 2026-09-25 (audit des textes RGPD/CGU contre le code ;
+/// références dans `docs/analyse-cgu.md` §3-4 et, pour le RGPD, dans l'analyse complète retirée du
+/// dépôt, `efcb787:docs/analyse-rgpd.md` §2) ; **une fonctionnalité qui change ce que l'overlay lit, envoie ou
 /// conserve doit changer ce texte dans le même commit** — un texte d'information périmé est pire
 /// que pas de texte.
 pub const SECTIONS: &[Section] = &[
@@ -205,7 +206,7 @@ pub const SECTIONS: &[Section] = &[
             ),
             info(
                 "WAKFU est une marque d'Ankama. Les noms, images, icônes et éléments d'interface \
-                 du jeu affichés ici restent la propriété d'Ankama Games et ne servent qu'à \
+                 du jeu affichés ici restent la propriété d'Ankama et ne servent qu'à \
                  illustrer ; tout contenu lui appartenant est retiré sur simple demande de sa part.",
             ),
         ],
@@ -221,11 +222,12 @@ pub const SECTIONS: &[Section] = &[
                  ne joue jamais à votre place.",
             ),
             info(
-                "Deux fonctions optionnelles vont plus loin : les raccourcis Inviter et Suivre, \
-                 ainsi que la réponse à une alerte de chat, tapent une commande dans le chat du \
-                 jeu à votre place ; la notification de tour (Windows) lit l'image de la fenêtre \
-                 du jeu pendant un combat pour y reconnaître votre nom. Rien de tout cela ne \
-                 quitte votre ordinateur.",
+                "Trois fonctions vont plus loin. Les raccourcis Inviter et Suivre (F1 et F2 par \
+                 défaut, désactivables dans l'onglet Raccourcis) et la réponse à une alerte de \
+                 chat tapent une commande dans le chat du jeu à votre place. La notification de \
+                 tour (Windows, désactivée par défaut) lit l'image de la fenêtre du jeu pendant \
+                 un combat pour y reconnaître votre nom. Rien de tout cela ne quitte votre \
+                 ordinateur.",
             ),
             alert(
                 "Les CGU d'Ankama interdisent les bots, les logiciels d'automatisation et tout \
@@ -247,10 +249,14 @@ pub const SECTIONS: &[Section] = &[
             ),
             info(
                 "Une fois un compte appairé, l'overlay envoie à wakfu-companion.com ce que le \
-                 site enregistrerait à votre place : vos combats (nom, classe et dégâts de chaque \
-                 participant), vos achats, vos échanges (avec le nom du partenaire), vos \
-                 extractions de pacte, vos personnages, vos alertes et vos recherches de chat. \
-                 Avant l'appairage, rien ne part.",
+                 site enregistrerait à votre place : vos combats (pour chaque participant : nom, \
+                 classe, dégâts, soins, armure et sorts ; pour le combat : durée, butin, \
+                 expérience, kamas et serveur), vos achats et vos ventes récupérées à l'Hôtel \
+                 des ventes, vos échanges (avec le nom du partenaire), vos extractions de pacte, \
+                 vos personnages, votre Suivi, vos alertes et vos recherches de chat. Ce que \
+                 wakfu.log contient déjà au lancement part au moment de l'appairage. Avant \
+                 l'appairage, seule la liste publique des serveurs de jeu est demandée, sans \
+                 rien qui vous concerne.",
             ),
             info(
                 "Un seul service tiers est contacté : GitHub, à chaque lancement, pour vérifier \
@@ -261,13 +267,14 @@ pub const SECTIONS: &[Section] = &[
             info(
                 "Sur cet ordinateur, l'overlay conserve sa configuration, le jeton de session \
                  (dans le trousseau du système quand il en existe un), les combats en cours, la \
-                 file d'envoi, un journal technique de 14 jours, ses caches et, si la \
-                 notification de tour est active, l'image du nom de vos personnages — sous \
-                 %APPDATA% (Windows) ou ~/.config et ~/.local/share (Linux). Se déconnecter \
-                 efface le jeton — ici et sur le serveur, où la session est supprimée —, les \
-                 combats en cours, les compteurs de suivi, l'image des noms et le contenu du \
-                 journal ; « Supprimer les données locales », ci-dessous, efface tout le reste \
-                 puis ferme l'overlay.",
+                 file d'envoi, un journal technique de vos 14 derniers jours d'utilisation, ses \
+                 caches et, si la notification de tour est active, l'image du nom de vos \
+                 personnages — sous %APPDATA% (Windows) ou ~/.config et ~/.local/share (Linux). \
+                 Sous Windows, il inscrit aussi dans le registre ce qu'il faut à ses \
+                 notifications. Se déconnecter efface le jeton — ici, et sur le serveur si la \
+                 connexion le permet —, les combats en cours, l'historique pas encore envoyé, \
+                 les compteurs de suivi, l'image des noms et le contenu du journal ; « Supprimer \
+                 les données locales », ci-dessous, efface tout le reste puis ferme l'overlay.",
             ),
             info(
                 "Vos droits d'accès, de rectification, d'effacement et de portabilité s'exercent \
@@ -292,14 +299,27 @@ pub const VOS_DONNEES_TITLE: &str = "Vos données";
 /// d'information "Supprimer les données locales" et son bouton associé en dessous de la section
 /// "Vos données" »). Il fermait jusque-là la section « Compte » de l'onglet « Paramètres », à
 /// côté de « Se déconnecter » — mais ce n'est pas un réglage de compte : c'est le droit à
-/// l'effacement (RGPD art. 17, constat C5 de `docs/analyse-rgpd.md` §3.5), et le bloc qui dit ce
+/// l'effacement (RGPD art. 17, constat C5 de `docs/analyse-rgpd.md`), et le bloc qui dit ce
 /// que l'overlay conserve sur la machine est ici. Le geste et son explication se lisent au même
 /// endroit.
-pub const PURGE_INFO: &str = "« Supprimer les données locales » efface de cet ordinateur tout ce \
-                              que l'overlay y a écrit : réglages, combats en cours, file d'envoi, \
-                              gabarits de tour, journaux, caches et session enregistrée. L'overlay \
-                              se ferme ensuite, et repart comme une installation neuve — votre \
-                              compte et son historique, eux, restent sur le site.";
+pub const PURGE_INFO: &str = "« Supprimer les données locales » efface de cet ordinateur ce que \
+                              l'overlay y a écrit : réglages, combats en cours, file d'envoi, \
+                              gabarits de tour, journaux, caches, session enregistrée, \
+                              inscription au démarrage de l'ordinateur et entrées du registre \
+                              (Windows). L'overlay se ferme ensuite, et repart comme une \
+                              installation neuve — votre compte et son historique, eux, restent \
+                              sur le site.";
+
+/// **Ce qu'efface « Se déconnecter »** (2026-09-25, audit des textes contre le code) — partagé par
+/// la section « Compte » de la fenêtre Options, celle de la Carte et la confirmation de la Carte.
+/// Ces textes ne parlaient que de la session, alors que la déconnexion vide aussi la file d'envoi
+/// (`background.rs`, `SyncCommand::Deactivate`) : l'historique pas encore transmis est perdu, et
+/// c'est la seule conséquence qu'on ne rattrape pas en se reconnectant. Même liste que le bloc
+/// « Sur cet ordinateur » de [`SECTIONS`] (`local_data::purge`, `Scope::OnDisconnect`).
+pub const DISCONNECT_INFO: &str = "Se déconnecter efface la session enregistrée — ici, et sur le \
+                                   serveur si la connexion le permet —, les combats en cours, \
+                                   l'historique pas encore envoyé, les compteurs de suivi, \
+                                   l'image des noms et le contenu du journal.";
 
 /// Titre de la première section — celle sous laquelle se peint [`copyright_notice`].
 pub const WAKFU_COMPANION_TITLE: &str = "Wakfu Companion";
@@ -819,6 +839,7 @@ mod tests {
         );
         assert_eq!(tone, design::InfoTone::Alert);
     }
+
     /// Les liens du service partent de la même origine que l'API — un binaire de Release ouvre la
     /// prod, un binaire de dev le déploiement dev, jamais l'inverse — et visent les chemins sans
     /// préfixe de langue que le site redirige (voir `privacy_policy_url`).
@@ -852,9 +873,7 @@ mod tests {
         }
     }
 
-    /// Les trois sections, dans l'ordre demandé, chacune avec au moins un lien — et la mention de
-    /// non-affiliation à Ankama (analyse CGU §3.5) ainsi que l'adresse de contact (RGPD, art. 13)
-    /// y figurent en toutes lettres.
+    /// L'origine d'API surchargée est nommée ; sans surcharge, rien ne s'affiche.
     #[test]
     fn l_origine_surchargee_est_dite_et_le_cas_normal_reste_muet() {
         assert_eq!(api_override_notice(None), None);
@@ -876,6 +895,9 @@ mod tests {
         assert!(copyright_year() >= FROZEN_COPYRIGHT_YEAR);
     }
 
+    /// Les trois sections, dans l'ordre demandé, chacune avec au moins un lien — et la mention de
+    /// non-affiliation à Ankama (analyse CGU §3.5) ainsi que l'adresse de contact (RGPD, art. 13)
+    /// y figurent en toutes lettres.
     #[test]
     fn les_sections_d_information_portent_ce_qui_est_attendu() {
         let titres: Vec<&str> = SECTIONS.iter().map(|s| s.title).collect();
@@ -903,11 +925,14 @@ mod tests {
         assert!(texte.contains("jamais téléversé"));
         // Les quatre types d'historique envoyés au compte (`overlay_engine::HistoryEventKind`),
         // tous nommés : la liste se lit comme exhaustive, elle doit l'être (2026-09-21).
+        // Le Suivi et les ventes récupérées à l'Hôtel des ventes partent aussi (2026-09-25).
         for flux in [
             "vos combats",
             "vos achats",
+            "vos ventes",
             "vos échanges",
             "vos extractions de pacte",
+            "votre Suivi",
         ] {
             assert!(texte.contains(flux), "« {flux} » absent de « Vos données »");
         }
@@ -919,5 +944,19 @@ mod tests {
             .collect();
         assert_eq!(alertes.len(), 1);
         assert!(alertes[0].text.contains("votre seule responsabilité"));
+    }
+
+    /// La déconnexion vide la file d'envoi : le texte partagé doit le dire, et le bloc « Sur cet
+    /// ordinateur » aussi (2026-09-25).
+    #[test]
+    fn la_deconnexion_annonce_la_perte_de_l_historique_non_envoye() {
+        assert!(DISCONNECT_INFO.contains("l'historique pas encore envoyé"));
+        let texte: String = SECTIONS
+            .iter()
+            .flat_map(|s| s.blocks.iter().map(|b| b.text))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(texte.contains("l'historique pas encore envoyé"));
+        assert!(PURGE_INFO.contains("inscription au démarrage"));
     }
 }

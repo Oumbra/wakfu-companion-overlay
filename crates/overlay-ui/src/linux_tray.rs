@@ -25,7 +25,7 @@ pub enum TrayEvent {
     /// fenêtre Options sur son onglet jusque-là.
     Settings,
     ManualUpdate,
-    /// La troisième entrée, dont le libellé suit l'état du compte : « Déconnecter » quand il y en
+    /// La troisième entrée, dont le libellé suit l'état du compte : « Se déconnecter » quand il y en
     /// a un, « Se connecter » sinon. Les deux ouvrent la Carte — voir `menu`.
     Account,
     Quit,
@@ -90,7 +90,7 @@ impl ksni::Tray for LinuxTray {
             MenuItem::Separator,
             StandardItem {
                 label: if self.enabled_for_account {
-                    "Déconnecter".into()
+                    "Se déconnecter".into()
                 } else {
                     "Se connecter".into()
                 },
