@@ -223,8 +223,8 @@ L'overlay l'affiche avec l'année courante dans son onglet « À propos ».
 détaillé dans [`docs/analyse-cgu.md`](docs/analyse-cgu.md) et rappelé dans l'onglet « À propos »
 de l'overlay. En deux mots : il lit le fichier `wakfu.log` que le jeu écrit lui-même, ne se
 connecte jamais aux serveurs d'Ankama, ne lit pas la mémoire du client et ne modifie aucun de ses
-fichiers. Trois fonctions vont plus loin : les raccourcis multicompte Inviter et Suivre (F1/F2 par
-défaut, désactivables dans l'onglet « Raccourcis ») et la réponse en privé depuis une alerte de
+fichiers. Trois fonctions vont plus loin : les raccourcis multicompte Inviter et Suivre (F1/F2,
+désactivés par défaut, à activer dans l'onglet « Raccourcis ») et la réponse en privé depuis une alerte de
 chat tapent une commande dans le chat du jeu ; la notification de tour (Windows, désactivée par
 défaut) lit l'image de la fenêtre du jeu. Les
 [CGU d'Ankama](https://www.wakfu.com/fr/cgu) n'autorisent **aucun programme tiers par défaut** :

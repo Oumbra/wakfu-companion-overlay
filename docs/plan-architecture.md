@@ -2876,10 +2876,10 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
      premier plan une commande de chat que **le jeu expose lui-même** (`/i "Nom"`, `/fol "Nom"`) —
      Wakfu permet déjà d'associer un raccourci à un texte envoyé au chat ; l'overlay ne fait que
      renseigner le nom de l'autre personnage à la place de l'utilisateur. Rien n'est tapé si la
-     fenêtre au premier plan n'est pas une fenêtre de jeu. **Désactivables** depuis le 2026-09-25
-     (case « Activer les raccourcis multicompte » de l'onglet « Raccourcis »,
-     `OverlayConfig::multiaccount_shortcuts`, actifs par défaut) : désactivés, ils ne sont plus
-     enregistrés et F1/F2 reviennent au jeu.
+     fenêtre au premier plan n'est pas une fenêtre de jeu. **Désactivés par défaut** depuis le
+     2026-09-25, y compris pour une configuration existante (case « Activer les raccourcis
+     multicompte » de l'onglet « Raccourcis », `OverlayConfig::multiaccount_shortcuts`) :
+     désactivés, ils ne sont pas enregistrés et F1/F2 restent au jeu.
   2. Le clic sur une **carte d'alerte de chat** amène la fenêtre du personnage concerné au premier
      plan et y tape `Entrée` puis `/w "Nom" ` (`chat_command::send_whisper`) — la réponse en
      privé est préparée, **jamais envoyée** : c'est le joueur qui écrit son message et valide.

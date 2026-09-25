@@ -93,14 +93,15 @@ documentée.
 ### 3.1 Frappe synthétique dans le chat du jeu — risque élevé, assumé
 
 `crates/overlay-ui/src/chat_command.rs` et `crates/overlay-platform/src/linux/keyboard.rs`
-(§9.1 sexies du plan). **Mécanisme inchangé au 2026-09-25 ; les raccourcis sont désactivables
-depuis ce jour.**
+(§9.1 sexies du plan). **Mécanisme inchangé au 2026-09-25 ; les raccourcis sont désactivés
+par défaut depuis ce jour.**
 
 - Les raccourcis globaux « Inviter » / « Suivre » (F1/F2 par défaut) tapent dans la fenêtre Wakfu
   au premier plan la séquence `Entrée`, `/i "Nom"` ou `/fol "Nom"`, `Entrée` — par `SendInput` +
-  `KEYEVENTF_UNICODE` sous Windows, par l'extension XTEST sous X11. Actifs par défaut ; la case
-  « Activer les raccourcis multicompte » de l'onglet « Raccourcis » les coupe tous deux
-  (`OverlayConfig::multiaccount_shortcuts`) : ils ne sont alors plus enregistrés auprès de l'OS.
+  `KEYEVENTF_UNICODE` sous Windows, par l'extension XTEST sous X11. **Désactivés par défaut**, y
+  compris pour une configuration existante (décision du mainteneur, 2026-09-25) : la case
+  « Activer les raccourcis multicompte » de l'onglet « Raccourcis » les active tous deux
+  (`OverlayConfig::multiaccount_shortcuts`) ; décochée, ils ne sont pas enregistrés auprès de l'OS.
   Jusqu'au 2026-09-25 on ne pouvait que les réassigner, alors que « À propos » les disait
   optionnels.
 - Le clic sur une carte d'alerte de chat tape `Entrée` puis `/w "Nom" ` (sans envoi).
@@ -238,7 +239,7 @@ aucun fichier du Client. Signalé pour mémoire, pas comme écart.
    aucune entrée n'est injectée dans le client, et `SendInput`/XTEST disparaissent du produit.
    *Décision utilisateur du 2026-09-18 : fonction conservée. Recommandation maintenue, à
    reconsidérer si Ankama se manifeste ou si un joueur est sanctionné. Depuis le 2026-09-25, les
-   raccourcis F1/F2 se désactivent d'une case ; la réponse en privé depuis une alerte de chat
+   raccourcis F1/F2 sont désactivés par défaut et s'activent d'une case ; la réponse en privé depuis une alerte de chat
    reste active.*
 2. **Surveillance de tour** : conservée sous option décochée par défaut (décision du 2026-09-18).
    L'alternative sans capture — la bascule du titre de fenêtre (`TickInput::current`) — reste
