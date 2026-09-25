@@ -49,8 +49,10 @@
 //! pour les deux raccourcis (demande utilisateur). Elle
 //! travaille sur le même brouillon que les combinaisons (`ShortcutBindings::multiaccount_enabled`),
 //! donc passe par « Valider » et « Réinitialiser » comme elles. **Décochée par défaut**
-//! (2026-09-25). Décochée, les combinaisons restent
-//! modifiables — elles resserviront à la réactivation — mais ne sont plus enregistrées.
+//! (2026-09-25). Décochée, les combinaisons ne sont plus enregistrées, et leurs lignes passent
+//! **en gris, champ désactivé** (demande utilisateur du 2026-09-25) : une case cliquable sous une
+//! option coupée laisserait croire que la combinaison saisie prendra effet. Elles sont conservées
+//! telles quelles et reviennent à la réactivation.
 //!
 //! **Les raccourcis globaux sont suspendus tant que la fenêtre Options est ouverte**
 //! (`main.rs::open_options_modal`) : sans cela, l'OS avalerait la frappe que l'utilisateur essaie
@@ -133,6 +135,15 @@ pub fn show(
     bindings: &mut ShortcutBindings,
 ) -> RaccourcisTabAction {
     let width = panel.inner.width();
+
+    // Une case multicompte en écoute au moment où la case d'activation est décochée cesse
+    // d'écouter : son champ est désormais désactivé, la frappe suivante ne doit pas l'atteindre.
+    if state
+        .capturing
+        .is_some_and(|action| action.is_multiaccount() && !bindings.multiaccount_enabled())
+    {
+        state.capturing = None;
+    }
 
     // La frappe est lue AVANT de peindre les lignes : la case concernée affiche ainsi la nouvelle
     // combinaison dès cette frame, et non à la suivante.
@@ -333,14 +344,21 @@ fn shortcut_table(
             let Some(action) = actions.get(row.index() - toggle_rows).copied() else {
                 return;
             };
+            // Raccourci multicompte alors que la case d'activation est décochée : ligne grisée,
+            // champ désactivé — voir doc de module.
+            let enabled = !action.is_multiaccount() || bindings.multiaccount_enabled();
             row.cell(|ui| {
                 ui.label(
                     RichText::new(action.label())
-                        .color(TEXT)
+                        .color(if enabled {
+                            TEXT
+                        } else {
+                            design::tokens::TEXT_DISABLED
+                        })
                         .font(design::text::label_font(ui.ctx(), BODY_FONT_SIZE)),
                 );
             });
-            row.cell(|ui| shortcut_cell(ui, state, bindings, action));
+            row.cell(|ui| shortcut_cell(ui, state, bindings, action, enabled));
         });
 }
 
@@ -355,8 +373,9 @@ fn shortcut_cell(
     state: &mut RaccourcisTabState,
     bindings: &ShortcutBindings,
     action: ShortcutAction,
+    enabled: bool,
 ) {
-    let capturing = state.capturing == Some(action);
+    let capturing = enabled && state.capturing == Some(action);
     // Le champ affiche ce qu'il attend quand il écoute ; `design::input` peint sa valeur, jamais un
     // texte indicatif sur une valeur non vide, d'où la bascule ici plutôt qu'un `placeholder`.
     let mut display = if capturing {
@@ -369,17 +388,24 @@ fn shortcut_cell(
             .size(InputSize::Standard)
             .width(SHORTCUT_COLUMN - 2.0 * design::tokens::TABLE_CELL_PAD_X)
             .read_only(true)
+            .enabled(enabled)
             // Le bord rouge signale la case EN ÉCOUTE aussi bien qu'une valeur refusée : dans les
             // deux cas, c'est là que l'utilisateur doit regarder, et le design system n'a pas
             // d'autre état de bord à proposer (voir `design::components::input::InputState`).
             .error(capturing)
-            .tooltip(if capturing {
+            .tooltip(if !enabled {
+                "Cochez « Activer les raccourcis multicompte » pour changer ce raccourci"
+                    .to_string()
+            } else if capturing {
                 "Tapez la nouvelle combinaison (Échap pour annuler)".to_string()
             } else {
                 format!("Changer le raccourci de « {} »", action.label())
             })
             .log_name(format!("raccourcis.{}", action.key())),
     );
+    if !enabled {
+        return;
+    }
     let click = ui
         .interact(
             response.rect,
