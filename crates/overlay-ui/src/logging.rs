@@ -102,9 +102,12 @@ static DAILY_CAP_REACHED: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// `RollingFileAppender` plafonné en volume — voir [`MAX_LOG_BYTES_PER_DAY`].
 ///
 /// Le compteur est remis à zéro au changement de jour UTC, c'est-à-dire exactement quand
-/// `tracing-appender` ouvre son fichier suivant (`Rotation::DAILY`, même horloge) : le plafond
-/// s'applique donc bien PAR FICHIER, sans avoir à demander à l'appender quel fichier il tient (il
-/// ne l'expose pas).
+/// `tracing-appender` ouvre son fichier suivant (`Rotation::DAILY`, même horloge). Au lancement,
+/// il part de la taille du fichier du jour déjà présent sur le disque
+/// ([`todays_log_size`], 2026-09-25) : il partait de zéro, si bien que plusieurs lancements dans
+/// la même journée pouvaient chacun écrire 16 Mio dans le même fichier. Le plafond s'applique
+/// donc bien PAR FICHIER, sans avoir à demander à l'appender quel fichier il tient (il ne
+/// l'expose pas).
 struct CappedAppender<W: Write> {
     inner: W,
     /// Jours écoulés depuis l'époque Unix, en UTC — l'unité de rotation.
@@ -133,6 +136,22 @@ impl<W: Write> CappedAppender<W> {
             cut_announced: false,
         }
     }
+
+    /// Octets déjà écrits aujourd'hui par un lancement précédent — voir la doc du type.
+    fn already_written(mut self, bytes: u64) -> Self {
+        self.written = bytes;
+        self
+    }
+}
+
+/// Taille du fichier de journal du jour (UTC) dans `dir`, `0` s'il n'existe pas encore. Le nom
+/// est celui que `tracing-appender` donne en rotation quotidienne avec le préfixe et le suffixe de
+/// [`build_appender`] : `overlay-ui.AAAA-MM-JJ.log`.
+fn todays_log_size(dir: &Path) -> u64 {
+    let name = format!("overlay-ui.{}.log", chrono::Utc::now().format("%Y-%m-%d"));
+    std::fs::metadata(dir.join(name))
+        .map(|meta| meta.len())
+        .unwrap_or(0)
 }
 
 impl<W: Write> Write for CappedAppender<W> {
@@ -305,7 +324,9 @@ pub fn init() -> Option<PathBuf> {
                     .with_ansi(false)
                     .with_thread_names(true)
                     .with_line_number(true)
-                    .with_writer(std::sync::Mutex::new(CappedAppender::new(appender)));
+                    .with_writer(std::sync::Mutex::new(
+                        CappedAppender::new(appender).already_written(todays_log_size(&dir)),
+                    ));
                 (Some(layer), Some(dir))
             }
             Err(err) => {
@@ -431,5 +452,22 @@ mod tests {
             String::from_utf8_lossy(&appender.inner).contains("jour suivant"),
             "le nouveau fichier du jour repart d'un compteur vide"
         );
+    }
+
+    /// Un lancement qui trouve le fichier du jour déjà au plafond n'y ajoute rien : le compteur
+    /// part de ce que les lancements précédents ont écrit.
+    #[test]
+    fn un_second_lancement_du_jour_herite_du_compteur() {
+        let dir = std::env::temp_dir().join(format!("overlay-log-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dossier temporaire");
+        assert_eq!(todays_log_size(&dir), 0);
+        let name = format!("overlay-ui.{}.log", chrono::Utc::now().format("%Y-%m-%d"));
+        std::fs::write(dir.join(name), b"0123456789").expect("fichier du jour");
+        assert_eq!(todays_log_size(&dir), 10);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut appender = CappedAppender::new(Vec::new()).already_written(MAX_LOG_BYTES_PER_DAY);
+        appender.write_all(b"relance").expect("pas d'erreur");
+        assert!(!String::from_utf8_lossy(&appender.inner).contains("relance"));
     }
 }
