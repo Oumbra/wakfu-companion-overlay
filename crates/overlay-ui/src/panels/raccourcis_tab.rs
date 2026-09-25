@@ -43,8 +43,10 @@
 //!
 //! ## La case « Activer les raccourcis multicompte » (2026-09-25)
 //!
-//! Posée en tête du groupe « Multicompte », au-dessus de son tableau, comme « Activer le suivi »
-//! en tête de l'onglet Suivi : une seule case pour les deux raccourcis (demande utilisateur). Elle
+//! **Première ligne du tableau « Multicompte »**, juste sous son titre (demande utilisateur du
+//! 2026-09-25 : elle était d'abord posée AU-DESSUS du tableau, donc avant le titre du groupe
+//! qu'elle commande — l'en-tête du tableau EST ce titre, voir [`shortcut_table`]). Une seule case
+//! pour les deux raccourcis (demande utilisateur). Elle
 //! travaille sur le même brouillon que les combinaisons (`ShortcutBindings::multiaccount_enabled`),
 //! donc passe par « Valider » et « Réinitialiser » comme elles. **Décochée par défaut**
 //! (2026-09-25). Décochée, les combinaisons restent
@@ -183,10 +185,6 @@ pub fn show(
                 ui.add_space(SECTION_GAP);
             }
             vu += actions.len();
-            if section == MULTIACCOUNT_SECTION {
-                multiaccount_toggle(ui, bindings);
-                ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
-            }
             shortcut_table(ui, state, bindings, &actions, content_width, section);
         }
 
@@ -215,7 +213,7 @@ const SECTIONS: [&str; 4] = ["Overlay", "Suivi", "Combat", MULTIACCOUNT_SECTION]
 /// Le groupe qui porte la case d'activation des raccourcis multicompte — voir doc de module.
 const MULTIACCOUNT_SECTION: &str = "Multicompte";
 
-/// La case « Activer les raccourcis multicompte », en tête de son groupe.
+/// La case « Activer les raccourcis multicompte », première ligne de son tableau.
 fn multiaccount_toggle(ui: &mut egui::Ui, bindings: &mut ShortcutBindings) {
     ui.add(
         design::checkbox(
@@ -317,15 +315,22 @@ fn shortcut_table(
     width: f32,
     section: &str,
 ) {
+    // Le groupe « Multicompte » ouvre sur sa case d'activation, sous son titre — voir doc de
+    // module. Les lignes d'action viennent ensuite, décalées d'autant.
+    let toggle_rows = usize::from(section == MULTIACCOUNT_SECTION);
     design::table()
         .column(TableColumn::flex(section, 1.0))
         .column(TableColumn::fixed("Combinaison", SHORTCUT_COLUMN).align(TableAlign::End))
-        .body(TableBody::Rows(actions.len()))
+        .body(TableBody::Rows(actions.len() + toggle_rows))
         .row_height(ROW_HEIGHT)
         .width(width)
         .log_name(format!("raccourcis.{}", section.to_lowercase()))
         .show(ui, |row| {
-            let Some(action) = actions.get(row.index()).copied() else {
+            if row.index() < toggle_rows {
+                row.cell(|ui| multiaccount_toggle(ui, bindings));
+                return;
+            }
+            let Some(action) = actions.get(row.index() - toggle_rows).copied() else {
                 return;
             };
             row.cell(|ui| {
