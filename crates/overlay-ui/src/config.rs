@@ -636,6 +636,18 @@ pub fn config_path() -> Option<PathBuf> {
 /// n'y a rien à faire ; une installation neuve non plus (ancienne racine absente).
 ///
 /// Best-effort comme le reste du module : un déplacement qui échoue est journalisé et l'ancien
+/// Le dossier propre de l'ancienne racine, en chemin absolu — `None` sous Linux, où elle se
+/// confond avec la racine actuelle (voir `overlay_engine::app_dirs::own_root`).
+pub fn legacy_root() -> Option<PathBuf> {
+    legacy_project_dirs().and_then(|dirs| overlay_engine::app_dirs::own_root(&dirs))
+}
+
+/// Le dossier propre de la racine actuelle (`%APPDATA%\wakfu-companion-overlay` sous Windows,
+/// `None` sous Linux) — pour que l'effacement complet ne laisse pas ce dossier vide derrière lui.
+pub fn own_root() -> Option<PathBuf> {
+    project_dirs().and_then(|dirs| overlay_engine::app_dirs::own_root(&dirs))
+}
+
 /// fichier reste où il est — l'overlay repart alors avec les réglages par défaut plutôt que de
 /// refuser de démarrer. Ce qui existe déjà à destination gagne (une migration antérieure, ou un
 /// overlay plus récent qui a déjà écrit là), l'ancien exemplaire est alors simplement supprimé.
@@ -643,8 +655,12 @@ pub fn migrate_legacy_root() {
     let (Some(legacy), Some(current)) = (legacy_project_dirs(), project_dirs()) else {
         return;
     };
-    let legacy_root = legacy.project_path();
-    if legacy_root == current.project_path() || !legacy_root.exists() {
+    // Chemins ABSOLUS (voir `overlay_engine::app_dirs::own_root`) ; sous Linux, pas de racine
+    // propre à migrer : les deux triplets donnent les mêmes dossiers XDG.
+    let (Some(legacy_root), Some(current_root)) = (legacy_root(), own_root()) else {
+        return;
+    };
+    if legacy_root == current_root || !legacy_root.exists() {
         return;
     }
     let moves = [
@@ -664,6 +680,7 @@ pub fn migrate_legacy_root() {
 /// temporaire. `legacy_root` n'est supprimée que si chaque déplacement a réussi.
 fn migrate_paths(legacy_root: &std::path::Path, moves: &[(PathBuf, PathBuf)]) {
     let mut failed = false;
+    let legacy_root = legacy_root.as_path();
     for (from, to) in moves {
         if !from.exists() {
             continue;

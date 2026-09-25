@@ -159,8 +159,7 @@ pub fn has_user_data(process_start: std::time::SystemTime) -> bool {
         overlay_engine::watchlist::default_store_path(),
     ];
     paths.extend(crate::turn_watch::templates::dir());
-    paths
-        .extend(crate::config::legacy_project_dirs().map(|dirs| dirs.project_path().to_path_buf()));
+    paths.extend(crate::config::legacy_root());
     if paths.iter().any(|path| not_empty(path)) {
         return true;
     }
@@ -221,12 +220,15 @@ pub fn targets(scope: Scope) -> Vec<PathBuf> {
                 paths.push(dirs.data_dir().to_path_buf());
                 paths.push(dirs.config_dir().to_path_buf());
             }
+            // Sous Windows, leur parent commun (`%APPDATA%\wakfu-companion-overlay`) : il restait
+            // vide derrière l'effacement (2026-09-25). `dedup` retire alors `data` et `config`,
+            // contenus dedans.
+            paths.extend(crate::config::own_root());
             // L'ancienne racine de `config.toml` et des gabarits, si la migration du démarrage
-            // l'a laissée (échec, ou fichier apparu depuis) : `project_path()` est son dossier
-            // propre, jamais un dossier partagé avec autre chose.
-            if let Some(dirs) = crate::config::legacy_project_dirs() {
-                paths.push(dirs.project_path().to_path_buf());
-            }
+            // l'a laissée (échec, ou fichier apparu depuis) : son dossier propre, jamais un
+            // dossier partagé avec autre chose. En chemin absolu — voir
+            // `overlay_engine::app_dirs::own_root`, qui explique pourquoi pas `project_path()`.
+            paths.extend(crate::config::legacy_root());
         }
     }
     dedup(paths)

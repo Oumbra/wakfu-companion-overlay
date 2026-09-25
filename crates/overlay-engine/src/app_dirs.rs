@@ -17,6 +17,8 @@
 //! test qui écrit ou efface ne doit jamais atteindre le dossier réel de la personne qui lance la
 //! suite (bug vécu le 2026-09-01, `overlay_sync::token_store`).
 
+use std::path::PathBuf;
+
 use directories::ProjectDirs;
 
 /// La racine de l'overlay pour `app_name` : `%APPDATA%\<app_name>\{config,data}` sous Windows,
@@ -30,6 +32,23 @@ pub fn project_dirs(app_name: &str) -> Option<ProjectDirs> {
 /// Linux elle se confond avec [`project_dirs`], et il n'y a rien à migrer.
 pub fn legacy_project_dirs(app_name: &str) -> Option<ProjectDirs> {
     ProjectDirs::from("com", "Oumbra", app_name)
+}
+
+/// **Le dossier propre d'une racine, en chemin absolu** — sous Windows, le parent commun de
+/// `config` et `data` (`%APPDATA%\<app_name>` ou `%APPDATA%\Oumbra\<app_name>`) ; sous Linux, rien :
+/// `~/.config/<app_name>` et `~/.local/share/<app_name>` n'ont pas de dossier commun qui soit à
+/// l'overlay seul.
+///
+/// **Pas `ProjectDirs::project_path`** (2026-09-25) : celui-ci n'est que le FRAGMENT relatif
+/// (`Oumbra\wakfu-companion-overlay`) à partir duquel les dossiers sont calculés. Utilisé comme
+/// chemin, il se résolvait contre le dossier courant du processus — la migration de l'ancienne
+/// racine ne la trouvait jamais, et l'effacement complet ne la visait pas.
+pub fn own_root(dirs: &ProjectDirs) -> Option<PathBuf> {
+    if cfg!(windows) {
+        dirs.config_dir().parent().map(PathBuf::from)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
