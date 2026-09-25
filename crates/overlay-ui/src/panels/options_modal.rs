@@ -175,8 +175,8 @@ const RESUME_STEPPER_SIZE: f32 = 28.0;
 /// Texte de la section « Journal » — ce que l'overlay écrit chez l'utilisateur, et ce que la case
 /// ajoute. Sorti en constante pour être vérifiable par un test, comme les blocs de
 /// `a_propos_tab::SECTIONS` (la section y est née le 2026-09-18, ici depuis le 2026-09-21).
-pub const JOURNAL_INFO: &str = "L'overlay tient un journal technique sur cet ordinateur : les 14 \
-                                derniers jours, jamais envoyé nulle part. Il ne contient ni le nom \
+pub const JOURNAL_INFO: &str = "L'overlay tient un journal technique sur cet ordinateur : vos 14 \
+                                derniers jours d'utilisation, jamais envoyé nulle part. Il ne contient ni le nom \
                                 de vos personnages, ni ceux des autres joueurs, ni le contenu du \
                                 chat.";
 

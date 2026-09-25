@@ -1826,8 +1826,8 @@ fn paint_settings_content(
         left,
         inner,
         y,
-        "Le journal technique reste sur cet ordinateur, quatorze jours, et sert à diagnostiquer \
-         un problème.",
+        "Le journal technique reste sur cet ordinateur, pour vos quatorze derniers jours \
+         d'utilisation, et sert à diagnostiquer un problème.",
     );
     y = set_check(
         ui,
