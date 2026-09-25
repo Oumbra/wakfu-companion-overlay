@@ -41,6 +41,15 @@
 //! fait rien quand le premier plan n'est pas le jeu (`chat_command::PartnerError::NoGameFocused`),
 //! mais la frappe est perdue pour l'application qui avait le focus.
 //!
+//! **Les raccourcis multicompte se désactivent d'un bloc depuis le 2026-09-25** (demande
+//! utilisateur : « permets de les désactiver dans une section multi-compte avec une seule option
+//! pour activer/désactiver les deux raccourcis »). Ils tapent une commande dans le chat du jeu à la
+//! place du joueur (`chat_command`) — ce que les CGU d'Ankama nomment, voir `docs/analyse-cgu.md`
+//! §3.1 — et l'onglet « À propos » les présentait comme optionnels alors qu'on ne pouvait que les
+//! réassigner. Désactivés ([`ShortcutBindings::multiaccount_enabled`]), ils ne sont plus
+//! enregistrés auprès de l'OS : F1 et F2 reviennent au jeu et aux autres applications. **Actifs
+//! par défaut**, comme avant, pour ne rien retirer à ceux qui s'en servent.
+//!
 //! **Toutes les actions ne sont pas câblées sur les deux OS** : le binaire Linux
 //! (`bin/wakfu-companion-overlay-x11.rs`) n'enregistre que les actions de
 //! [`ShortcutAction::LINUX_SUPPORTED`] (voir sa doc de module : pas de thread Auth/Catalogue ni de
@@ -260,6 +269,12 @@ impl ShortcutAction {
     fn from_key(key: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|action| action.key() == key)
     }
+
+    /// Une action de la section « Multicompte » — celles que coupe
+    /// [`ShortcutBindings::multiaccount_enabled`].
+    pub fn is_multiaccount(self) -> bool {
+        matches!(self, Self::InvitePartner | Self::FollowPartner)
+    }
 }
 
 /// Clés de config des raccourcis RETIRÉS — déconnexion (`disconnect`, 2026-09-13) et fermeture de
@@ -385,6 +400,14 @@ impl fmt::Display for Shortcut {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShortcutBindings {
     slots: [Shortcut; ShortcutAction::ALL.len()],
+    /// Les raccourcis multicompte sont-ils actifs ? — case « Activer les raccourcis multicompte »
+    /// de l'onglet « Raccourcis » (voir doc de module). Faux, les actions
+    /// [`ShortcutAction::is_multiaccount`] gardent leur combinaison mais ne sont plus
+    /// enregistrées, et n'entrent plus dans la détection de doublons.
+    ///
+    /// Persisté hors de la table `[shortcuts]`, qui ne porte que des combinaisons
+    /// (`config::OverlayConfig::multiaccount_shortcuts`).
+    multiaccount: bool,
 }
 
 impl Default for ShortcutBindings {
@@ -393,7 +416,10 @@ impl Default for ShortcutBindings {
         for action in ShortcutAction::ALL {
             slots[action as usize] = action.default_shortcut();
         }
-        Self { slots }
+        Self {
+            slots,
+            multiaccount: true,
+        }
     }
 }
 
@@ -404,6 +430,27 @@ impl ShortcutBindings {
 
     pub fn set(&mut self, action: ShortcutAction, shortcut: Shortcut) {
         self.slots[action as usize] = shortcut;
+    }
+
+    /// Voir le champ `multiaccount`.
+    pub fn multiaccount_enabled(&self) -> bool {
+        self.multiaccount
+    }
+
+    /// Accès mutable au drapeau multicompte — pour la case de l'onglet « Raccourcis », qui
+    /// travaille sur le brouillon comme les combinaisons.
+    pub fn multiaccount_enabled_mut(&mut self) -> &mut bool {
+        &mut self.multiaccount
+    }
+
+    pub fn set_multiaccount_enabled(&mut self, enabled: bool) {
+        self.multiaccount = enabled;
+    }
+
+    /// L'action est-elle à enregistrer auprès de l'OS ? Faux pour une action multicompte quand
+    /// celles-ci sont désactivées.
+    pub fn is_active(&self, action: ShortcutAction) -> bool {
+        self.multiaccount || !action.is_multiaccount()
     }
 
     /// Libellé prêt à afficher (`Ctrl+Shift+W`) — utilisé par les tooltips des boutons du carré de
@@ -455,10 +502,17 @@ impl ShortcutBindings {
     /// Première paire d'actions partageant la même combinaison, s'il y en a une — un doublon fait
     /// échouer l'enregistrement de la deuxième auprès de l'OS (même `HotKey::id`), l'UI le refuse
     /// donc AVANT de valider (voir `panels::options_modal`).
+    ///
+    /// Une action désactivée (multicompte coupé) n'entre pas en compte : elle n'est pas
+    /// enregistrée, donc ne prend sa touche à personne — et réactiver la case refait passer ce
+    /// contrôle avant « Valider ».
     pub fn conflict(&self) -> Option<(ShortcutAction, ShortcutAction)> {
         for (index, first) in ShortcutAction::ALL.into_iter().enumerate() {
             for second in ShortcutAction::ALL.into_iter().skip(index + 1) {
-                if self.get(first) == self.get(second) {
+                if self.is_active(first)
+                    && self.is_active(second)
+                    && self.get(first) == self.get(second)
+                {
                     return Some((first, second));
                 }
             }
@@ -560,6 +614,11 @@ impl ShortcutRegistry {
     fn register_active(&mut self) -> Vec<ShortcutAction> {
         let mut rejected = Vec::new();
         for action in self.supported.clone() {
+            if !self.bindings.is_active(action) {
+                // Raccourcis multicompte désactivés : la touche reste au jeu et aux autres
+                // applications (voir doc de module).
+                continue;
+            }
             let hotkey = self.bindings.get(action).to_hotkey();
             match self.manager.register(hotkey) {
                 Ok(()) => {
@@ -856,6 +915,30 @@ mod tests {
         // Nées nues (2026-09-13), à la demande de l'utilisateur — voir la doc de ces variantes.
         assert_eq!(bindings.label(ShortcutAction::InvitePartner), "F1");
         assert_eq!(bindings.label(ShortcutAction::FollowPartner), "F2");
+    }
+
+    /// Désactivés, les raccourcis multicompte gardent leur combinaison mais ne comptent plus :
+    /// ni actifs, ni en conflit avec une autre action qui prendrait leur touche.
+    #[test]
+    fn multicompte_desactive_sort_des_actions_actives_et_des_conflits() {
+        let mut bindings = ShortcutBindings::default();
+        assert!(bindings.multiaccount_enabled());
+        assert!(bindings.is_active(ShortcutAction::InvitePartner));
+        bindings.set_multiaccount_enabled(false);
+        assert!(!bindings.is_active(ShortcutAction::InvitePartner));
+        assert!(!bindings.is_active(ShortcutAction::FollowPartner));
+        assert!(bindings.is_active(ShortcutAction::Toggle));
+        assert_eq!(bindings.label(ShortcutAction::InvitePartner), "F1");
+        bindings.set(
+            ShortcutAction::Options,
+            Shortcut::parse("F1").expect("touche de fonction nue valide"),
+        );
+        assert_eq!(bindings.conflict(), None);
+        bindings.set_multiaccount_enabled(true);
+        assert_eq!(
+            bindings.conflict(),
+            Some((ShortcutAction::Options, ShortcutAction::InvitePartner))
+        );
     }
 
     /// Aucun conflit dans les défauts — sans quoi l'overlay démarrerait avec un raccourci non

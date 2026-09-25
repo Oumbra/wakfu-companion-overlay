@@ -41,6 +41,14 @@
 //! raccourcis multicompte, F1/F2 par défaut), et un **doublon** est signalé immédiatement plutôt
 //! qu'au moment de valider (l'OS refuserait le second enregistrement).
 //!
+//! ## La case « Activer les raccourcis multicompte » (2026-09-25)
+//!
+//! Posée en tête du groupe « Multicompte », au-dessus de son tableau, comme « Activer le suivi »
+//! en tête de l'onglet Suivi : une seule case pour les deux raccourcis (demande utilisateur). Elle
+//! travaille sur le même brouillon que les combinaisons (`ShortcutBindings::multiaccount_enabled`),
+//! donc passe par « Valider » et « Réinitialiser » comme elles. Décochée, les combinaisons restent
+//! modifiables — elles resserviront à la réactivation — mais ne sont plus enregistrées.
+//!
 //! **Les raccourcis globaux sont suspendus tant que la fenêtre Options est ouverte**
 //! (`main.rs::open_options_modal`) : sans cela, l'OS avalerait la frappe que l'utilisateur essaie
 //! justement d'assigner — à commencer par la combinaison qui vient d'ouvrir cette fenêtre.
@@ -174,6 +182,10 @@ pub fn show(
                 ui.add_space(SECTION_GAP);
             }
             vu += actions.len();
+            if section == MULTIACCOUNT_SECTION {
+                multiaccount_toggle(ui, bindings);
+                ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            }
             shortcut_table(ui, state, bindings, &actions, content_width, section);
         }
 
@@ -197,7 +209,25 @@ pub fn show(
 /// l'onglet « Paramètres ») — un groupe vide ne s'affiche pas, mais le laisser ici ferait croire
 /// qu'il reste quelque chose à y ranger. Le test `toutes_les_sections_sont_listees` garantit
 /// l'inverse : aucune action ne peut se retrouver sans groupe.
-const SECTIONS: [&str; 4] = ["Overlay", "Suivi", "Combat", "Multicompte"];
+const SECTIONS: [&str; 4] = ["Overlay", "Suivi", "Combat", MULTIACCOUNT_SECTION];
+
+/// Le groupe qui porte la case d'activation des raccourcis multicompte — voir doc de module.
+const MULTIACCOUNT_SECTION: &str = "Multicompte";
+
+/// La case « Activer les raccourcis multicompte », en tête de son groupe.
+fn multiaccount_toggle(ui: &mut egui::Ui, bindings: &mut ShortcutBindings) {
+    ui.add(
+        design::checkbox(
+            bindings.multiaccount_enabled_mut(),
+            "Activer les raccourcis multicompte",
+        )
+        .tooltip(
+            "Inviter et Suivre tapent une commande dans le chat du jeu à votre place. \
+             Décochée, leurs touches ne sont plus prises au jeu ni aux autres applications.",
+        )
+        .log_name("raccourcis.multicompte-actif"),
+    );
+}
 
 /// Message affiché quand la frappe capturée n'est pas assignable — `pub` pour que le harnais de
 /// capture (`overlay-testkit`, `tests/panels.rs::options_raccourcis`) le REPRENNE plutôt que de le
