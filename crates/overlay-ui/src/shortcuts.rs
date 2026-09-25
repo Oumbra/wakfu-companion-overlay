@@ -47,8 +47,9 @@
 //! place du joueur (`chat_command`) — ce que les CGU d'Ankama nomment, voir `docs/analyse-cgu.md`
 //! §3.1 — et l'onglet « À propos » les présentait comme optionnels alors qu'on ne pouvait que les
 //! réassigner. Désactivés ([`ShortcutBindings::multiaccount_enabled`]), ils ne sont plus
-//! enregistrés auprès de l'OS : F1 et F2 reviennent au jeu et aux autres applications. **Actifs
-//! par défaut**, comme avant, pour ne rien retirer à ceux qui s'en servent.
+//! enregistrés auprès de l'OS : F1 et F2 reviennent au jeu et aux autres applications.
+//! **Désactivés par défaut** (décision du mainteneur, 2026-09-25), y compris pour une configuration
+//! existante : une fonction que les CGU nomment ne s'active que si le joueur la demande.
 //!
 //! **Toutes les actions ne sont pas câblées sur les deux OS** : le binaire Linux
 //! (`bin/wakfu-companion-overlay-x11.rs`) n'enregistre que les actions de
@@ -418,7 +419,7 @@ impl Default for ShortcutBindings {
         }
         Self {
             slots,
-            multiaccount: true,
+            multiaccount: false,
         }
     }
 }
@@ -922,7 +923,9 @@ mod tests {
     #[test]
     fn multicompte_desactive_sort_des_actions_actives_et_des_conflits() {
         let mut bindings = ShortcutBindings::default();
-        assert!(bindings.multiaccount_enabled());
+        // Désactivés par défaut (2026-09-25).
+        assert!(!bindings.multiaccount_enabled());
+        bindings.set_multiaccount_enabled(true);
         assert!(bindings.is_active(ShortcutAction::InvitePartner));
         bindings.set_multiaccount_enabled(false);
         assert!(!bindings.is_active(ShortcutAction::InvitePartner));

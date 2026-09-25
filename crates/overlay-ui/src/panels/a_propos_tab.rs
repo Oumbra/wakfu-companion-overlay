@@ -222,8 +222,8 @@ pub const SECTIONS: &[Section] = &[
                  ne joue jamais à votre place.",
             ),
             info(
-                "Trois fonctions vont plus loin. Les raccourcis Inviter et Suivre (F1 et F2 par \
-                 défaut, désactivables dans l'onglet Raccourcis) et la réponse à une alerte de \
+                "Trois fonctions vont plus loin. Les raccourcis Inviter et Suivre (F1 et F2, \
+                 désactivés par défaut, à activer dans l'onglet Raccourcis) et la réponse à une alerte de \
                  chat tapent une commande dans le chat du jeu à votre place. La notification de \
                  tour (Windows, désactivée par défaut) lit l'image de la fenêtre du jeu pendant \
                  un combat pour y reconnaître votre nom. Rien de tout cela ne quitte votre \

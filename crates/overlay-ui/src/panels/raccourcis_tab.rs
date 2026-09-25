@@ -46,7 +46,8 @@
 //! Posée en tête du groupe « Multicompte », au-dessus de son tableau, comme « Activer le suivi »
 //! en tête de l'onglet Suivi : une seule case pour les deux raccourcis (demande utilisateur). Elle
 //! travaille sur le même brouillon que les combinaisons (`ShortcutBindings::multiaccount_enabled`),
-//! donc passe par « Valider » et « Réinitialiser » comme elles. Décochée, les combinaisons restent
+//! donc passe par « Valider » et « Réinitialiser » comme elles. **Décochée par défaut**
+//! (2026-09-25). Décochée, les combinaisons restent
 //! modifiables — elles resserviront à la réactivation — mais ne sont plus enregistrées.
 //!
 //! **Les raccourcis globaux sont suspendus tant que la fenêtre Options est ouverte**

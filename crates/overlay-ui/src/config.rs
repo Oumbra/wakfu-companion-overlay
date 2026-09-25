@@ -378,9 +378,11 @@ pub struct OverlayConfig {
     /// lu comme une action inconnue par les versions antérieures. Relu et écrit avec elle par
     /// [`Self::shortcuts`] / [`Self::set_shortcuts`].
     ///
-    /// **`true` par défaut, y compris pour une config écrite avant ce champ** : ces raccourcis
-    /// existaient avant la case, les couper à la mise à jour retirerait un geste sans prévenir.
-    #[serde(default = "actif")]
+    /// **`false` par défaut, y compris pour une config écrite avant ce champ** (décision du
+    /// mainteneur, 2026-09-25) : ces raccourcis tapent dans le chat du jeu à la place du joueur,
+    /// ce que les CGU d'Ankama nomment — ils ne s'activent que si on les demande, même pour qui
+    /// s'en servait avant la case.
+    #[serde(default)]
     pub multiaccount_shortcuts: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
@@ -448,7 +450,7 @@ impl Default for OverlayConfig {
             chat_alert_muted: false,
             auto_update: actif(),
             verbose_log: false,
-            multiaccount_shortcuts: actif(),
+            multiaccount_shortcuts: false,
             shortcuts: BTreeMap::new(),
         }
     }
@@ -1123,23 +1125,25 @@ mod tests {
             crate::shortcuts::ShortcutAction::Options,
             crate::shortcuts::Shortcut::parse("Ctrl+Alt+K").expect("combinaison de test valide"),
         );
-        bindings.set_multiaccount_enabled(false);
+        bindings.set_multiaccount_enabled(true);
         config.set_shortcuts(&bindings);
 
         let raw = toml::to_string_pretty(&config).expect("sérialisation");
         let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
         assert_eq!(relu, config);
         assert_eq!(relu.shortcuts(), bindings);
-        assert!(!relu.shortcuts().multiaccount_enabled());
+        assert!(relu.shortcuts().multiaccount_enabled());
     }
 
-    /// Une config écrite avant la case multicompte garde ses raccourcis F1/F2 actifs.
+    /// Une config écrite avant la case multicompte a ses raccourcis F1/F2 désactivés, comme une
+    /// installation neuve (décision du 2026-09-25).
     #[test]
-    fn multicompte_actif_par_defaut_pour_une_config_ancienne() {
+    fn multicompte_desactive_par_defaut_meme_pour_une_config_ancienne() {
         let relu: OverlayConfig =
             toml::from_str("log_path = \"/config/wakfu.log\"").expect("relecture");
-        assert!(relu.multiaccount_shortcuts);
-        assert!(relu.shortcuts().multiaccount_enabled());
+        assert!(!relu.multiaccount_shortcuts);
+        assert!(!relu.shortcuts().multiaccount_enabled());
+        assert!(!OverlayConfig::default().shortcuts().multiaccount_enabled());
     }
 
     /// La bande Récap déplacée (2026-09-17) : les deux coordonnées font l'aller-retour, elles
