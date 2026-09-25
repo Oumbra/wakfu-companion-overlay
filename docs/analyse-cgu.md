@@ -1,7 +1,8 @@
 # Analyse de conformité aux CGU Wakfu
 
-> Premier relevé le 2026-09-18 (version 0.63.1), **revérifié le 2026-09-21** à l'état du dépôt
-> `dev` (version 0.75.0). Lecture technique du code contre le texte des CGU, des règles du jeu et de
+> Premier relevé le 2026-09-18 (version 0.63.1), revérifié le 2026-09-21 (version 0.75.0), puis
+> **le 2026-09-25** à l'état du dépôt `dev` (version 0.82.10, après la Carte, `SessionExpired` et la
+> Release du 24 ; audit des textes « À propos » contre le code). Lecture technique du code contre le texte des CGU, des règles du jeu et de
 > la licence des données — **pas un avis juridique**. À refaire à chaque fonctionnalité qui touche
 > au client, à la fenêtre du jeu ou aux entrées clavier/souris (recette au §6).
 >
@@ -92,11 +93,16 @@ documentée.
 ### 3.1 Frappe synthétique dans le chat du jeu — risque élevé, assumé
 
 `crates/overlay-ui/src/chat_command.rs` et `crates/overlay-platform/src/linux/keyboard.rs`
-(§9.1 sexies du plan). **Inchangé au 2026-09-21.**
+(§9.1 sexies du plan). **Mécanisme inchangé au 2026-09-25 ; les raccourcis sont désactivables
+depuis ce jour.**
 
 - Les raccourcis globaux « Inviter » / « Suivre » (F1/F2 par défaut) tapent dans la fenêtre Wakfu
   au premier plan la séquence `Entrée`, `/i "Nom"` ou `/fol "Nom"`, `Entrée` — par `SendInput` +
-  `KEYEVENTF_UNICODE` sous Windows, par l'extension XTEST sous X11.
+  `KEYEVENTF_UNICODE` sous Windows, par l'extension XTEST sous X11. Actifs par défaut ; la case
+  « Activer les raccourcis multicompte » de l'onglet « Raccourcis » les coupe tous deux
+  (`OverlayConfig::multiaccount_shortcuts`) : ils ne sont alors plus enregistrés auprès de l'OS.
+  Jusqu'au 2026-09-25 on ne pouvait que les réassigner, alors que « À propos » les disait
+  optionnels.
 - Le clic sur une carte d'alerte de chat tape `Entrée` puis `/w "Nom" ` (sans envoi).
 - Le module Linux le documente lui-même : « XTEST injecte au niveau du SERVEUR, exactement comme un
   clavier physique : aucune application ne peut la distinguer d'une vraie frappe ».
@@ -146,9 +152,9 @@ consigne que toute nouvelle entrée synthétique est une décision à y inscrire
 | Curseur animé | `assets/cursor/*.png` | « isolé pixel par pixel depuis un enregistrement d'écran » du jeu | inchangé |
 | Bustes et portraits de classe (36 + 36) | `crates/overlay-ui/assets/avatars/`, `class-profile/` | art officiel des classes | inchangé |
 | Bordures de rareté | `crates/overlay-ui/assets/items/Border-*.webp` | art du jeu | inchangé |
-| Icônes de sorts, d'objets, de monstres | `remote_icons.rs`, `overlay_sync::client::icon_url` | art Ankama (`wakassets`) **relayé par l'API `wakfu-companion`** (`/api/v1/icons/…`) depuis le 2026-09-19 | le binaire ne contacte plus `vertylo.github.io` ; `assets/spells.json` et `monster-spells.json` en portent encore les URL (2 887 `picture`), dont seul le numéro d'image est lu (`spells::picture_gfx_id`) |
+| Icônes de sorts, d'objets, de monstres | `remote_icons.rs`, `overlay_sync::client::icon_url` | art Ankama (`wakassets`) **relayé par l'API `wakfu-companion`** (`/api/v1/icons/…`) depuis le 2026-09-19 | le binaire ne contacte plus `vertylo.github.io`, et depuis le 2026-09-22 (`7935f48`) `assets/spells.json` et `monster-spells.json` ne portent plus que des chemins relatifs (`spells/2282.png`) |
 | Données de jeu (noms, raretés, catégories d'objets, familles de monstres, sorts) | `overlay_engine::catalog` (via l'API), `assets/*.json` | gamedata Ankama (`definition.rarity`…) et encyclopédie | couvert par la **licence des données** si la mention est affichée — faite ce jour (§5.4) |
-| Sons d'alerte | `crates/overlay-ui/assets/sounds/` | aucun ne vient de Wakfu ; `loot.mp3` = `AlertSound6` de filterblade.xyz (son d'alerte de *Path of Exile*, Grinding Gear Games), les deux autres « fournis par l'utilisateur » | provenance documentée dans `assets/sounds/README.md` ; licence de `loot.mp3` **non établie** (tiers, pas Ankama) |
+| Sons d'alerte | `crates/overlay-ui/assets/sounds/` | `loot.mp3` = `AlertSound6` de filterblade.xyz (son d'alerte de *Path of Exile*, Grinding Gear Games) ; `countdown.mp3` et `chat-filter.mp3` « fournis par l'utilisateur » ; `turn.mp3`, qui n'est plus une copie du décompte, d'origine non documentée | provenance tenue dans `assets/sounds/README.md` ; licence de `loot.mp3` **non établie** (tiers, pas Ankama), origine des trois autres à documenter |
 | Polices | `assets/fonts/` | PT Serif (OFL), Ubuntu (UFL) | conforme, licences jointes |
 
 Le design system est en outre, par construction, une **œuvre dérivée** de l'interface du jeu
@@ -164,8 +170,9 @@ Le nom du produit (`wakfu-companion-overlay`), le protocole `wakfu-companion:` e
 toast, et l'identité du toast utilisent la marque (art. 13.3). La mention de non-affiliation
 (« projet de fan […] ni édité, ni hébergé, ni approuvé par Ankama », « WAKFU est une marque
 d'Ankama ») figure dans l'onglet « À propos » depuis le 2026-09-18 (`panels/a_propos_tab.rs`,
-`SECTIONS`) et, depuis ce relevé, dans le README (section « Projet non officiel »). La licence MIT
-du dépôt précise désormais qu'elle ne couvre pas les éléments d'Ankama.
+`SECTIONS`) et, depuis ce relevé, dans le README (section « Projet non officiel »). Le README
+(section « Licence ») précise que la licence MIT du dépôt ne couvre pas les éléments d'Ankama ; le
+fichier `LICENSE`, lui, est le texte MIT brut.
 
 ### 3.6 Données de tiers envoyées à l'API — risque faible
 
@@ -206,8 +213,9 @@ aucun fichier du Client. Signalé pour mémoire, pas comme écart.
   `_NET_CLIENT_LIST`), jamais par son process. `RegisterHotKey` / `XGrabKey` ne servent qu'aux
   raccourcis globaux de l'overlay.
 - **Aucune connexion aux serveurs d'Ankama** : hôtes contactés par le binaire = l'API
-  `wakfu-companion.com` (ou l'origine surchargée, affichée dans « À propos ») et `github.com`
-  (mise à jour). Ni `wakfu.com`, ni `ankama.com`, ni le CDN gamedata — l'art. 13.5 (TDM) n'est
+  `wakfu-companion.com` (`claude-dev.wakfu-companion.com` pour un binaire hors Release, ou
+  l'origine surchargée, affichée dans « À propos ») et `github.com` avec son CDN d'assets de
+  Release (mise à jour). `www.wakfu.com` n'apparaît que comme lien ouvert dans le navigateur (CGU). Ni `wakfu.com`, ni `ankama.com`, ni le CDN gamedata — l'art. 13.5 (TDM) n'est
   pas touché par ce dépôt. Les skills de synchronisation des référentiels (scraping de
   l'encyclopédie, heap dump du client Java) relèvent d'un autre outillage et tombent, eux, sous
   les art. 13.5 et 5.2.1.
@@ -229,7 +237,9 @@ aucun fichier du Client. Signalé pour mémoire, pas comme écart.
    `/w "Nom" ` et laisser le joueur coller (`Entrée`, `Ctrl+V`, `Entrée`). Le geste reste rapide,
    aucune entrée n'est injectée dans le client, et `SendInput`/XTEST disparaissent du produit.
    *Décision utilisateur du 2026-09-18 : fonction conservée. Recommandation maintenue, à
-   reconsidérer si Ankama se manifeste ou si un joueur est sanctionné.*
+   reconsidérer si Ankama se manifeste ou si un joueur est sanctionné. Depuis le 2026-09-25, les
+   raccourcis F1/F2 se désactivent d'une case ; la réponse en privé depuis une alerte de chat
+   reste active.*
 2. **Surveillance de tour** : conservée sous option décochée par défaut (décision du 2026-09-18).
    L'alternative sans capture — la bascule du titre de fenêtre (`TickInput::current`) — reste
    documentée pour le jour où l'option serait retirée.
@@ -237,29 +247,32 @@ aucun fichier du Client. Signalé pour mémoire, pas comme écart.
 4. ✅ **Non-affiliation, marque, mention de droits d'auteur** : onglet « À propos » (2026-09-18,
    mention de la licence ajoutée le 2026-09-21) et README (2026-09-21). Provenance des sons
    documentée (`crates/overlay-ui/assets/sounds/README.md`) ; reste au mainteneur à établir la
-   licence de `loot.mp3` et l'origine de `countdown.mp3` / `chat-filter.mp3`.
+   licence de `loot.mp3` et l'origine de `countdown.mp3`, `chat-filter.mp3` et `turn.mp3`.
 5. **Demander une autorisation écrite à Ankama** pour les assets graphiques (design system,
    curseur, portraits, bordures, icônes) et l'usage du nom — la licence des données ne les couvre
    pas. À défaut, réduire les assets embarqués à ce qui ne reproduit pas l'art du jeu, et retirer
    du dépôt les captures brutes d'interfaces (`assets/design-system/interfaces/`,
    `docs/design-reference/`), qui ne servent qu'au relevé.
-6. **Nettoyer les URL `vertylo.github.io` des référentiels** (`assets/spells.json`,
-   `monster-spells.json`) au profit du seul numéro d'image, pour que le dépôt ne référence plus un
-   CDN tiers dont le binaire n'a plus besoin — cosmétique, le binaire est déjà propre.
+6. ✅ **URL `vertylo.github.io` retirées des référentiels** (`assets/spells.json`,
+   `monster-spells.json`) le 2026-09-22 (`7935f48`) : chemins relatifs seulement.
 7. **Refaire ce relevé** à chaque ajout d'API système sensible (voir §6).
 
 ## 6. Recette du relevé
 
 ```bash
-# API système sensibles (entrées, fenêtres, capture, process) — attendu : SendInput dans
-# chat_command.rs et turn_watch/notify.rs, PrintWindow dans turn_watch/, xtest dans
-# overlay-platform/src/linux/keyboard.rs, RegisterHotKey/XGrabKey dans shortcuts.rs. Rien d'autre.
+# API système sensibles (entrées, fenêtres, capture, process) — attendu, hors commentaires :
+# SendInput dans chat_command.rs et turn_watch/notify.rs, PrintWindow dans turn_watch/, xtest dans
+# overlay-platform/src/linux/keyboard.rs, RegisterHotKey/XGrabKey dans shortcuts.rs. Rien d'autre
+# (les occurrences dans des commentaires — overlay-platform/linux, lib.rs, main.rs, binaire x11,
+# testkit/examples — sont attendues).
 rtk grep -rn -o -E "\b(SendInput|keybd_event|mouse_event|SetWindowsHookEx[AW]?|ReadProcessMemory|OpenProcess|CreateRemoteThread|PrintWindow|BitBlt|XTestFake\w+|XSendEvent|RegisterHotKey|XGrabKey|xtest)\b" crates --include=*.rs
 
 # Accès au répertoire d'installation du jeu (doit rester vide hors commentaires)
 rtk grep -rn -i -E "program files|steamapps/common|Ankama Launcher|\.jar\b" crates --include=*.rs
 
-# Hôtes distants référencés par le code (attendu : wakfu-companion.com, github.com, 127.0.0.1)
+# Hôtes distants référencés par le code (attendu : wakfu-companion.com,
+# claude-dev.wakfu-companion.com, github.com, www.wakfu.com (lien navigateur), 127.0.0.1/localhost ;
+# vertylo.github.io et example.* seulement dans des commentaires ou des tests)
 rtk grep -rhoE "https?://[a-zA-Z0-9./_-]+" crates --include=*.rs | sed -E 's#(https?://[^/]+).*#\1#' | sort | uniq -c | sort -rn
 
 # Mention de droits d'auteur et non-affiliation, dans l'onglet et le README

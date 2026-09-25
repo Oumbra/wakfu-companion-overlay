@@ -4,7 +4,7 @@ Overlay de jeu natif (Rust) pour [Wakfu](https://www.wakfu.com/), portage de
 [`Oumbra/wakfu-companion`](https://github.com/Oumbra/wakfu-companion) : lecture en direct de
 `wakfu.log`, affichage par-dessus le jeu des dégâts de combat, du suivi d'objets/ennemis et des
 alertes de drop, avec synchronisation de l'historique (combats, achats et récupérations de kamas à
-l'Hôtel de Vente, échanges) vers le même compte que l'application web.
+l'Hôtel de Vente, échanges, extractions de pacte) vers le même compte que l'application web.
 
 **Plateformes visées : Windows et Linux (X11 / XWayland).**
 
@@ -207,7 +207,7 @@ Un binaire de Release vise toujours l'API de prod ; un binaire compilé avec tou
 Wakfu Companion est un **projet de fan, gratuit et sans but lucratif**, qui n'est ni édité, ni
 hébergé, ni approuvé par Ankama et n'a aucun lien avec cette société. **WAKFU est une marque
 d'Ankama.** Les noms, images, icônes et éléments d'interface du jeu reproduits dans ce dépôt et dans
-le binaire restent la propriété d'Ankama Games et ne servent qu'à illustrer ; tout contenu lui
+le binaire restent la propriété d'Ankama et ne servent qu'à illustrer ; tout contenu lui
 appartenant est retiré sur simple demande de sa part (`contact@wakfu-companion.com`).
 
 Les données de jeu affichées (objets, monstres, raretés, catégories) descendent des fichiers que
@@ -215,16 +215,40 @@ Ankama met à disposition des projets communautaires, sous sa
 [licence d'utilisation des données Wakfu](https://static.ankama.com/comm/2019_03/2019-03-11_Licence%20d'utilisation_Donne_es%20Wakfu_v.1%20(1).pdf)
 (usage personnel et non commercial), qui impose la mention suivante :
 
-> WAKFU MMORPG : © 2012-2026 Ankama Studio. Tous droits réservés.
+> WAKFU MMORPG : © 2012-[année en cours] Ankama Studio. Tous droits réservés.
+
+L'overlay l'affiche avec l'année courante dans son onglet « À propos ».
 
 **Ce que l'overlay fait vis-à-vis du client de jeu, et ce que les CGU d'Ankama en disent**, est
 détaillé dans [`docs/analyse-cgu.md`](docs/analyse-cgu.md) et rappelé dans l'onglet « À propos »
 de l'overlay. En deux mots : il lit le fichier `wakfu.log` que le jeu écrit lui-même, ne se
 connecte jamais aux serveurs d'Ankama, ne lit pas la mémoire du client et ne modifie aucun de ses
-fichiers ; deux fonctions optionnelles vont plus loin (frappe d'une commande dans le chat sur
-raccourci, lecture de l'image de la fenêtre pour la notification de tour). Les
+fichiers. Trois fonctions vont plus loin : les raccourcis multicompte Inviter et Suivre (F1/F2 par
+défaut, désactivables dans l'onglet « Raccourcis ») et la réponse en privé depuis une alerte de
+chat tapent une commande dans le chat du jeu ; la notification de tour (Windows, désactivée par
+défaut) lit l'image de la fenêtre du jeu. Les
 [CGU d'Ankama](https://www.wakfu.com/fr/cgu) n'autorisent **aucun programme tiers par défaut** :
 utiliser cet overlay relève de l'appréciation et de la seule responsabilité de chaque joueur.
+
+## Vos données
+
+Le détail est dans l'onglet « À propos » de l'overlay (section « Vos données ») et dans la
+politique de confidentialité du site. L'essentiel :
+
+- **Ce qui part au compte**, une fois l'overlay appairé à un compte `wakfu-companion.com` :
+  l'historique lu dans `wakfu.log` (combats, achats et ventes récupérées à l'Hôtel des ventes,
+  échanges avec le nom du partenaire, extractions de pacte), vos personnages, votre Suivi, vos
+  alertes et vos recherches de chat. Ce que `wakfu.log` contient déjà au lancement part au moment
+  de l'appairage. Les messages de chat ne sont jamais envoyés, et `wakfu.log` n'est jamais
+  téléversé.
+- **Les autres connexions** : GitHub à chaque lancement (vérification de mise à jour, sans
+  identifiant), et la liste publique des serveurs de jeu sur `wakfu-companion.com`, sans
+  authentification.
+- **Ce qui reste sur la machine** : configuration, jeton de session (trousseau du système quand il
+  existe), combats en cours, file d'envoi, journaux techniques (14 derniers jours d'utilisation),
+  caches, et quelques entrées de registre sous Windows. Se déconnecter efface la session, les
+  combats en cours, l'historique pas encore envoyé et le contenu des journaux ; le bouton
+  « Supprimer les données locales » efface tout le reste.
 
 ## Licence
 

@@ -647,7 +647,8 @@ automatiquement par un navigateur, ce qui n'existe pas ici).
 > **Ne jamais** aller lire le cookie dans la base du navigateur : fragile, intrusif, indéfendable.
 
 **Stockage du jeton** : trousseau OS via `keyring` (Credential Manager sous Windows, Secret Service
-sous Linux). Repli explicite et signalé au journal (pas encore dans l'interface, C7 de
+sous Linux). Repli explicite, signalé au journal et, depuis le 2026-09-19, dans la section
+« Compte » de la fenêtre Options (`options_modal::token_file_notice`, C7 de
 [`analyse-rgpd.md`](analyse-rgpd.md)) : fichier `0600` sous `$XDG_DATA_HOME/wakfu-overlay/` quand
 aucun Secret Service n'est disponible (WM minimalistes) ou que le trousseau ne relit pas ce qu'il
 a écrit. Un emplacement **par déploiement** depuis le 2026-09-21 (`token_store::slot`, dérivé de
@@ -715,10 +716,16 @@ survit à un crash/une coupure réseau/un redémarrage (la file SQLite est écri
 rejeu sans conséquence grâce à l'idempotence (`SyncQueue::enqueue`, testé par rejeu 10x — voir
 `crates/overlay-sync/src/queue.rs::tests`, critère de sortie du §12).
 
-**Mode invité par défaut** : sans compte connecté (`uid` jamais résolu, voir plus bas), le thread
-Sync n'envoie jamais rien — `SyncCommand::Enqueue` continue d'ÉCRIRE en file (persistance locale,
-comme le web écrit quand même en IndexedDB en mode invité) mais `flush_once` n'est jamais appelé
-sans `uid` connu. **Rien ne quitte la machine** tant qu'aucun compte n'est lié.
+**Sans compte lié** (le mode invité n'existe plus depuis le 2026-09-14, §9.1 undecies ; reste
+l'intervalle entre le lancement et la résolution de l'`uid`, voir plus bas), le thread Sync
+n'envoie rien et **n'écrit rien sur disque** : `SyncCommand::Enqueue` garde les événements en
+mémoire (`held`, borné par `HELD_EVENTS_CAP`, 2026-09-18, constat C3), puis les verse dans la file
+à `SyncCommand::Activate` — l'historique relu dans `wakfu.log` au lancement part donc au compte au
+moment de l'appairage. **Aucun historique ne quitte la machine** tant qu'aucun compte n'est lié ;
+seule la liste publique des serveurs de jeu (`GET /api/v1/game-servers`, sans authentification)
+est demandée à chaque lancement. `SyncCommand::Deactivate` (déconnexion) vide la file ET la
+mémoire : l'historique pas encore envoyé est perdu, ce que disent l'onglet « À propos » et la
+section « Compte » (`a_propos_tab::DISCONNECT_INFO`).
 
 **`uid` (clé de `client_key = sha256(uid|kind|signature)`) résolu via `GET /api/v1/auth/me`**
 (`overlay_sync::client::fetch_account_id`, nouveau — `AuthService.uid` côté web vient du cookie de
@@ -834,9 +841,9 @@ DERNIER instantané compte.
   jamais une file qui grossit — rien à perdre en continuant de réessayer). Rien n'est jamais perdu
   côté overlay dans l'intervalle : `watchlist-counts.json` (fichier local, voir `watchlist.rs`)
   reste la source de vérité immédiate, la réplication réseau est un aval, jamais la seule copie.
-- **Mode invité / rattrapage à la connexion** : sans compte connecté, `pending_watchlist` reste en
-  attente (aucune requête tentée) jusqu'à `SyncCommand::Activate` — cohérent avec le §7.3 (« rien ne
-  quitte la machine tant qu'aucun compte n'est lié »).
+- **Rattrapage à la connexion** : sans compte connecté, `pending_watchlist` reste en attente
+  (aucune requête tentée) jusqu'à `SyncCommand::Activate` — cohérent avec le §7.3 (aucun
+  historique ne quitte la machine tant qu'aucun compte n'est lié).
 - **Divergence assumée pendant la fenêtre de debounce/backoff** : un overlay et le web utilisés en
   parallèle sur le même personnage peuvent afficher un `count` différent tant que la réplication
   n'a pas abouti — exactement le même compromis que `RemoteUserDataRepository` côté web (jamais
@@ -2863,39 +2870,57 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
   (`templates.rs`, C8), rien n'est transmis. La fonction est réglée par une case à cocher
   **décochée par défaut** (`OverlayConfig::turn_notification`) : décochée, aucune lecture de
   fenêtre n'a lieu.
-- **Entrées synthétiques : deux cas, tous deux déclenchés par l'utilisateur, aucun ne joue à sa
+- **Entrées synthétiques : trois cas, tous déclenchés par l'utilisateur, aucun ne joue à sa
   place.**
   1. Les raccourcis multicompte F1/F2 (§9.1 sexies, `chat_command.rs`) tapent dans le client au
      premier plan une commande de chat que **le jeu expose lui-même** (`/i "Nom"`, `/fol "Nom"`) —
      Wakfu permet déjà d'associer un raccourci à un texte envoyé au chat ; l'overlay ne fait que
      renseigner le nom de l'autre personnage à la place de l'utilisateur. Rien n'est tapé si la
-     fenêtre au premier plan n'est pas une fenêtre de jeu, et ce sont les **seules** frappes
-     synthétisées.
-  2. Le clic sur la notification de tour doit amener la fenêtre du personnage au premier plan ;
+     fenêtre au premier plan n'est pas une fenêtre de jeu. **Désactivables** depuis le 2026-09-25
+     (case « Activer les raccourcis multicompte » de l'onglet « Raccourcis »,
+     `OverlayConfig::multiaccount_shortcuts`, actifs par défaut) : désactivés, ils ne sont plus
+     enregistrés et F1/F2 reviennent au jeu.
+  2. Le clic sur une **carte d'alerte de chat** amène la fenêtre du personnage concerné au premier
+     plan et y tape `Entrée` puis `/w "Nom" ` (`chat_command::send_whisper`) — la réponse en
+     privé est préparée, **jamais envoyée** : c'est le joueur qui écrit son message et valide.
+  3. Le clic sur la notification de tour doit amener la fenêtre du personnage au premier plan ;
      Windows l'interdit à un process qui n'a pas reçu d'entrée. Le contournement (`notify.rs`,
      `focus_via_decoy`) est un clic synthétique **sur une fenêtre-leurre de 5 px de l'overlay**,
      sous le curseur, remis à sa place ensuite — le jeu ne reçoit ni clic ni déplacement. Il n'a
      lieu **que** parce que l'utilisateur vient de cliquer le toast, et seulement si la
      notification de tour est activée.
 
-  Ni l'un ni l'autre n'agit dans le combat, n'automatise une action de jeu ni ne procure un
-  avantage : la notification évite de manquer son tour, les raccourcis évitent de taper un nom.
+  Aucun n'agit dans le combat, n'automatise une action de jeu ni ne procure un
+  avantage : la notification évite de manquer son tour, les raccourcis et la réponse en privé évitent de
+  taper un nom.
   Ce n'est pas du botting, et l'overlay ne doit jamais le devenir : toute nouvelle entrée
   synthétique est une décision à inscrire ici, pas un détail d'implémentation.
-- Aucune donnée ne sort en mode invité (§7.3).
+- Aucun historique ne sort tant qu'aucun compte n'est appairé (§7.3) ; ce que `wakfu.log`
+  contient déjà au lancement part au moment de l'appairage.
+- Hôtes contactés : l'API du service (`wakfu-companion.com`, ou `claude-dev.wakfu-companion.com`
+  pour un binaire hors Release, ou l'origine de `WAKFU_COMPANION_API_URL`, affichée dans
+  « À propos ») — y compris les icônes, relayées par `GET /api/v1/icons/…` depuis le 2026-09-19
+  (C10) — et GitHub, à chaque lancement et sur demande, pour la mise à jour (sans identifiant ni
+  version courante). Aucun autre.
+- Données locales : « Se déconnecter » efface la session (ici et côté serveur), les combats en
+  cours, la file d'envoi, les compteurs de Suivi, les gabarits de tour et le contenu des journaux
+  (`local_data::Scope::OnDisconnect`) ; « Supprimer les données locales » efface tout le reste, y
+  compris l'inscription au démarrage et les clés de registre (`Scope::Everything`). Le démarrage
+  automatique est **décoché par défaut** depuis le 2026-09-19 (C12).
 - Le contenu du log est **hostile par nature** (messages de chat écrits par des tiers) : tout texte
   affiché est traité comme donnée, jamais interprété ; longueurs bornées ; parsing sans
   récursion non bornée.
-- Mises à jour : binaire et bundle moteur signés (`minisign`/ed25519), signature **vérifiée avant
-  exécution ou chargement**. Un asset de Release non vérifié n'est jamais chargé — un moteur JS
-  téléchargé est du code exécutable, pas de la donnée.
+- Mises à jour : binaire signé (`minisign`/ed25519 — le canal du bundle moteur a été retiré le
+  2026-09-15, §11), signature **vérifiée avant exécution**. Un asset de Release non vérifié n'est
+  jamais installé.
 - **Jeton de session** (§7.2) : c'est le jeton du compte *wakfu-companion*, jamais celui du jeu.
   C'est un **jeton porteur** — quiconque le détient peut appeler l'API au nom de l'utilisateur
   (`Authorization: Bearer`, `client.rs`) jusqu'à révocation : il n'est donc pas anodin. Il est
   rangé dans le **trousseau de l'OS** (Credential Manager, Secret Service) ; quand aucun trousseau
   n'est disponible ou ne relit ce qu'il a écrit, l'overlay le **replie en clair** dans un fichier
   de son dossier de données (`token_store.rs::save_token_file`, `0600` sous Linux, aucune ACL
-  particulière sous Windows — C7), et le dit au journal (`warn!`), pas encore dans l'interface. Il
+  particulière sous Windows — C7), et le dit au journal (`warn!`) et dans la section « Compte » de
+  la fenêtre Options (`token_file_notice`). Il
   est **effacé** des deux emplacements à la déconnexion (`clear_token`), **effacé côté serveur**
   au même geste (`DELETE /api/v1/auth/native/session`, C5) et **révocable** depuis le site
   (« Sessions actives »). Il est **renouvelé** au démarrage quand il a plus de 7 jours (2026-09-19,
@@ -2973,11 +2998,15 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
     (`std::env::current_exe`), sans le renommer. Une installation antérieure garde donc son
     `overlay-ui.exe`/`overlay-ui-x11` jusqu'à ce que l'utilisateur retélécharge — aucune Release
     n'ayant encore été distribuée, le cas est théorique.
-- **Windows** : binaire + installeur NSIS/MSI. Signature Authenticode fortement recommandée (sans
+- **Ce que publie la Release aujourd'hui** (`release.yml`) : un binaire par OS compressé en gzip
+  (`wakfu-companion-overlay-{version}-windows-x86_64.exe.gz`, `…-linux-x86_64.gz`), plus le
+  manifeste signé que l'overlay lit pour s'installer seul — ni installeur, ni paquet. Les
+  paragraphes suivants restent des pistes, pas l'état du dépôt.
+- **Windows** (piste) : installeur NSIS/MSI. Signature Authenticode fortement recommandée (sans
   elle, SmartScreen effraie chaque nouvel utilisateur) — coût à budgéter, mais l'app reste
   installable sans.
-- **Linux** : AppImage (cible principale, aucune dépendance système à gérer) + `.deb`. Dépendances
-  runtime documentées : Vulkan/Mesa, X11, `libsecret` (optionnel, cf. repli §7.2).
+- **Linux** (piste) : AppImage + `.deb`. Dépendances runtime documentées : Vulkan/Mesa, X11,
+  `libsecret` (optionnel, cf. repli §7.2).
 - **Numéro de version : une seule source, incrémentée automatiquement** (décision du 2026-09-14).
   `[workspace.package] version` du `Cargo.toml` racine est la version du PRODUIT ; toutes les crates
   y renvoient (`version.workspace = true`), Cargo l'embarque dans le binaire, et

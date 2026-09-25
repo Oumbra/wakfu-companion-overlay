@@ -14,6 +14,26 @@ du dépôt `wakfu-companion` (section 8 pour le reliquat issu de l'overlay).
 | --- | --- | --- | --- |
 | — | Optionnel, écarté le 2026-09-18 : `--purge-local-data` en ligne de commande ; à rouvrir seulement si un désinstalleur arrive | C5 | — |
 
+## Fait le 2026-09-25 (audit des textes contre le code)
+
+Relecture de chaque phrase de « À propos », des écrans de connexion et de déconnexion, du README
+et des analyses face au code (`45e0828`, version 0.82.10). Constats numérotés C20 à C25.
+
+| Constat | Ce qui a été fait | Où |
+| --- | --- | --- |
+| C20 | Titre de la fenêtre au premier plan (n'importe quelle application) écrit toutes les 3 s au niveau `info` tant qu'un overlay est rétrogradé ; nom du partenaire d'Inviter/Suivre en `info`/`warn`. Passés en `debug` (« Journal détaillé »), dont l'infobulle le dit | `main.rs::sync_topmost`, `main.rs`/`bin/…-x11.rs` (raccourcis multicompte), `chat_command.rs::send`, `panels/options_modal.rs` |
+| C21 | « Avant l'appairage, rien ne part » était faux : `GET /api/v1/game-servers` part sans authentification à chaque lancement, et l'historique relu dans `wakfu.log` est envoyé au moment de l'appairage. La liste de ce qui part omettait le Suivi, les ventes récupérées à l'HDV et le détail des combats (soins, armure, sorts, butin, XP, kamas, serveur). Texte réécrit, test étendu | `panels/a_propos_tab.rs::SECTIONS`, README « Vos données » |
+| C22 | La déconnexion vide la file d'envoi (`SyncCommand::Deactivate`) : l'historique pas encore envoyé est perdu, et aucun texte ne le disait. Constante partagée `DISCONNECT_INFO`, affichée dans la section « Compte » (Options et Carte) et dans la confirmation de la Carte | `a_propos_tab::DISCONNECT_INFO`, `options_modal.rs`, `login.rs` |
+| C23 | « Journal de 14 jours » : ce sont 14 fichiers quotidiens (« vos 14 derniers jours d'utilisation »). Le plafond de 16 Mio repartait de zéro à chaque lancement : il part désormais de la taille du fichier du jour | `a_propos_tab.rs`, `logging.rs::todays_log_size` |
+| C24 | « Supprimer les données locales » : la liste omettait l'inscription au démarrage et les clés de registre ; le dossier `%APPDATA%\wakfu-companion-overlay` restait vide derrière la purge. Surtout, l'ancienne racine (C13) était visée par `ProjectDirs::project_path()`, un fragment RELATIF : ni la migration ni la purge ne la trouvaient. Chemins absolus (`app_dirs::own_root`), dossier parent purgé | `overlay-engine/src/app_dirs.rs`, `config.rs::{legacy_root, own_root, migrate_legacy_root}`, `local_data.rs` |
+| C25 | « Deux fonctions optionnelles » pour trois fonctions, dont F1/F2 non désactivables. Case « Activer les raccourcis multicompte » (onglet « Raccourcis », actifs par défaut) ; « Trois fonctions » dans « À propos » et le README | `shortcuts.rs`, `config.rs::multiaccount_shortcuts`, `panels/raccourcis_tab.rs` |
+
+**Reste à confirmer par le mainteneur** : C5 (rotation du jeton) et C9 (`PATCH` partiel) dépendaient
+du déploiement du site (`claude/dev` → `main` de `wakfu-companion`), et la Release v0.82.10 est
+sortie le 2026-09-24. Le dépôt du site n'était pas accessible depuis la session du 25 : vérifier que
+le site est déployé, puis retirer les mentions « dépend du déploiement » ci-dessous et faire pointer
+le lien de l'en-tête vers `main`.
+
 ## Fait le 2026-09-21 (revérification)
 
 | Constat | Ce qui a été fait | Où |
