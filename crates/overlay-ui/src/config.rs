@@ -369,6 +369,21 @@ pub struct OverlayConfig {
     /// demandé le mode détaillé.
     #[serde(default)]
     pub verbose_log: bool,
+    /// Les raccourcis **multicompte** (Inviter / Suivre l'autre personnage, F1/F2 par défaut)
+    /// sont-ils actifs ? — case « Activer les raccourcis multicompte » de l'onglet « Raccourcis »
+    /// (2026-09-25, voir la doc de module de `shortcuts`). Désactivés, ils ne sont plus
+    /// enregistrés : aucune commande n'est plus tapée dans le chat du jeu sur raccourci.
+    ///
+    /// Hors de la table `[shortcuts]`, qui ne porte que des combinaisons : un drapeau y serait
+    /// lu comme une action inconnue par les versions antérieures. Relu et écrit avec elle par
+    /// [`Self::shortcuts`] / [`Self::set_shortcuts`].
+    ///
+    /// **`false` par défaut, y compris pour une config écrite avant ce champ** (décision du
+    /// mainteneur, 2026-09-25) : ces raccourcis tapent dans le chat du jeu à la place du joueur,
+    /// ce que les CGU d'Ankama nomment — ils ne s'activent que si on les demande, même pour qui
+    /// s'en servait avant la case.
+    #[serde(default)]
+    pub multiaccount_shortcuts: bool,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).
@@ -435,6 +450,7 @@ impl Default for OverlayConfig {
             chat_alert_muted: false,
             auto_update: actif(),
             verbose_log: false,
+            multiaccount_shortcuts: false,
             shortcuts: BTreeMap::new(),
         }
     }
@@ -444,13 +460,16 @@ impl OverlayConfig {
     /// Raccourcis effectifs de cette config — défauts inclus pour toute action absente/illisible,
     /// voir [`ShortcutBindings::from_config`].
     pub fn shortcuts(&self) -> ShortcutBindings {
-        ShortcutBindings::from_config(&self.shortcuts)
+        let mut bindings = ShortcutBindings::from_config(&self.shortcuts);
+        bindings.set_multiaccount_enabled(self.multiaccount_shortcuts);
+        bindings
     }
 
     /// Remplace la table `[shortcuts]` par l'intégralité de `bindings` — appelée à la validation de
     /// la fenêtre Options (voir `panels::options_modal`), jamais à chaque frame.
     pub fn set_shortcuts(&mut self, bindings: &ShortcutBindings) {
         self.shortcuts = bindings.to_config();
+        self.multiaccount_shortcuts = bindings.multiaccount_enabled();
     }
 
     /// Réglages de la carte de chat effectifs — défaut pour une config qui ne les porte pas.
@@ -619,6 +638,18 @@ pub fn legacy_project_dirs() -> Option<directories::ProjectDirs> {
     overlay_engine::app_dirs::legacy_project_dirs(APP_NAME)
 }
 
+/// Le dossier propre de l'ancienne racine, en chemin absolu — `None` sous Linux, où elle se
+/// confond avec la racine actuelle (voir `overlay_engine::app_dirs::own_root`).
+pub fn legacy_root() -> Option<PathBuf> {
+    legacy_project_dirs().and_then(|dirs| overlay_engine::app_dirs::own_root(&dirs))
+}
+
+/// Le dossier propre de la racine actuelle (`%APPDATA%\wakfu-companion-overlay` sous Windows,
+/// `None` sous Linux) — pour que l'effacement complet ne laisse pas ce dossier vide derrière lui.
+pub fn own_root() -> Option<PathBuf> {
+    project_dirs().and_then(|dirs| overlay_engine::app_dirs::own_root(&dirs))
+}
+
 fn config_file() -> Option<PathBuf> {
     project_dirs().map(|dirs| dirs.config_dir().join("config.toml"))
 }
@@ -643,10 +674,15 @@ pub fn migrate_legacy_root() {
     let (Some(legacy), Some(current)) = (legacy_project_dirs(), project_dirs()) else {
         return;
     };
-    let legacy_root = legacy.project_path();
-    if legacy_root == current.project_path() || !legacy_root.exists() {
+    // Chemins ABSOLUS (voir `overlay_engine::app_dirs::own_root`) ; sous Linux, pas de racine
+    // propre à migrer : les deux triplets donnent les mêmes dossiers XDG.
+    let (Some(legacy_root), Some(current_root)) = (legacy_root(), own_root()) else {
+        return;
+    };
+    if legacy_root == current_root || !legacy_root.exists() {
         return;
     }
+    let legacy_root = legacy_root.as_path();
     let moves = [
         (
             legacy.config_dir().join("config.toml"),
@@ -1089,12 +1125,25 @@ mod tests {
             crate::shortcuts::ShortcutAction::Options,
             crate::shortcuts::Shortcut::parse("Ctrl+Alt+K").expect("combinaison de test valide"),
         );
+        bindings.set_multiaccount_enabled(true);
         config.set_shortcuts(&bindings);
 
         let raw = toml::to_string_pretty(&config).expect("sérialisation");
         let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
         assert_eq!(relu, config);
         assert_eq!(relu.shortcuts(), bindings);
+        assert!(relu.shortcuts().multiaccount_enabled());
+    }
+
+    /// Une config écrite avant la case multicompte a ses raccourcis F1/F2 désactivés, comme une
+    /// installation neuve (décision du 2026-09-25).
+    #[test]
+    fn multicompte_desactive_par_defaut_meme_pour_une_config_ancienne() {
+        let relu: OverlayConfig =
+            toml::from_str("log_path = \"/config/wakfu.log\"").expect("relecture");
+        assert!(!relu.multiaccount_shortcuts);
+        assert!(!relu.shortcuts().multiaccount_enabled());
+        assert!(!OverlayConfig::default().shortcuts().multiaccount_enabled());
     }
 
     /// La bande Récap déplacée (2026-09-17) : les deux coordonnées font l'aller-retour, elles

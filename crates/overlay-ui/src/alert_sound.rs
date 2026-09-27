@@ -12,9 +12,9 @@ const COUNTDOWN_SOUND_BYTES: &[u8] = include_bytes!("../assets/sounds/countdown.
 const LOOT_SOUND_BYTES: &[u8] = include_bytes!("../assets/sounds/loot.mp3");
 const CHAT_SOUND_BYTES: &[u8] = include_bytes!("../assets/sounds/chat-filter.mp3");
 /// Son de la notification de tour (§9.1 decies) — le toast Windows est silencieux, c'est ce
-/// fichier qu'on entend. **Provisoirement une copie du décompte** : à remplacer par le son que
-/// l'utilisateur choisira, en déposant son fichier à ce chemin (asset maintenu par lui, comme
-/// `spells.json`).
+/// fichier qu'on entend. Ce n'est plus la copie provisoire du décompte des débuts : le fichier a
+/// été remplacé (asset maintenu par l'utilisateur, comme `spells.json`) ; sa provenance reste à
+/// documenter dans `assets/sounds/README.md`.
 const TURN_SOUND_BYTES: &[u8] = include_bytes!("../assets/sounds/turn.mp3");
 
 /// Joue le son de décompte à 0 — voir `play_alert` pour les garanties (thread dédié, best-effort).
