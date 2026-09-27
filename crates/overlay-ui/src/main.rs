@@ -795,8 +795,8 @@ struct App {
     /// déjà journalisées (`sync_topmost`), si `GetForegroundWindow()` désignait réellement autre
     /// chose que le jeu pendant tout ce temps (l'utilisateur ayant réellement l'attention ailleurs)
     /// ou si la détection elle-même restait bloquée sur une valeur obsolète. Sert à borner un
-    /// battement de coeur périodique (voir `sync_topmost`) qui journalise le titre de la fenêtre
-    /// actuellement au premier plan — mais SEULEMENT tant qu'au moins un overlay reste
+    /// battement de coeur périodique (voir `sync_topmost`) qui journalise, en `debug`, le titre de
+    /// la fenêtre actuellement au premier plan — mais SEULEMENT tant qu'au moins un overlay reste
     /// `HWND_NOTOPMOST` (voir son appel), pour ne pas spammer le journal en usage normal.
     last_foreground_heartbeat: Option<std::time::Instant>,
     /// Dialogue de fichier natif (`rfd`) en cours, le cas échéant — voir `App::start_file_dialog`
@@ -831,6 +831,16 @@ struct App {
     /// menu de la zone de notification, qui pose sa question par-dessus (2026-09-22). Même rôle
     /// que [`Self::manual_update`] pour l'écran de mise à jour.
     account_card: bool,
+    /// **Un appairage a été lancé depuis le dernier compte lié** (2026-09-27, demande
+    /// utilisateur) — posé dès que le compte passe par `AuthStatus::PairingStarted`, consommé
+    /// quand il aboutit. `sync_session_windows` pose alors [`Self::account_card`] : la Carte
+    /// reste ouverte sur l'écran « Connecté » au lieu de disparaître d'elle-même, et c'est
+    /// l'utilisateur qui la referme (« Fermer ») ou se déconnecte. Une fenêtre qui s'évanouit
+    /// à la validation du code ne dit ni que la connexion a réussi, ni où elle est passée.
+    ///
+    /// Un démarrage sur un jeton déjà enregistré ne passe jamais par l'appairage : la Carte y
+    /// cède toujours la place aux overlays sans rien demander.
+    pairing_seen: bool,
 }
 
 /// L'icône de zone de notification (`tray-icon`, même auteurs que `global-hotkey`) et les quatre
@@ -1047,6 +1057,7 @@ impl App {
             manual_update: false,
             login_dismissed: false,
             account_card: false,
+            pairing_seen: false,
         }
     }
 
@@ -1065,7 +1076,8 @@ impl App {
     ///    Elle masque tout le démarrage : catalogue, référentiels, rattrapage de `wakfu.log`,
     ///    vérification du jeton et récupération des réglages du compte ;
     /// 2. **compte lié** (et tout chargé) : pas de fenêtre de connexion, `sync_windows` crée
-    ///    enfin les overlays de jeu ;
+    ///    enfin les overlays de jeu, sauf juste après un appairage : la Carte
+    ///    reste alors sur l'écran « Connecté » jusqu'à « Fermer » (voir `pairing_seen`) ;
     /// 3. **compte non lié** : la fenêtre de connexion, seule, sur son écran « Vous n'êtes pas
     ///    connecté » (ou appairage, ou erreur).
     ///
@@ -1078,6 +1090,19 @@ impl App {
         let loading = !self.startup.is_complete() || matches!(**auth, AuthStatus::Connecting);
         let connected = !loading && auth.is_connected();
         let has_login = self.windows.values().any(|w| w.kind == OverlayKind::Login);
+        if matches!(**auth, AuthStatus::PairingStarted { .. }) {
+            self.pairing_seen = true;
+        }
+        // **Appairage abouti** : la Carte reste sur l'écran « Connecté » jusqu'à ce que
+        // l'utilisateur la ferme — voir `pairing_seen`.
+        let just_paired = connected && std::mem::take(&mut self.pairing_seen);
+        if just_paired {
+            self.account_card = true;
+            self.login_dismissed = false;
+            tracing::info!(
+                "[connexion] appairage abouti — la Carte reste ouverte sur l'écran du compte."
+            );
+        }
         if connected {
             // Seule exception à « compte lié = pas de fenêtre de connexion » : l'écran de mise à
             // jour demandé depuis le menu de la zone de notification, qui vit alors à côté des
@@ -1093,6 +1118,14 @@ impl App {
                 );
             }
             self.account_was_connected = true;
+            // L'utilisateur vient de valider le code dans son navigateur : la Carte repasse
+            // au premier plan, pour qu'il voie que c'est fait.
+            if just_paired {
+                if let Some(overlay) = self.windows.values().find(|w| w.kind == OverlayKind::Login)
+                {
+                    overlay.window.focus_window();
+                }
+            }
         } else {
             // **Transition « connecté -> plus connecté »** (voir `account_was_connected`) : le récap
             // de session part avec le compte, sinon il serait réécrit juste après la purge du thread
@@ -1284,7 +1317,7 @@ impl App {
             return;
         }
         let menu = Menu::new();
-        // « Options » et « Déconnecter » naissent grisés : rien à régler ni à quitter tant
+        // Toutes les entrées naissent actives ; celle du compte dit « Se connecter » tant
         // qu'aucun compte n'est lié (voir `sync_tray_menu`).
         let options = MenuItem::new("Paramètres", true, None);
         let update = MenuItem::new("Mise à jour", true, None);
@@ -1342,7 +1375,7 @@ impl App {
                 // « Se connecter » plutôt que de s'éteindre — une entrée grisée sans explication
                 // n'apprend rien, et c'est le seul menu de l'overlay.
                 tray.disconnect.set_text(if connected {
-                    "Déconnecter"
+                    "Se déconnecter"
                 } else {
                     "Se connecter"
                 });
@@ -2537,7 +2570,10 @@ impl App {
             .collect();
         match chat_command::partner_character(&windows, &foreground) {
             Ok(partner) => {
-                tracing::info!(">>> {} ({label}) : {partner}", command.label());
+                // Le nom du partenaire se journalise en `debug`, comme l'auteur d'une alerte de
+                // chat (constat C6 de `docs/analyse-rgpd.md`) : l'action suffit au niveau `info`.
+                tracing::info!(">>> {} ({label})", command.label());
+                tracing::debug!(%partner, ">>> {}", command.label());
                 chat_command::send(command, partner);
             }
             // Jamais une erreur remontée à l'utilisateur : il n'y a rien à réparer, seulement un
@@ -2632,7 +2668,12 @@ impl App {
                 .is_none_or(|t| now.duration_since(t) >= FOREGROUND_HEARTBEAT_INTERVAL);
             if due {
                 self.last_foreground_heartbeat = Some(now);
-                tracing::info!(
+                // **En `debug` depuis le 2026-09-25** : le titre est celui de N'IMPORTE quelle
+                // application au premier plan (onglet de navigateur, objet d'un courriel…), écrit
+                // toutes les 3 s — une donnée personnelle au niveau `info` par défaut, contraire
+                // au constat C6 de `docs/analyse-rgpd.md`. Le diagnostic reste disponible avec
+                // « Journal détaillé ».
+                tracing::debug!(
                     "[topmost] sondage (overlay(s) toujours rétrogradé(s)) : premier plan actuel = « {} »",
                     Self::window_title(foreground)
                 );

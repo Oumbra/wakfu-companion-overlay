@@ -69,7 +69,7 @@ jobs:
       exists: ${{ steps.tag.outputs.exists }}
       commit: ${{ steps.read.outputs.commit }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: lire [workspace.package] version
@@ -103,7 +103,7 @@ jobs:
     if: needs.version.outputs.exists == 'false'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
@@ -121,7 +121,7 @@ jobs:
           # surcharge prévue pour une chaîne de release, prioritaire sur `git`.
           WAKFU_OVERLAY_COMMIT: ${{ needs.version.outputs.commit }}
         run: cargo build --release -p overlay-ui --bin wakfu-companion-overlay
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-x86_64
           path: target/release/wakfu-companion-overlay.exe
@@ -134,7 +134,7 @@ jobs:
     if: needs.version.outputs.exists == 'false'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Toolchain Rust (version épinglée par rust-toolchain.toml)
@@ -152,7 +152,7 @@ jobs:
         env:
           WAKFU_OVERLAY_COMMIT: ${{ needs.version.outputs.commit }}
         run: cargo build --release -p overlay-ui --bin wakfu-companion-overlay-x11
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-x86_64
           path: target/release/wakfu-companion-overlay-x11
@@ -170,14 +170,14 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           # Aucune étape ne pousse par git : `gh release` et `action-gh-release` passent par l'API
           # avec leur propre jeton. Ne pas laisser le jeton d'écriture dans `.git/config` pendant
           # la compilation et l'exécution de `xtask`.
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: binaries
       - name: assets de la Release précédente (mesure du différentiel)
@@ -256,7 +256,7 @@ jobs:
           } > notes.md
           cat notes.md
       - name: Release GitHub
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: ${{ needs.version.outputs.tag }}

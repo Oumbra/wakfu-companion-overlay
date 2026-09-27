@@ -219,11 +219,10 @@ pub fn send(command: ChatCommand, character: &str) {
         .name("chat-command".into())
         .spawn(move || {
             if let Err(err) = imp::type_chat_line(&line, CHAT_OPEN_DELAY, SEND_DELAY) {
-                tracing::warn!(
-                    "[multicompte] « {} » vers {} en échec : {err}",
-                    command.label(),
-                    character
-                );
+                // Le destinataire (personnage de l'utilisateur) reste hors du niveau `warn` —
+                // constat C6 de `docs/analyse-rgpd.md`.
+                tracing::warn!("[multicompte] « {} » en échec : {err}", command.label());
+                tracing::debug!(%character, "[multicompte] destinataire de la frappe en échec");
             }
         })
         .map(|_| ())

@@ -392,6 +392,8 @@ mod linux_main {
         login_dismissed: bool,
         /// Voir `main.rs::App::account_card`.
         account_card: bool,
+        /// Voir `main.rs::App::pairing_seen`.
+        pairing_seen: bool,
         /// Icône de zone de notification (StatusNotifierItem/DBus, §17.2 du plan) — voir
         /// `overlay_ui::linux_tray`, équivalent Linux de `main.rs::App::tray`. `None` si la pose a
         /// échoué (pas de bus de session, pas d'hôte SNI — jamais fatal).
@@ -672,6 +674,7 @@ mod linux_main {
                 manual_update: false,
                 login_dismissed: false,
                 account_card: false,
+                pairing_seen: false,
                 tray: None,
                 tray_rx: None,
                 tray_synced_connected: false,
@@ -761,6 +764,19 @@ mod linux_main {
             let loading = !self.startup.is_complete() || matches!(**auth, AuthStatus::Connecting);
             let connected = !loading && auth.is_connected();
             let has_login = self.windows.values().any(|w| w.kind == OverlayKind::Login);
+            if matches!(**auth, AuthStatus::PairingStarted { .. }) {
+                self.pairing_seen = true;
+            }
+            // **Appairage abouti** : la Carte reste sur l'écran « Connecté » jusqu'à ce que
+            // l'utilisateur la ferme — voir `pairing_seen`.
+            let just_paired = connected && std::mem::take(&mut self.pairing_seen);
+            if just_paired {
+                self.account_card = true;
+                self.login_dismissed = false;
+                tracing::info!(
+                    "[connexion] appairage abouti — la Carte reste ouverte sur l'écran du compte."
+                );
+            }
             if connected {
                 // Seule exception à « compte lié = pas de fenêtre de connexion » : l'écran de
                 // mise à jour demandé à la main (voir `App::manual_update`).
@@ -775,6 +791,15 @@ mod linux_main {
                     );
                 }
                 self.account_was_connected = true;
+                // L'utilisateur vient de valider le code dans son navigateur : la Carte repasse
+                // au premier plan, pour qu'il voie que c'est fait.
+                if just_paired {
+                    if let Some(overlay) =
+                        self.windows.values().find(|w| w.kind == OverlayKind::Login)
+                    {
+                        overlay.window.focus_window();
+                    }
+                }
             } else {
                 // **Transition « connecté -> plus connecté »** — voir `main.rs::sync_session_windows`,
                 // même geste : le récap de session part avec le compte, sinon il serait réécrit juste
@@ -1523,7 +1548,9 @@ mod linux_main {
                 .collect();
             match chat_command::partner_character(&windows, &active) {
                 Ok(partner) => {
-                    tracing::info!(">>> {} ({label}) : {partner}", command.label());
+                    // Nom du partenaire en `debug` seulement — voir la même ligne dans `main.rs`.
+                    tracing::info!(">>> {} ({label})", command.label());
+                    tracing::debug!(%partner, ">>> {}", command.label());
                     chat_command::send(command, partner);
                 }
                 Err(err) => tracing::info!(">>> {} ({label}) : {}", command.label(), err.message()),
