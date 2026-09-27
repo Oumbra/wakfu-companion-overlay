@@ -2748,7 +2748,9 @@ fn paint_body(
             }
             // **L'écran d'un compte lié** (2026-09-22) — il n'existait pas : `Connected` tombait
             // dans la branche ci-dessous et affichait « vous n'êtes pas connecté », ce qui ne se
-            // voyait jamais, la fenêtre se refermant dès la validation du compte. L'entrée
+            // voyait jamais, la fenêtre se refermant dès la validation du compte. Depuis le
+            // 2026-09-27, c'est aussi l'écran d'arrivée d'un appairage réussi : la Carte y reste
+            // jusqu'à « Fermer » (voir `App::pairing_seen`). L'entrée
             // « Déconnecter » du menu de la zone de notification change cela : il faut un écran
             // derrière la boîte de confirmation, et un endroit où revenir si elle est annulée.
             //
