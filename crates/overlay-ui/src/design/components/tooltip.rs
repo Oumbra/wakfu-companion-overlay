@@ -153,6 +153,7 @@ pub fn tooltip(response: &Response) -> Tooltip<'_> {
         side: TooltipSide::default(),
         gap: tokens::TOOLTIP_GAP,
         anchor: None,
+        slide: false,
     }
 }
 
@@ -162,6 +163,7 @@ pub struct Tooltip<'a> {
     side: TooltipSide,
     gap: f32,
     anchor: Option<egui::Rect>,
+    slide: bool,
 }
 
 impl Tooltip<'_> {
@@ -191,6 +193,19 @@ impl Tooltip<'_> {
     /// les replis de [`TooltipSide`] s'appliquent à LUI (voir la doc de module).
     pub fn anchor(mut self, anchor: egui::Rect) -> Self {
         self.anchor = Some(anchor);
+        self
+    }
+
+    /// **Centrée sur son côté, puis glissée le long du bord** qui la gêne, au lieu des replis
+    /// réalignés de [`TooltipSide`] (demande utilisateur 2026-09-28, bouton œil) : un bouton posé
+    /// contre le bord gauche garde son infobulle dessous, décalée juste assez vers la droite pour
+    /// tenir dans la fenêtre — jamais alignée sur son bord, jamais basculée de côté.
+    ///
+    /// C'est à la fenêtre de faire la place, et à l'appelant de choisir le côté qui en a : c'est
+    /// le cas du bouton œil, dont l'hôte taille la fenêtre sur la zone de jeu
+    /// (`click_through_placement::tip_window`).
+    pub fn slide(mut self) -> Self {
+        self.slide = true;
         self
     }
 
@@ -231,7 +246,9 @@ impl Tooltip<'_> {
         tip.popup = tip
             .popup
             .align(align)
-            .align_alternatives(&alternatives)
+            // Sans repli, egui garde l'alignement demandé et retient la zone dans la fenêtre
+            // (`Area::constrain`, actif par défaut) : c'est la glissade de `slide`.
+            .align_alternatives(if self.slide { &[] } else { &alternatives })
             .gap(self.gap);
         tip.show(add_contents);
     }

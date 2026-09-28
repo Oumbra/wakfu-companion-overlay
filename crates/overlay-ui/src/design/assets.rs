@@ -426,6 +426,15 @@ pub enum DsTexture {
     /// octet pour octet le `button-background.png` que `ui_icons` charge déjà de son côté.
     ButtonIconFirstPlan,
     ButtonIconFirstPlanHover,
+    /// **Le fond de section d'un bouton de premier plan** (`button-icon-first-plan-section.png`,
+    /// 40 × 42, 2026-09-28) — le cadre sombre que le jeu pose autour de ses boutons posés sur la
+    /// scène (le cadeau à côté de Boutique, les groupes « + / − » du zoom) : 2 px sur les côtés et
+    /// en haut, 4 en bas (un liseré d'ombre compris). Découpé dans
+    /// `menu-button-icon-first-plan.png` — le haut et le bas de sa colonne recollés sur un seul
+    /// bouton —, fond noir de la capture rendu transparent. L'intérieur est plein, de la teinte du
+    /// cadre : le socle de 36 px s'y pose à (2, 2) et ses angles arrondis laissent voir ce cadre,
+    /// comme dans le jeu.
+    ButtonIconFirstPlanSection,
     /// Socle grisé — **une seule texture pour les deux contextes**, le jeu n'en ayant capturé
     /// qu'une (même parti pris que `ButtonDisabled` pour le bouton texte).
     ButtonIconDisabled,
@@ -639,6 +648,7 @@ impl DsTexture {
         DsTexture::ButtonIconHover,
         DsTexture::ButtonIconFirstPlan,
         DsTexture::ButtonIconFirstPlanHover,
+        DsTexture::ButtonIconFirstPlanSection,
         DsTexture::ButtonIconDisabled,
         DsTexture::ModalBody,
         DsTexture::ModalSection,
@@ -825,6 +835,11 @@ impl DsTexture {
             DsTexture::ButtonIconFirstPlanHover => DsTextureSpec {
                 name: "ds-button-icon-first-plan-hover",
                 bytes: ds_asset!("button-icon-first-plan-hover.png"),
+                slice: ICON_BUTTON_SLICE,
+            },
+            DsTexture::ButtonIconFirstPlanSection => DsTextureSpec {
+                name: "ds-button-icon-first-plan-section",
+                bytes: ds_asset!("button-icon-first-plan-section.png"),
                 slice: ICON_BUTTON_SLICE,
             },
             DsTexture::ButtonIconDisabled => DsTextureSpec {

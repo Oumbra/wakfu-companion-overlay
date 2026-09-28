@@ -114,12 +114,14 @@
 //! saisit plus et **le curseur redevient celui du système** au-dessus d'elle ; déverrouillée, il
 //! repasse à `Grab`/`Grabbing` comme décrit plus haut. Voir [`RecapChrome`] et [`band_drag`].
 //!
-//! À côté du cadenas, et **seulement une fois la bande déplacée**, un glyphe `Undo` la renvoie à
-//! son ancrage d'origine — après confirmation, comme la remise à zéro des compteurs et par la
-//! même fenêtre (`OverlayKind::ResetConfirm`, dont la cible dit lequel des deux on remet à zéro).
-//! Les deux vivent sur une pastille posée hors du fond, en haut à gauche de la bande, qui bascule
+//! Le cadenas vit sur une pastille posée hors du fond, en haut à gauche de la bande, qui bascule
 //! en bas quand il n'y a pas la place au-dessus — et qui **n'apparaît qu'au survol** de la bande
 //! (2026-09-21) — voir [`paint_actions_row`].
+//!
+//! **Plus de glyphe de replacement depuis le 2026-09-28** (demande utilisateur : « on retire le
+//! fait de pouvoir le repositionner, ça n'a pas vraiment d'utilité ») : un `Undo` renvoyait la
+//! bande déplacée à son ancrage d'origine, après confirmation. L'aimantation au relâchement
+//! (`recap_placement::snap`) suffit à l'y reposer.
 //!
 //! ## Ce que ce module ne fait pas
 //!
@@ -158,20 +160,16 @@ pub struct RecapOutcome {
     /// Le cadenas de la rangée d'actions vient d'être cliqué : à l'hôte d'inverser
     /// [`RecapChrome::locked`] et de l'écrire dans la config (voir [`paint_actions_row`]).
     pub toggle_lock: bool,
-    /// Le glyphe de replacement vient d'être cliqué : à l'hôte d'ouvrir la confirmation qui, sur
-    /// un « Oui », rend son ancrage d'origine à la bande.
-    pub restore_requested: bool,
     /// Le geste de déplacement de la bande, s'il y en a un cette frame — voir [`RecapDrag`].
     pub drag: RecapDrag,
 }
 
 /// **Ce que l'hôte sait de la bande et que le bloc ne peut pas savoir** (2026-09-17) : verrouillée
-/// ou non, déjà déplacée ou non, et de quel côté sa rangée d'actions tient.
+/// ou non, et de quel côté sa rangée d'actions tient.
 ///
-/// Les trois viennent de l'extérieur pour la même raison : ce module ne garde aucun état et ne
+/// Les deux viennent de l'extérieur pour la même raison : ce module ne garde aucun état et ne
 /// connaît pas sa position à l'écran (voir la doc de module). Le verrou vit dans la config
-/// (`config::OverlayConfig::recap_locked`), le déplacement aussi
-/// (`config::OverlayConfig::recap_position`), et le côté se calcule sur la fenêtre de jeu
+/// (`config::OverlayConfig::recap_locked`), et le côté se calcule sur la fenêtre de jeu
 /// (`recap_placement::actions_below`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecapChrome {
@@ -180,10 +178,6 @@ pub struct RecapChrome {
     /// [`DsIcon::Lock`] ; déverrouillée, [`DsIcon::LockOpen`] — jamais les deux, c'est un seul
     /// bouton qui bascule.
     pub locked: bool,
-    /// **La bande a une position à elle** (`config::OverlayConfig::recap_position` renseignée) :
-    /// c'est la seule condition d'affichage du glyphe de replacement — remettre à son ancrage
-    /// d'origine une bande qui y est déjà n'aurait rien à faire.
-    pub moved: bool,
     /// **La rangée d'actions passe SOUS le fond** faute de place au-dessus dans la fenêtre de jeu
     /// (voir [`paint_actions_row`] et `recap_placement::actions_below`).
     pub actions_below: bool,
@@ -195,7 +189,6 @@ impl Default for RecapChrome {
     fn default() -> Self {
         Self {
             locked: true,
-            moved: false,
             actions_below: false,
         }
     }
@@ -213,7 +206,7 @@ pub type RecapDrag = crate::panels::drag::PanelDrag;
 /// une commande, pas une information.
 const RESET_ICON_SIZE: f32 = 14.0;
 
-/// Côté d'un glyphe de la **rangée d'actions** (cadenas, replacement) — [`RESET_ICON_SIZE`] :
+/// Côté d'un glyphe de la **rangée d'actions** (le cadenas) — [`RESET_ICON_SIZE`] :
 /// mêmes commandes, même discrétion, et deux tailles de glyphe-commande dans un bloc de 206 px
 /// n'auraient rien dit de plus.
 const ACTIONS_ICON_SIZE: f32 = RESET_ICON_SIZE;
@@ -226,9 +219,6 @@ const ACTIONS_ICON_SIZE: f32 = RESET_ICON_SIZE;
 /// la bande ([`BACKDROP_ROUNDING`], `tokens::OVERLAY_BACKDROP`) : c'est visiblement la même
 /// chose, posée juste à côté.
 const ACTIONS_PADDING: f32 = 4.0;
-
-/// Écart entre le cadenas et le glyphe de replacement, dans la pastille.
-const ACTIONS_GAP: f32 = 6.0;
 
 /// Écart entre la pastille d'actions et le fond de la bande — assez pour qu'on lise deux blocs,
 /// assez peu pour qu'on lise qu'ils vont ensemble.
@@ -626,7 +616,6 @@ pub fn show(
         height: band.height(),
         reset_requested,
         toggle_lock: actions.toggle_lock,
-        restore_requested: actions.restore_requested,
         drag,
     }
 }
@@ -656,17 +645,15 @@ fn band_drag(ui: &mut egui::Ui, band: egui::Rect, locked: bool) -> RecapDrag {
     crate::panels::drag::from_response(ui, &response)
 }
 
-/// Ce que la rangée d'actions vient de récolter — deux boutons, deux intentions, remontées
-/// telles quelles par [`RecapOutcome`] : ce module n'agit jamais lui-même.
+/// Ce que la rangée d'actions vient de récolter, remonté tel quel par [`RecapOutcome`] : ce
+/// module n'agit jamais lui-même.
 #[derive(Debug, Clone, Copy, Default)]
 struct ActionsOutcome {
     toggle_lock: bool,
-    restore_requested: bool,
 }
 
-/// **La rangée d'actions de la bande** (2026-09-17, demande utilisateur) : le cadenas, et le
-/// glyphe de replacement quand il a lieu d'être — posés HORS du fond, sur une pastille à eux,
-/// alignés sur le bord gauche de la bande.
+/// **La rangée d'actions de la bande** (2026-09-17, demande utilisateur) : le cadenas, posé HORS
+/// du fond, sur une pastille à lui, aligné sur le bord gauche de la bande.
 ///
 /// ## Un seul cadenas, deux visages
 ///
@@ -675,12 +662,6 @@ struct ActionsOutcome {
 /// libérer »), [`DsIcon::LockOpen`] quand elle ne l'est pas (« clique pour figer ») — les deux
 /// glyphes sont faits l'un pour l'autre, même corps au pixel près, seule l'anse change (voir leur
 /// doc dans `design::icons`).
-///
-/// ## Le glyphe de replacement n'apparaît qu'une fois la bande déplacée
-///
-/// [`RecapChrome::moved`], et rien d'autre : tant que la bande est à son ancrage d'origine, il n'y
-/// a rien à défaire, et un bouton grisé en permanence sur un overlay de 206 px coûterait sa place
-/// pour ne rien dire. La pastille se resserre sur le seul cadenas dans ce cas.
 ///
 /// ## Au-dessus, sauf quand ça ne tient pas
 ///
@@ -711,13 +692,7 @@ fn paint_actions_row(
     band: egui::Rect,
     chrome: RecapChrome,
 ) -> ActionsOutcome {
-    let glyphs = 1 + usize::from(chrome.moved);
-    let pill_size = egui::vec2(
-        2.0 * ACTIONS_PADDING
-            + glyphs as f32 * ACTIONS_ICON_SIZE
-            + (glyphs - 1) as f32 * ACTIONS_GAP,
-        ACTIONS_ICON_SIZE + 2.0 * ACTIONS_PADDING,
-    );
+    let pill_size = egui::Vec2::splat(ACTIONS_ICON_SIZE + 2.0 * ACTIONS_PADDING);
     let top = if chrome.actions_below {
         band.max.y + ACTIONS_MARGIN
     } else {
@@ -730,7 +705,8 @@ fn paint_actions_row(
     let hovered = ui
         .input(|i| i.pointer.latest_pos())
         .is_some_and(|pos| band.union(pill).contains(pos));
-    if !hovered {
+    // Maintenue un instant après le départ du pointeur : voir `panels::hover_reveal`.
+    if !crate::panels::hover_reveal::reveal(ui.ctx(), ui.id().with("recap-actions"), hovered) {
         return ActionsOutcome::default();
     }
     ui.painter()
@@ -741,39 +717,16 @@ fn paint_actions_row(
     } else {
         TooltipSide::Below
     };
-    let slot = |index: usize| {
-        egui::Rect::from_min_size(
-            egui::pos2(
-                pill.min.x + ACTIONS_PADDING + index as f32 * (ACTIONS_ICON_SIZE + ACTIONS_GAP),
-                pill.min.y + ACTIONS_PADDING,
-            ),
-            egui::Vec2::splat(ACTIONS_ICON_SIZE),
-        )
-    };
+    let slot = pill.shrink(ACTIONS_PADDING);
 
     let (icon, tooltip) = if chrome.locked {
         (DsIcon::Lock, "Déverrouiller la bande")
     } else {
         (DsIcon::LockOpen, "Verrouiller la bande")
     };
-    let toggle_lock = paint_action(ui, ds, slot(0), "recap-verrou", icon, tooltip, side);
-    // Court-circuit volontaire : bande jamais déplacée, glyphe jamais peint — la pastille s'est
-    // déjà dimensionnée dessus.
-    let restore_requested = chrome.moved
-        && paint_action(
-            ui,
-            ds,
-            slot(1),
-            "recap-replacer",
-            DsIcon::Undo,
-            "Replacer la bande",
-            side,
-        );
+    let toggle_lock = paint_action(ui, ds, slot, "recap-verrou", icon, tooltip, side);
 
-    ActionsOutcome {
-        toggle_lock,
-        restore_requested,
-    }
+    ActionsOutcome { toggle_lock }
 }
 
 /// Un glyphe-commande de la rangée d'actions : blanc au repos, or au survol, curseur « main »,

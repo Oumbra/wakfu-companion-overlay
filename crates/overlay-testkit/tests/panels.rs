@@ -201,6 +201,9 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
@@ -280,6 +283,9 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
@@ -385,6 +391,9 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
                     recap: &recap,
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: Default::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -483,6 +492,9 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
                         recap: &recap,
                         recap_cells: Default::default(),
                         recap_chrome: Default::default(),
+                        watchlist_chrome: Default::default(),
+                        watchlist_base: None,
+                        click_through_tip: Default::default(),
                         combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
@@ -640,6 +652,9 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
                             locked: false,
                             ..Default::default()
                         },
+                        watchlist_chrome: Default::default(),
+                        watchlist_base: None,
+                        click_through_tip: Default::default(),
                         combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
@@ -784,6 +799,9 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: Default::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -875,6 +893,9 @@ fn confirmation_de_reinitialisation_d_un_compteur_nomme_l_objet() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: Default::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -964,6 +985,9 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
                 now,
                 recap: &recap,
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 recap_cells: panels::recap::RecapCells {
                     duration: false,
@@ -1046,6 +1070,9 @@ fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
                 now,
                 recap: &recap,
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 recap_cells: panels::recap::RecapCells {
                     duration: false,
@@ -1121,6 +1148,9 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
@@ -1288,6 +1318,9 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
@@ -1369,6 +1402,9 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
@@ -1510,6 +1546,9 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: Default::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -1587,12 +1626,16 @@ const INTERRUPTEUR_Y: f32 = 38.0;
 /// suggestions s'ouvre sous lui : bande de filtres, rangées et poignée suivent du même pas.
 const CHAMP_ALERTES_Y: f32 = 241.0 + INTERRUPTEUR_Y;
 
+/// **La colonne de la poignée du bandeau** (2026-09-28, `panels::watchlist::CHROME_RESERVE`) :
+/// tout ce qui la suit dans le bandeau couché a glissé d'autant vers la droite.
+const POIGNEE: f32 = panels::watchlist::CHROME_RESERVE;
+
 /// Centres des quatre boutons du carré de contrôle — détail du calcul dans la doc de
 /// [`panneau_suivi_toutes_les_infobulles_sous_la_bande`].
-const BANDEAU_PLUS: egui::Pos2 = egui::pos2(25.0, 25.0);
-const BANDEAU_MOINS: egui::Pos2 = egui::pos2(55.0, 25.0);
-const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(25.0, 55.0);
-const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(55.0, 55.0);
+const BANDEAU_PLUS: egui::Pos2 = egui::pos2(25.0 + POIGNEE, 25.0);
+const BANDEAU_MOINS: egui::Pos2 = egui::pos2(55.0 + POIGNEE, 25.0);
+const BANDEAU_DETAILS: egui::Pos2 = egui::pos2(25.0 + POIGNEE, 55.0);
+const BANDEAU_OPTIONS: egui::Pos2 = egui::pos2(55.0 + POIGNEE, 55.0);
 
 /// Le bandeau VIDE (retour utilisateur 2026-09-13, deux captures à l'appui — voir
 /// `panels::watchlist`, doc de module, « bandeau vide : rangée 1×4 ») : sans entrée suivie, les
@@ -1663,6 +1706,9 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: Default::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -1691,7 +1737,9 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
         (85.0, "details"),
         (115.0, "options"),
     ] {
-        harness.hover_at(egui::pos2(x, 25.0));
+        // En rangée, la pastille est gardée AU-DESSUS des boutons (`watchlist::chrome_top`) : la
+        // rangée descend d'autant, sans rien garder à sa gauche.
+        harness.hover_at(egui::pos2(x, 25.0 + POIGNEE));
         harness.run();
         harness.snapshot(format!("watchlist_vide_tooltip_{nom}_dessous"));
     }
@@ -1722,11 +1770,13 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
     let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
 
+    // Depuis le 2026-09-28, les deux rangées gardent la même largeur plancher : celle de la plus
+    // longue infobulle de la pastille (« Replacer à l'emplacement d'origine »), centrée sous les
+    // boutons comme toutes les autres. La RANGÉE se referme toujours, la fenêtre plus.
     let window_width = bandeau_largeur_suivi(0, false);
     assert!(
-        window_width < bandeau_largeur(0),
-        "Suivi coupé, la fenêtre doit rétrécir de deux boutons : {window_width} \
-         px contre {} px",
+        window_width <= bandeau_largeur(0),
+        "Suivi coupé, la fenêtre ne doit pas s'élargir : {window_width} px contre {} px",
         bandeau_largeur(0)
     );
 
@@ -1769,6 +1819,9 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: Default::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -1784,7 +1837,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
     // Les deux boutons qui restent, survolés là où « + » et « − » se tenaient : leur infobulle dit
     // « Détails » et « Options », et aucune ne dit « Ajouter » ni « Supprimer ».
     for (x, nom) in [(25.0, "details"), (55.0, "options")] {
-        harness.hover_at(egui::pos2(x, 25.0));
+        harness.hover_at(egui::pos2(x, 25.0 + POIGNEE));
         harness.run();
         harness.snapshot(format!("watchlist_suivi_coupe_tooltip_{nom}"));
     }
@@ -1939,6 +1992,9 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         recap: &Default::default(),
                         recap_cells: Default::default(),
                         recap_chrome: Default::default(),
+                        watchlist_chrome: Default::default(),
+                        watchlist_base: None,
+                        click_through_tip: Default::default(),
                         combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
@@ -2070,6 +2126,9 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: Default::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -2102,7 +2161,7 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
 /// (`STRIP_SCROLLBAR_OUTER_MARGIN`, l'air au-dessus de la barre) + 3 (moitié de
 /// `SCROLLBAR_WIDTH`) = 13. Voir le calcul complet dans
 /// [`panneau_suivi_bande_defilante_boutons_fixes`].
-const BANDEAU_SCROLL_POIGNEE: egui::Pos2 = egui::pos2(140.0, 13.0);
+const BANDEAU_SCROLL_POIGNEE: egui::Pos2 = egui::pos2(140.0 + POIGNEE, 13.0);
 
 /// Centres des trois tuiles du bandeau — mêmes calculs que
 /// [`panneau_suivi_le_bouton_moins_ouvre_la_selection_multiple`] : première tuile centrée en
@@ -2111,8 +2170,8 @@ const BANDEAU_SCROLL_POIGNEE: egui::Pos2 = egui::pos2(140.0, 13.0);
 /// l'overlay démarre au premier pixel des boutons) puis la marge haute (28 px de réserve
 /// d'infobulle passés sous la bande, et les 6 px restants tombés avec elle). Trois entrées ne
 /// débordent pas : la barre de défilement, peinte en tête de bande, ne prend ici aucune place.
-const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(116.0, 40.0);
-const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(268.0, 40.0);
+const BANDEAU_TUILE_0: egui::Pos2 = egui::pos2(116.0 + POIGNEE, 40.0);
+const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(268.0 + POIGNEE, 40.0);
 /// Un point de prise excentré dans la première tuile — le fantôme se tient par où on l'a pris, et
 /// c'est ce décalage qui laisse voir la tuile visée dessous (voir la planche de l'onglet Suivi).
 ///
@@ -2120,7 +2179,7 @@ const BANDEAU_TUILE_2: egui::Pos2 = egui::pos2(268.0, 40.0);
 /// disque de réinitialisation (26 px, centré) occupe le centre, et le nom de la tuile ne s'ouvre
 /// pas quand il est visé (voir `panels::watchlist::entry_tile`). Un test qui veut l'infobulle du
 /// NOM survole donc ici, jamais [`BANDEAU_TUILE_0`].
-const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(99.0, 23.0);
+const BANDEAU_TUILE_0_PRISE: egui::Pos2 = egui::pos2(99.0 + POIGNEE, 23.0);
 
 /// **Le glisser-déposer du bandeau rend la liste réordonnée, pas une suppression.**
 ///
@@ -2434,6 +2493,9 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: Default::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -2541,6 +2603,9 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
@@ -2640,6 +2705,9 @@ fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: Default::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     login: None,
@@ -2738,6 +2806,9 @@ fn panneau_options_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: Some(&mut options_state),
                 veiled: false,
@@ -3030,6 +3101,9 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: Some(&mut options_state),
                 veiled: false,
@@ -3155,6 +3229,9 @@ fn modale_options_voilee_couvre_la_fenetre_de_jeu() {
                         recap: &Default::default(),
                         recap_cells: Default::default(),
                         recap_chrome: Default::default(),
+                        watchlist_chrome: Default::default(),
+                        watchlist_base: None,
+                        click_through_tip: Default::default(),
                         combat_chrome: Default::default(),
                         options: Some(&mut options_state),
                         veiled: true,
@@ -5915,6 +5992,9 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
@@ -6576,6 +6656,9 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
@@ -6849,6 +6932,9 @@ fn login_card_harness(
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: Default::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -7417,24 +7503,24 @@ fn options_onglet_personnages_suppression_compte() {
 }
 
 /// **La rangée d'actions de la bande Récap** (2026-09-17, demande utilisateur) — bande
-/// DÉVERROUILLÉE et DÉPLACÉE : le cadenas ouvert et, à côté de lui, le glyphe de replacement que
-/// seul un déplacement fait apparaître. La pastille est posée hors du fond, en haut à gauche,
+/// DÉVERROUILLÉE : le cadenas ouvert, seul. La pastille est posée hors du fond, en haut à gauche,
 /// dans la réserve d'infobulle de la fenêtre.
+///
+/// Elle portait aussi, bande déplacée, un glyphe de replacement — retiré le 2026-09-28 (« ça n'a
+/// pas vraiment d'utilité ») : la capture `recap_actions_deverrouille_deplace` montrait les deux.
 #[test]
-fn bande_recap_deverrouillee_et_deplacee_montre_ses_deux_glyphes() {
+fn bande_recap_deverrouillee_ne_montre_que_son_cadenas_ouvert() {
     capture_rangee_actions(
         panels::recap::RecapChrome {
             locked: false,
-            moved: true,
             actions_below: false,
         },
-        "recap_actions_deverrouille_deplace",
+        "recap_actions_deverrouille",
     );
 }
 
-/// La même bande **verrouillée et jamais déplacée** : un seul glyphe, le cadenas fermé, et la
-/// pastille se resserre dessus — « les deux ne peuvent pas vivre en même temps », et il n'y a
-/// rien à replacer.
+/// La même bande **verrouillée** : le cadenas fermé — « les deux ne peuvent pas vivre en même
+/// temps ».
 #[test]
 fn bande_recap_verrouillee_ne_montre_que_son_cadenas() {
     capture_rangee_actions(
@@ -7451,7 +7537,6 @@ fn bande_recap_collee_en_haut_descend_sa_rangee_d_actions() {
     capture_rangee_actions(
         panels::recap::RecapChrome {
             locked: false,
-            moved: true,
             actions_below: true,
         },
         "recap_actions_en_bas",
@@ -7460,14 +7545,13 @@ fn bande_recap_collee_en_haut_descend_sa_rangee_d_actions() {
 
 /// **Sans pointeur, pas de pastille** (2026-09-21, demande utilisateur : « afficher les icônes de
 /// verrouillage et de réinitialisation de position seulement lors du survol des overlays ») : la
-/// même bande que `recap_actions_deverrouille_deplace`, rendue sans que la souris y soit — rien
+/// même bande que `recap_actions_deverrouille`, rendue sans que la souris y soit — rien
 /// au-dessus du bloc, la réserve d'infobulle reste vide.
 #[test]
 fn bande_recap_sans_pointeur_ne_montre_pas_sa_pastille() {
     capture_rangee_actions_survolee(
         panels::recap::RecapChrome {
             locked: false,
-            moved: true,
             actions_below: false,
         },
         "recap_actions_hors_survol",
@@ -7551,6 +7635,9 @@ fn capture_rangee_actions_survolee(chrome: panels::recap::RecapChrome, nom: &str
                 recap: &recap,
                 recap_cells: Default::default(),
                 recap_chrome: chrome,
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: Default::default(),
                 options: None,
                 veiled: false,
@@ -7578,8 +7665,9 @@ fn capture_rangee_actions_survolee(chrome: panels::recap::RecapChrome, nom: &str
 ///    plus — pas de croix fléchée du jeu, sur laquelle `Grab`/`Grabbing` retombent (voir
 ///    `overlay_ui::cursor`) ;
 /// 2. le cadenas remonte sa bascule à l'hôte, qui seul tient le réglage et l'écrit ;
-/// 3. le glyphe de replacement n'existe QUE si la bande a été déplacée — au même pixel, sans
-///    déplacement, il n'y a rien à cliquer.
+/// 3. il n'y a plus de glyphe de replacement à côté du cadenas, même bande déverrouillée
+///    (retiré le 2026-09-28, « ça n'a pas vraiment d'utilité ») — au pixel où il était, il n'y a
+///    rien à cliquer.
 #[test]
 fn bande_recap_verrouillee_ne_bouge_pas() {
     let mut textures = Textures::new();
@@ -7607,7 +7695,6 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
     let chrome = std::rc::Rc::new(std::cell::Cell::new(panels::recap::RecapChrome::default()));
     let gestes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let bascules = std::rc::Rc::new(std::cell::Cell::new(0usize));
-    let replacements = std::rc::Rc::new(std::cell::Cell::new(0usize));
 
     let mut harness = Harness::builder()
         .with_size(egui::Vec2::new(
@@ -7621,7 +7708,6 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
             let chrome = std::rc::Rc::clone(&chrome);
             let gestes = std::rc::Rc::clone(&gestes);
             let bascules = std::rc::Rc::clone(&bascules);
-            let replacements = std::rc::Rc::clone(&replacements);
             move |ui| {
                 let ctx = ui.ctx().clone();
                 let (portraits, combat_frame, icons, avatars) = textures.get_or_load(&ctx);
@@ -7657,6 +7743,9 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
                         recap: &recap,
                         recap_cells: Default::default(),
                         recap_chrome: chrome.get(),
+                        watchlist_chrome: Default::default(),
+                        watchlist_base: None,
+                        click_through_tip: Default::default(),
                         combat_chrome: Default::default(),
                         options: None,
                         veiled: false,
@@ -7669,9 +7758,6 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
                 }
                 if outcome.recap_toggle_lock {
                     bascules.set(bascules.get() + 1);
-                }
-                if outcome.recap_restore_requested {
-                    replacements.set(replacements.get() + 1);
                 }
             }
         });
@@ -7712,7 +7798,12 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
     harness.run();
     assert_eq!(bascules.get(), 1, "le cadenas doit remonter sa bascule");
 
-    // (3) Le deuxième emplacement de la pastille n'existe pas tant que la bande n'a pas bougé…
+    // (3) Déverrouillée, la pastille ne porte toujours que le cadenas : là où était le glyphe de
+    // replacement, un clic ne fait rien — ni replacement (il n'y en a plus), ni bascule.
+    chrome.set(panels::recap::RecapChrome {
+        locked: false,
+        actions_below: false,
+    });
     let replacer = egui::pos2(39.0, 31.0);
     harness.hover_at(replacer);
     harness.run();
@@ -7721,32 +7812,9 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
     press(&mut harness, replacer, false);
     harness.run();
     assert_eq!(
-        replacements.get(),
-        0,
-        "sans déplacement, il n'y a pas de glyphe de replacement à cliquer"
-    );
-
-    // … et il apparaît dès que l'hôte dit que la bande a une position à elle.
-    chrome.set(panels::recap::RecapChrome {
-        locked: false,
-        moved: true,
-        actions_below: false,
-    });
-    harness.hover_at(replacer);
-    harness.run();
-    press(&mut harness, replacer, true);
-    harness.run();
-    press(&mut harness, replacer, false);
-    harness.run();
-    assert_eq!(
-        replacements.get(),
-        1,
-        "déplacée, la bande doit offrir son retour à l'ancrage d'origine"
-    );
-    assert_eq!(
         bascules.get(),
         1,
-        "le glyphe de replacement n'est pas le cadenas"
+        "à côté du cadenas, il n'y a plus rien à cliquer"
     );
 }
 

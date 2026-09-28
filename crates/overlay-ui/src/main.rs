@@ -76,19 +76,21 @@ use overlay_ui::background::{
 };
 use overlay_ui::build_info;
 use overlay_ui::chat_command::{self, ChatCommand};
+use overlay_ui::click_through_placement;
 use overlay_ui::combat_placement;
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
     SharedRosterDraft, WatchlistCompleted,
 };
-use overlay_ui::frame::{recreate_surface, render, GpuState};
+use overlay_ui::frame::{recreate_surface, render, sync_hit_test, GpuState};
 use overlay_ui::game_servers::GameServers;
 use overlay_ui::game_window::{self, GameRect, GameWindowTracker};
 use overlay_ui::logging;
 use overlay_ui::panels;
 use overlay_ui::panels::alerts_tab;
 use overlay_ui::panels::chat_tab;
+use overlay_ui::panels::click_through;
 use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::feature_switch::FeatureToggles;
@@ -110,6 +112,7 @@ use overlay_ui::shortcuts::{ShortcutAction, ShortcutBindings, ShortcutRegistry};
 use overlay_ui::startup::StartupProgress;
 use overlay_ui::turn_watch;
 use overlay_ui::ui_icons::{self, UiIcons};
+use overlay_ui::watchlist_placement;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
@@ -168,88 +171,54 @@ const FOREGROUND_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::
 // tooltips du switch Alliés/Ennemis affichées en dessous faute de place au-dessus) : voir sa doc,
 // seule façon de loger cette marge sans compresser le reste du panneau.
 const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGIN as f64);
-/// Hauteur de la fenêtre du panneau Suivi (bande horizontale de tuiles, voir
-/// `panels::watchlist`) — la LARGEUR, elle, suit dynamiquement le CONTENU (voir
-/// `watchlist_target_width`), pas une constante fixe. Plus
-/// `render_content::WATCHLIST_TOOLTIP_RESERVE` (2026-09-13, voir sa doc) : la place des
-/// infobulles, qui s'ouvrent toutes EN DESSOUS de la bande depuis le soir du même jour. Cette
-/// réserve-là ne décale rien — elle laisse de la hauteur de fenêtre SOUS le contenu, là où la
-/// version du matin la prenait AU-DESSUS et éloignait la bande du bord haut du jeu d'autant.
-///
-/// **Ramenée de 132 à 92 px le 2026-09-13** (retour utilisateur : « on peut réduire un peu
-/// l'overlay en hauteur »). Les 132 px dataient du 2026-09-02, où ils réservaient d'un bloc
-/// l'espace du toast d'alerte SOUS la bande — devenu inutile le jour même, `watchlist_target_
-/// height` ajoutant `TOAST_AREA_HEIGHT` seulement tant qu'un toast est actif —, puis 16 px de plus
-/// pour dégager la barre de défilement flottante des icônes. Les deux raisons ont disparu : la
-/// barre du jeu (`panels::watchlist::strip_scroll_area`) prend sa place SOUS les tuiles au lieu de
-/// flotter dessus. 92 px, c'est ce que la bande occupe réellement — 6 px de marge interne haute,
-/// 72 px de zone défilante (58 de tuile + 14 de réserve de barre), 6 px de gouttière avant le
-/// toast, 6 px de marge basse, plus 2 px d'arrondi — et rien de plus : la fenêtre reste
-/// cliquable/bloquante sur toute sa surface, y compris là où elle ne peint rien.
-const WATCHLIST_HEIGHT: f64 = 92.0 + render_content::WATCHLIST_TOOLTIP_RESERVE as f64;
-
-/// Même marge que `egui::Frame::NONE.inner_margin(6)` posée par `render` (6px de chaque côté) —
-/// à additionner à `panels::watchlist::content_width` pour obtenir la largeur de FENÊTRE
-/// nécessaire, pas seulement celle du contenu peint dedans.
-const WATCHLIST_INNER_MARGIN: f64 = 12.0;
-/// Plafond de largeur — fraction de la largeur de la fenêtre de jeu, jamais dépassée même avec
-/// beaucoup d'entrées suivies (la bande de tuiles défile horizontalement au-delà, voir
-/// `panels::watchlist::show`). Bornée par prudence plutôt que par mesure précise de l'espace
-/// réellement libre entre les groupes de boutons du jeu (variable selon la résolution/l'UI du
-/// client) — à ajuster si ça chevauche quand même l'interface du jeu sur une configuration donnée.
-const WATCHLIST_WIDTH_FRACTION: f64 = 0.5;
-const WATCHLIST_MAX_CEILING: f64 = 1000.0;
-
-/// Largeur RÉELLEMENT nécessaire à l'affichage actuel — retour utilisateur 2026-09-02 : « je ne
-/// veux pas de fond, je veux que ça reste transparent, mais [...] l'overlay n'a pas plus de taille
-/// s'il n'y a pas besoin » — une fenêtre plus large que son contenu reste cliquable/bloquante sur
-/// toute sa zone même là où rien n'est peint (pas de test de transparence par pixel côté Win32),
-/// l'utilisateur ne peut alors pas deviner où s'arrête l'overlay. Toujours le MINIMUM entre ce que
-/// le contenu demande (`content_width`, croît avec le nombre d'entrées, et avec `toast_active` —
-/// voir `panels::watchlist::TOAST_LAYER_WIDTH`) et le plafond (`WATCHLIST_WIDTH_FRACTION` de la
-/// fenêtre de jeu, `WATCHLIST_MAX_CEILING`) — jamais l'inverse : avec peu d'entrées et sans toast,
-/// la fenêtre reste étroite même si le plafond est large.
-fn watchlist_target_width(
-    entry_count: usize,
-    tracking_enabled: bool,
-    toast_active: bool,
-    game_width_px: i32,
-) -> f64 {
-    let ceiling = (game_width_px as f64 * WATCHLIST_WIDTH_FRACTION).min(WATCHLIST_MAX_CEILING);
-    let tiles = panels::watchlist::content_width(entry_count, tracking_enabled) as f64;
-    // La couche de confettis est centrée sur le MÊME axe que la bande de tuiles (voir
-    // `panels::watchlist::toast_card`) : sans cette largeur minimale pendant qu'un toast est
-    // affiché, ses confettis les plus excentrés seraient rognés par le bord de la fenêtre.
-    let toast = if toast_active {
-        panels::watchlist::TOAST_LAYER_WIDTH as f64
-    } else {
-        0.0
-    };
-    let content = tiles.max(toast) + WATCHLIST_INNER_MARGIN;
-    content.min(ceiling).max(WATCHLIST_INNER_MARGIN)
-}
-
-/// Hauteur nécessaire à l'affichage actuel — même principe que `watchlist_target_width`
-/// (dimensionnée sur le CONTENU, pas une constante toujours large) : `WATCHLIST_HEIGHT` seule
-/// tant qu'aucun toast n'est affiché, plus `panels::watchlist::TOAST_AREA_HEIGHT` pendant qu'un
-/// toast (carte + confettis) est actif. L'ancrage de la fenêtre Suivi (`App::anchor_position`) ne
-/// dépend que de sa LARGEUR, jamais de sa hauteur — grandir vers le bas ne déplace donc jamais la
-/// bande de tuiles déjà positionnée.
-fn watchlist_target_height(toast_active: bool, select_open: bool) -> f64 {
-    WATCHLIST_HEIGHT
-        + if toast_active {
-            panels::watchlist::TOAST_AREA_HEIGHT as f64
-        } else {
-            0.0
-        }
-        // La bande du bouton de suppression groupée, le temps de la sélection multiple — la
-        // fenêtre se rétracte en quittant le mode (2026-09-13).
-        + if select_open {
-            panels::watchlist::SELECTION_BAR_HEIGHT as f64
-        } else {
-            0.0
-        }
-}
+// **Le gabarit du bandeau Suivi vit dans `overlay_ui::watchlist_placement` depuis le
+// 2026-09-28** (`plan`, `HORIZONTAL_HEIGHT`, `HORIZONTAL_INNER_MARGIN`, `WIDTH_FRACTION`,
+// `MAX_CEILING`), partagé avec le binaire X11 : le bandeau y a gagné une position libre, une
+// orientation verticale et une extension au survol. Les fonctions `watchlist_target_width` et
+// `watchlist_target_height` qui vivaient ici en sont devenues le cas horizontal. Leur
+// historique, qu'il ne faut pas perdre :
+//
+// Hauteur de la fenêtre du panneau Suivi (bande horizontale de tuiles, voir
+// `panels::watchlist`) — la LARGEUR, elle, suit dynamiquement le CONTENU (voir
+// `watchlist_target_width`), pas une constante fixe. Plus
+// `render_content::WATCHLIST_TOOLTIP_RESERVE` (2026-09-13, voir sa doc) : la place des
+// infobulles, qui s'ouvrent toutes EN DESSOUS de la bande depuis le soir du même jour. Cette
+// réserve-là ne décale rien — elle laisse de la hauteur de fenêtre SOUS le contenu, là où la
+// version du matin la prenait AU-DESSUS et éloignait la bande du bord haut du jeu d'autant.
+//
+// **Ramenée de 132 à 92 px le 2026-09-13** (retour utilisateur : « on peut réduire un peu
+// l'overlay en hauteur »). Les 132 px dataient du 2026-09-02, où ils réservaient d'un bloc
+// l'espace du toast d'alerte SOUS la bande — devenu inutile le jour même, `watchlist_target_
+// height` ajoutant `TOAST_AREA_HEIGHT` seulement tant qu'un toast est actif —, puis 16 px de plus
+// pour dégager la barre de défilement flottante des icônes. Les deux raisons ont disparu : la
+// barre du jeu (`panels::watchlist::strip_scroll_area`) prend sa place SOUS les tuiles au lieu de
+// flotter dessus. 92 px, c'est ce que la bande occupe réellement — 6 px de marge interne haute,
+// 72 px de zone défilante (58 de tuile + 14 de réserve de barre), 6 px de gouttière avant le
+// toast, 6 px de marge basse, plus 2 px d'arrondi — et rien de plus : la fenêtre reste
+// cliquable/bloquante sur toute sa surface, y compris là où elle ne peint rien.
+// Même marge que `egui::Frame::NONE.inner_margin(6)` posée par `render` (6px de chaque côté) —
+// à additionner à `panels::watchlist::content_width` pour obtenir la largeur de FENÊTRE
+// nécessaire, pas seulement celle du contenu peint dedans.
+// Plafond de largeur — fraction de la largeur de la fenêtre de jeu, jamais dépassée même avec
+// beaucoup d'entrées suivies (la bande de tuiles défile horizontalement au-delà, voir
+// `panels::watchlist::show`). Bornée par prudence plutôt que par mesure précise de l'espace
+// réellement libre entre les groupes de boutons du jeu (variable selon la résolution/l'UI du
+// client) — à ajuster si ça chevauche quand même l'interface du jeu sur une configuration donnée.
+// Largeur RÉELLEMENT nécessaire à l'affichage actuel — retour utilisateur 2026-09-02 : « je ne
+// veux pas de fond, je veux que ça reste transparent, mais [...] l'overlay n'a pas plus de taille
+// s'il n'y a pas besoin » — une fenêtre plus large que son contenu reste cliquable/bloquante sur
+// toute sa zone même là où rien n'est peint (pas de test de transparence par pixel côté Win32),
+// l'utilisateur ne peut alors pas deviner où s'arrête l'overlay. Toujours le MINIMUM entre ce que
+// le contenu demande (`content_width`, croît avec le nombre d'entrées, et avec la place du toast —
+// voir `panels::watchlist::TOAST_LAYER_WIDTH`) et le plafond (`WATCHLIST_WIDTH_FRACTION` de la
+// fenêtre de jeu, `WATCHLIST_MAX_CEILING`) — jamais l'inverse : avec peu d'entrées et sans toast,
+// la fenêtre reste étroite même si le plafond est large.
+// Hauteur nécessaire à l'affichage actuel — même principe que `watchlist_target_width`
+// (dimensionnée sur le CONTENU, pas une constante toujours large) : `WATCHLIST_HEIGHT` seule
+// tant qu'aucun toast n'est affiché, plus `panels::watchlist::TOAST_AREA_HEIGHT` pendant qu'un
+// toast (carte + confettis) est actif. L'ancrage de la fenêtre Suivi (`App::anchor_position`) ne
+// dépend que de sa LARGEUR, jamais de sa hauteur — grandir vers le bas ne déplace donc jamais la
+// bande de tuiles déjà positionnée.
 // **La marge au bord vertical du client a rejoint `overlay_ui::combat_placement`** (2026-09-17)
 // avec tout l'ancrage du panneau Combat : elle est NULLE, des deux côtés, et c'est une décision
 // d'écran plus qu'un calcul. Son relevé, qu'il ne faut pas perdre :
@@ -263,22 +232,24 @@ fn watchlist_target_height(toast_active: bool, select_open: bool) -> f64 {
 //
 // Le binaire X11, lui, était resté à 12 px — cette refonte ne l'avait pas suivi, et personne ne
 // l'avait vu puisque rien ne comparait les deux hôtes. Le calcul partagé les met d'accord.
-/// Marge, en pixels physiques, entre le bord HAUT de la zone cliente du jeu et l'overlay Suivi
-/// (demande utilisateur explicite 2026-09-01 : « collé en haut de la fenêtre de jeu au centre »,
-/// « le même espacement » que les boutons d'interface du jeu — menu/Boutique en haut-gauche, icônes
-/// en haut-droite).
-///
-/// **Historique de mise au point (2026-09-01, deux allers-retours avec capture d'écran)** : la
-/// valeur initiale (12 px, copiée de la marge latérale du Combat) était bien trop petite — l'overlay
-/// apparaissait quasiment collé au très haut de la fenêtre de jeu. Diagnostic confirmé par le
-/// `println!` de `create_overlay_window` (`rect.top=0 client_top=0, écart 0`) : **le client Wakfu
-/// dessine lui-même sa fausse barre de titre DANS sa zone cliente** (voir `GameRect::client_top`,
-/// fenêtre non décorée côté Win32) — il n'y avait donc aucune vraie barre de titre Windows à
-/// exclure, `client_top` valait déjà `top`. Toute la hauteur à compenser est celle de cette fausse
-/// barre de titre dessinée par le jeu, pas une histoire de coordonnées Win32 : 28 px s'est avéré
-/// visuellement correct (confirmé par une deuxième capture d'écran, alignement quasi identique aux
-/// boutons Menu/Boutique du jeu).
-const GAME_TOP_MARGIN_PX: i32 = 28;
+// **Devenue `watchlist_placement::DEFAULT_TOP`** (2026-09-28), partagée avec le binaire X11 —
+// son relevé :
+//
+// Marge, en pixels physiques, entre le bord HAUT de la zone cliente du jeu et l'overlay Suivi
+// (demande utilisateur explicite 2026-09-01 : « collé en haut de la fenêtre de jeu au centre »,
+// « le même espacement » que les boutons d'interface du jeu — menu/Boutique en haut-gauche, icônes
+// en haut-droite).
+//
+// **Historique de mise au point (2026-09-01, deux allers-retours avec capture d'écran)** : la
+// valeur initiale (12 px, copiée de la marge latérale du Combat) était bien trop petite — l'overlay
+// apparaissait quasiment collé au très haut de la fenêtre de jeu. Diagnostic confirmé par le
+// `println!` de `create_overlay_window` (`rect.top=0 client_top=0, écart 0`) : **le client Wakfu
+// dessine lui-même sa fausse barre de titre DANS sa zone cliente** (voir `GameRect::client_top`,
+// fenêtre non décorée côté Win32) — il n'y avait donc aucune vraie barre de titre Windows à
+// exclure, `client_top` valait déjà `top`. Toute la hauteur à compenser est celle de cette fausse
+// barre de titre dessinée par le jeu, pas une histoire de coordonnées Win32 : 28 px s'est avéré
+// visuellement correct (confirmé par une deuxième capture d'écran, alignement quasi identique aux
+// boutons Menu/Boutique du jeu).
 // L'ancrage du bloc Récap — « en haut à gauche, en dessous des boutons du jeu » (2026-09-16) —
 // et le décalage que l'utilisateur lui donne à la souris depuis le 2026-09-17 vivent dans
 // `overlay_ui::recap_placement` (`DEFAULT_OFFSET`, bornage et aimantation) : le binaire X11 fait
@@ -375,6 +346,15 @@ struct OverlayWindow {
     /// Même principe que `last_watchlist_width`, pour la HAUTEUR (voir `watchlist_target_height`)
     /// — change uniquement à l'apparition/disparition d'un toast, jamais avec le nombre d'entrées.
     last_watchlist_height: Option<f64>,
+    /// **Ce que le bandeau Suivi affichait à sa dernière frame** (2026-09-28), et le gabarit qui
+    /// en est sorti (`watchlist_placement::plan`) — l'ancrage de `sync_windows` s'en sert pour
+    /// poser la fenêtre à la taille qu'elle a vraiment, et le survol du bandeau vertical se teste
+    /// sur la fenêtre de base du gabarit précédent. `None` pour toute autre zone.
+    watchlist_state: Option<watchlist_placement::StripState>,
+    watchlist_plan: Option<watchlist_placement::Plan>,
+    /// **Le bouton œil est survolé** (2026-09-28) : sa fenêtre est étendue pour son infobulle
+    /// (`click_through_window`). `false` pour toute autre zone.
+    click_through_hovered: bool,
     /// Dernière hauteur demandée pour une fenêtre `Recap` — le bloc mesure ce qu'il occupe et
     /// le renvoie (`RenderOutcome::recap_height`), l'hôte y ajuste la fenêtre OS. Même rôle et
     /// même garde-fou que `last_watchlist_height` (ne pas rappeler `request_inner_size` pour
@@ -567,6 +547,95 @@ impl RecapAnchor {
     }
 }
 
+/// **Où poser les deux fenêtres qui se placent librement dans le jeu** (2026-09-28) — le bouton
+/// œil et le bandeau Suivi : la position voulue par l'utilisateur, et ce qui retaille leur
+/// fenêtre au survol (l'infobulle du bouton, la réserve de côté du bandeau vertical). Le pendant
+/// de [`CombatAnchor`] et [`RecapAnchor`] ; les calculs vivent dans
+/// `overlay_ui::click_through_placement` et `overlay_ui::watchlist_placement`, partagés avec le
+/// binaire X11.
+#[derive(Debug, Clone, Copy)]
+struct FreeAnchor {
+    click_through_offset: Option<(i32, i32)>,
+    /// Le bouton œil est survolé : sa fenêtre est étendue pour l'infobulle.
+    click_through_hovered: bool,
+    watchlist_offset: Option<(i32, i32)>,
+    /// Ce que le bandeau affichait à sa dernière frame — sa taille, donc son ancrage, en
+    /// dépend.
+    watchlist_state: watchlist_placement::StripState,
+    /// Échelle d'affichage de la fenêtre placée.
+    scale: f64,
+}
+
+impl Default for FreeAnchor {
+    /// « Jamais déplacés », au repos, bandeau horizontal vide et Suivi actif (le défaut de la
+    /// config) : ce que passent les zones qui n'en lisent rien.
+    fn default() -> Self {
+        Self {
+            click_through_offset: None,
+            click_through_hovered: false,
+            watchlist_offset: None,
+            watchlist_state: watchlist_placement::StripState {
+                tracking_enabled: true,
+                ..Default::default()
+            },
+            scale: 1.0,
+        }
+    }
+}
+
+impl FreeAnchor {
+    /// Les réglages propres à CETTE fenêtre, par-dessus ceux de l'application : son échelle, le
+    /// survol du bouton œil, l'état du bandeau à sa dernière frame.
+    fn for_window(mut self, overlay: &OverlayWindow) -> Self {
+        self.scale = overlay.window.scale_factor();
+        self.click_through_hovered = overlay.click_through_hovered;
+        if let Some(state) = overlay.watchlist_state {
+            self.watchlist_state = state;
+        }
+        self
+    }
+}
+
+/// La zone cliente du jeu dans le vocabulaire des modules de placement — voir
+/// [`RecapAnchor::geometry`], qui dit pourquoi elle part de `client_top`.
+fn client_area(rect: GameRect) -> recap_placement::ClientArea {
+    RecapAnchor::default().geometry(rect, 0, 0).0
+}
+
+/// **La fenêtre du bouton œil**, au repos ou étendue pour son infobulle (2026-09-28) : position,
+/// taille et place du bouton dedans, en pixels physiques — voir
+/// `click_through_placement::tip_window`. Au repos, la fenêtre EST le bouton.
+fn click_through_window(
+    offset: Option<(i32, i32)>,
+    hovered: bool,
+    client: recap_placement::ClientArea,
+    scale: f64,
+) -> click_through_placement::TipWindow {
+    let physical = |v: egui::Vec2| {
+        (
+            (v.x as f64 * scale).round() as i32,
+            (v.y as f64 * scale).round() as i32,
+        )
+    };
+    let size = physical(click_through::SECTION_SIZE);
+    let base = click_through_placement::window_position(offset, client, size);
+    if hovered {
+        click_through_placement::tip_window(
+            base,
+            size,
+            physical(click_through::TIP_RESERVE),
+            client,
+        )
+    } else {
+        click_through_placement::TipWindow {
+            position: base,
+            size,
+            button_origin: (0, 0),
+            above: false,
+        }
+    }
+}
+
 /// Un glissement de la bande Récap en cours (2026-09-17) — voir `panels::recap::RecapDrag`, qui
 /// dit pourquoi le geste se raconte en POSITIONS et non en écarts.
 ///
@@ -712,6 +781,8 @@ struct App {
     /// Le panneau Combat est-il verrouillé en hauteur ? — le cadenas de sa rangée d'actions
     /// (`config::OverlayConfig::combat_locked`, déverrouillé par défaut).
     combat_locked: bool,
+    /// Le panneau Combat est-il réduit ? — sa flèche de repli (`config::OverlayConfig::combat_collapsed`).
+    combat_collapsed: bool,
     /// Le glissement du panneau Combat **en cours**, s'il y en a un — voir [`CombatDragState`].
     combat_drag: Option<CombatDragState>,
     /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
@@ -785,6 +856,23 @@ struct App {
     /// Le glissement de la bande Récap **en cours**, s'il y en a un — voir `RecapDragState` et
     /// `panels::recap::RecapDrag`. `None` le reste du temps, c'est-à-dire presque toujours.
     recap_drag: Option<RecapDragState>,
+    /// **Où l'utilisateur a posé le bouton œil** (2026-09-28) — relative à la fenêtre de jeu, une
+    /// seule pour tous les clients comme `recap_position`. `None` : jamais déplacé, il suit son
+    /// ancrage d'origine (`click_through_placement::DEFAULT_OFFSET`).
+    click_through_position: Option<(i32, i32)>,
+    /// Le glissement du bouton œil en cours, s'il y en a un — même état que pour la bande Récap
+    /// (la fenêtre saisie et le point de saisie).
+    click_through_drag: Option<RecapDragState>,
+    /// **Où l'utilisateur a posé le bandeau Suivi** (2026-09-28) — relative à la fenêtre de jeu,
+    /// une seule pour tous les clients comme `recap_position`. `None` : jamais déplacé, il reste
+    /// centré en haut du jeu (`watchlist_placement`).
+    watchlist_position: Option<(i32, i32)>,
+    /// **Le bandeau Suivi est-il vertical ?** (2026-09-28) — l'icône d'orientation de sa poignée,
+    /// relue de la config au démarrage et réécrite à chaque bascule.
+    watchlist_vertical: bool,
+    /// Le glissement du bandeau Suivi en cours, s'il y en a un — même état que pour la bande
+    /// Récap.
+    watchlist_drag: Option<RecapDragState>,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
     /// bannière.
@@ -895,6 +983,8 @@ struct AppState {
     combat_position_y: Option<i32>,
     /// Voir `App::combat_locked` — relu de la config au démarrage.
     combat_locked: bool,
+    /// Le panneau Combat est-il réduit ? — sa flèche de repli (`config::OverlayConfig::combat_collapsed`).
+    combat_collapsed: bool,
     /// Voir `App::turn_notification` — même provenance que `combat_always_visible`.
     turn_notification: bool,
     /// Voir `App::turn_notification_muted`.
@@ -927,6 +1017,12 @@ struct AppState {
     /// Voir `App::recap_position` — relue du disque au démarrage (`config::OverlayConfig::
     /// recap_position`), et réécrite à chaque bande reposée.
     recap_position: Option<(i32, i32)>,
+    /// Voir `App::click_through_position` — relue de la config au démarrage.
+    click_through_position: Option<(i32, i32)>,
+    /// Voir `App::watchlist_position`, `App::watchlist_vertical` — relus de la config au
+    /// démarrage.
+    watchlist_position: Option<(i32, i32)>,
+    watchlist_vertical: bool,
     /// Voir `App::recap_locked` — relu de la config au démarrage
     /// (`config::OverlayConfig::recap_locked`).
     recap_locked: bool,
@@ -956,6 +1052,7 @@ impl App {
             combat_on_right,
             combat_position_y,
             combat_locked,
+            combat_collapsed,
             turn_notification,
             turn_notification_muted,
             features,
@@ -974,6 +1071,9 @@ impl App {
             completions_rx,
             recap_session,
             recap_position,
+            click_through_position,
+            watchlist_position,
+            watchlist_vertical,
             recap_locked,
             catalog,
             catalog_stale,
@@ -1034,6 +1134,7 @@ impl App {
             combat_on_right,
             combat_position_y,
             combat_locked,
+            combat_collapsed,
             combat_drag: None,
             turn_notification,
             turn_notification_muted,
@@ -1046,6 +1147,11 @@ impl App {
             account_was_connected: false,
             recap_session,
             recap_position,
+            click_through_position,
+            click_through_drag: None,
+            watchlist_position,
+            watchlist_vertical,
+            watchlist_drag: None,
             recap_locked,
             recap_drag: None,
             banner_printed: false,
@@ -1279,6 +1385,9 @@ impl App {
             last_position: None,
             last_watchlist_width: None,
             last_watchlist_height: None,
+            watchlist_state: None,
+            watchlist_plan: None,
+            click_through_hovered: false,
             last_recap_height: None,
             visible: true,
             is_topmost: false,
@@ -1570,11 +1679,13 @@ impl App {
             still_here
         });
 
+        let free = self.free_anchor();
         for (character_name, info) in &found {
             for kind in [
                 OverlayKind::Combat,
                 OverlayKind::Watchlist,
                 OverlayKind::Recap,
+                OverlayKind::ClickThrough,
             ] {
                 if let Some(existing) = self
                     .windows
@@ -1587,6 +1698,7 @@ impl App {
                         self.combat_on_right,
                         self.combat_position_y,
                         self.recap_position,
+                        free,
                     );
                     if existing.active_character != *character_name {
                         existing.active_character = character_name.clone();
@@ -1616,6 +1728,7 @@ impl App {
                     self.combat_on_right,
                     self.combat_position_y,
                     self.recap_position,
+                    free,
                 );
                 tracing::info!(
                     "[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé."
@@ -1862,6 +1975,9 @@ impl App {
         overlay_height: i32,
         combat: CombatAnchor,
         recap: RecapAnchor,
+        // Où poser le bouton œil et le bandeau Suivi (`App::free_anchor`) — sans objet pour les
+        // autres zones.
+        free: FreeAnchor,
     ) -> PhysicalPosition<i32> {
         match kind {
             // Combat : collé à un bord vertical (`CombatAnchor::on_right`), centré verticalement
@@ -1879,10 +1995,19 @@ impl App {
                 );
                 PhysicalPosition::new(x, y)
             }
-            OverlayKind::Watchlist => PhysicalPosition::new(
-                rect.left + (rect.width - overlay_width) / 2,
-                rect.client_top + GAME_TOP_MARGIN_PX,
-            ),
+            // Suivi : centré en haut du jeu tant que l'utilisateur ne l'a pas déplacé, là où il l'a
+            // posé ensuite (2026-09-28) — tout le calcul, orientation et extension de survol
+            // comprises, est dans `overlay_ui::watchlist_placement`, partagé avec le binaire X11.
+            OverlayKind::Watchlist => {
+                let (x, y) = watchlist_placement::plan(
+                    free.watchlist_state,
+                    free.watchlist_offset,
+                    client_area(rect),
+                    free.scale,
+                )
+                .position;
+                PhysicalPosition::new(x, y)
+            }
             // Récap : sous les boutons du jeu et leurs infobulles tant que l'utilisateur ne l'a
             // pas déplacée, là où il l'a posée ensuite (2026-09-17) — tout le calcul, bornage
             // compris, est dans `overlay_ui::recap_placement`, partagé avec le binaire X11. Le
@@ -1896,6 +2021,20 @@ impl App {
             // La confirmation de remise à zéro couvre la fenêtre de jeu ENTIÈRE, barre de titre
             // comprise : son voile part du coin de la fenêtre, pas de la zone cliente.
             OverlayKind::ResetConfirm(_) => PhysicalPosition::new(rect.left, rect.top),
+            // Le bouton œil : juste après le bouton Boutique du jeu tant que l'utilisateur ne l'a
+            // pas déplacé, là où il l'a posé ensuite (2026-09-28) — tout le calcul, bornage
+            // compris, est dans `overlay_ui::click_through_placement`, partagé avec le binaire X11.
+            // Sa fenêtre EST le bouton : son côté physique est la largeur de la fenêtre.
+            OverlayKind::ClickThrough => {
+                let (x, y) = click_through_window(
+                    free.click_through_offset,
+                    free.click_through_hovered,
+                    client_area(rect),
+                    free.scale,
+                )
+                .position;
+                PhysicalPosition::new(x, y)
+            }
             // **Rattachée à une fenêtre de jeu, la fenêtre Options EST la fenêtre de jeu**
             // (2026-09-17) : elle la couvre entière, barre de titre comprise, comme la
             // confirmation ci-dessus — son voile part du coin, et c'est le rendu qui centre la
@@ -1934,6 +2073,9 @@ impl App {
         // Où poser la bande Récap (`App::recap_position`) — sans objet pour les autres zones,
         // qui n'en lisent rien.
         recap_offset: Option<(i32, i32)>,
+        // Où poser le bouton œil et le bandeau Suivi (`App::free_anchor`) — sans objet pour les
+        // autres.
+        free: FreeAnchor,
     ) -> OverlayWindow {
         let size = match kind {
             OverlayKind::Combat => WINDOW_SIZE,
@@ -1944,10 +2086,15 @@ impl App {
             // le premier `RedrawRequested` rétrécit la fenêtre d'une rangée de quatre boutons à
             // une rangée de deux si la case est décochée (2026-09-15) — la même frame que celle
             // qui vide déjà le bandeau de ses tuiles.
-            OverlayKind::Watchlist => (
-                watchlist_target_width(0, true, false, rect.width),
-                watchlist_target_height(false, false),
-            ),
+            OverlayKind::Watchlist => {
+                watchlist_placement::plan(
+                    free.watchlist_state,
+                    free.watchlist_offset,
+                    client_area(rect),
+                    free.scale,
+                )
+                .size
+            }
             // Rattachée à une fenêtre de jeu : SA taille, pour que le voile la couvre en entier,
             // overlays compris (2026-09-17, voir `RenderContent::veiled`). Détachée (`game_hwnd`
             // nul, aucun client à l'écran) : celle de la modale seule, sans voile.
@@ -1973,6 +2120,13 @@ impl App {
             OverlayKind::ResetConfirm(_) => (rect.width as f64, rect.height as f64),
             // Créée par `create_login_window`, jamais par ici — voir sa doc.
             OverlayKind::Login => (login::WINDOW_WIDTH as f64, login::INITIAL_HEIGHT as f64),
+            // Exactement le bouton et son fond de section : cette fenêtre capte toujours les clics,
+            // le moindre pixel de plus en volerait au jeu (voir `panels::click_through`). Elle ne
+            // s'étend que le temps du survol, pour l'infobulle (`click_through_window`).
+            OverlayKind::ClickThrough => (
+                click_through::SECTION_SIZE.x as f64,
+                click_through::SECTION_SIZE.y as f64,
+            ),
         };
         // **Une fenêtre qui couvre le jeu se mesure en pixels PHYSIQUES** : `GameRect` vient de
         // `GetWindowRect`, et la position posée plus bas (`set_outer_position`) est physique
@@ -1993,6 +2147,7 @@ impl App {
             OverlayKind::ResetConfirm(_) => "Confirmation",
             OverlayKind::Options => "Options",
             OverlayKind::Login => "Connexion",
+            OverlayKind::ClickThrough => "Bascule",
         };
         let attrs = WindowAttributes::default()
             .with_title(format!(
@@ -2033,6 +2188,9 @@ impl App {
         }
         // La modale Options force sa propre interactivité (voir `App::open_options_modal`) — voir
         // aussi le paramètre `interactive` passé explicitement `true` par cet appelant pour ce cas.
+        // Le bouton œil, lui, capte TOUJOURS les clics : c'est lui qui ramène l'overlay en mode
+        // interactif (voir `panels::click_through`).
+        let interactive = interactive || kind == OverlayKind::ClickThrough;
         if let Err(err) = window.set_cursor_hittest(interactive) {
             tracing::warn!("set_cursor_hittest a échoué à la création : {err}");
         }
@@ -2052,6 +2210,10 @@ impl App {
             outer.height as i32,
             CombatAnchor::new(combat_on_right, combat_offset, window.scale_factor()),
             RecapAnchor::new(recap_offset, window.scale_factor()),
+            FreeAnchor {
+                scale: window.scale_factor(),
+                ..free
+            },
         );
         window.set_outer_position(position);
         if kind == OverlayKind::Watchlist {
@@ -2060,7 +2222,7 @@ impl App {
             // jeu) est la source du bug d'ancrage corrigé le 2026-09-01 (voir la doc de
             // `GameRect::client_top`) — utile pour vérifier en un coup d'œil, sur une machine
             // donnée, que `client_top` a bien été résolu (pas replié sur `rect.top`, ce qui se
-            // voit ici par un écart nul) avant de retoucher `GAME_TOP_MARGIN_PX` à l'aveugle.
+            // voit ici par un écart nul) avant de retoucher `watchlist_placement::DEFAULT_TOP` à l'aveugle.
             tracing::debug!(
                 "[overlay Suivi] rect.top={} client_top={} (écart {}) -> position.y={}",
                 rect.top,
@@ -2096,6 +2258,9 @@ impl App {
             // d'entrées reste 0. `None` pour `Combat`, qui ne redimensionne jamais.
             last_watchlist_width: (kind == OverlayKind::Watchlist).then_some(size.0),
             last_watchlist_height: (kind == OverlayKind::Watchlist).then_some(size.1),
+            watchlist_state: None,
+            watchlist_plan: None,
+            click_through_hovered: false,
             // Déjà la largeur demandée ci-dessus pour une fenêtre `Recap` — même principe que le
             // Suivi juste au-dessus : la première frame ne redemande rien si elle tombe dessus.
             last_recap_height: (kind == OverlayKind::Recap).then_some(panels::recap::HEIGHT),
@@ -2116,6 +2281,7 @@ impl App {
         combat_on_right: bool,
         combat_offset: Option<i32>,
         recap_offset: Option<(i32, i32)>,
+        free: FreeAnchor,
     ) {
         overlay.game_rect = rect;
         let outer = overlay.window.outer_size();
@@ -2127,6 +2293,7 @@ impl App {
             outer.height as i32,
             CombatAnchor::new(combat_on_right, combat_offset, scale),
             RecapAnchor::new(recap_offset, scale),
+            free.for_window(overlay),
         );
         if overlay.last_position != Some(desired) {
             overlay.window.set_outer_position(desired);
@@ -2274,6 +2441,39 @@ impl App {
         }
     }
 
+    /// Les fenêtres dont `set_cursor_hittest` suit ce qu'elles ont peint (voir
+    /// `overlay_ui::hit_region`) : celles posées sur le jeu. Les modales, la confirmation et la
+    /// connexion captent toute leur surface — un voile ou un fond plein de toute façon.
+    fn follows_hit_region(kind: OverlayKind) -> bool {
+        matches!(
+            kind,
+            OverlayKind::Combat
+                | OverlayKind::Watchlist
+                | OverlayKind::Recap
+                | OverlayKind::ClickThrough
+        )
+    }
+
+    /// **Le clic traverse partout où une fenêtre de jeu n'a rien peint** (2026-09-28) — ses
+    /// réserves d'infobulle, les écarts entre les tuiles, les infobulles elles-mêmes. Sondé à
+    /// chaque tick sur le curseur d'écran : une fenêtre traversante ne reçoit plus d'événement
+    /// souris, c'est le seul moyen de savoir qu'il revient sur son contenu. Voir
+    /// `overlay_ui::frame::sync_hit_test`.
+    fn sync_hit_tests(&mut self) {
+        let cursor = game_window::cursor_position();
+        let now = std::time::Instant::now();
+        for overlay in self.windows.values_mut() {
+            if !Self::follows_hit_region(overlay.kind) || !overlay.visible {
+                continue;
+            }
+            // Le bouton œil capte toujours : c'est lui qui ramène l'overlay en mode interactif.
+            let allowed = self.interactive || overlay.kind == OverlayKind::ClickThrough;
+            if sync_hit_test(&mut overlay.gpu, &overlay.window, allowed, cursor) {
+                overlay.next_redraw_at = Some(now);
+            }
+        }
+    }
+
     fn toggle_interactive(&mut self) {
         self.interactive = !self.interactive;
         for overlay in self.windows.values_mut() {
@@ -2281,11 +2481,17 @@ impl App {
             if overlay.kind == OverlayKind::Login {
                 continue;
             }
-            if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
-                tracing::warn!("set_cursor_hittest a échoué : {err}");
+            // Les fenêtres de jeu règlent leur `set_cursor_hittest` sur ce qu'elles ont peint
+            // (`sync_hit_tests`, juste après) ; le bouton œil reste cliquable dans les deux modes,
+            // seul son glyphe change (voir `panels::click_through`).
+            if !Self::follows_hit_region(overlay.kind) {
+                if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
+                    tracing::warn!("set_cursor_hittest a échoué : {err}");
+                }
             }
             overlay.next_redraw_at = Some(std::time::Instant::now());
         }
+        self.sync_hit_tests();
         tracing::info!(
             ">>> Bascule ({}) : mode = {}",
             self.hotkeys.bindings().label(ShortcutAction::Toggle),
@@ -3032,9 +3238,11 @@ impl App {
             // peut naître masqué (voir `sync_panel_visibility`).
             true,
             self.combat_on_right,
-            // Sans objet : cette fenêtre-ci n'est ni le panneau Combat ni la bande Récap.
+            // Sans objet : cette fenêtre-ci n'est ni le panneau Combat, ni la bande Récap, ni le
+            // bouton œil.
             None,
             None,
+            FreeAnchor::default(),
         );
         if detached {
             // Pas de jeu sur lequel s'ancrer : au centre de l'écran principal, et le focus tout de
@@ -3605,9 +3813,10 @@ impl App {
             true,
             self.combat_on_right,
             // La confirmation couvre la fenêtre de jeu entière — elle ne suit ni le panneau
-            // Combat ni la bande Récap.
+            // Combat, ni la bande Récap, ni le bouton œil.
             None,
             None,
+            FreeAnchor::default(),
         );
         overlay.next_redraw_at = Some(std::time::Instant::now());
         self.windows.insert(overlay.window.id(), overlay);
@@ -3615,8 +3824,8 @@ impl App {
             ResetTarget::RecapSession => {
                 tracing::info!("[session] confirmation de remise à zéro ouverte.")
             }
-            ResetTarget::RecapPosition => {
-                tracing::info!("[recap] confirmation de replacement ouverte.")
+            ResetTarget::WatchlistPosition => {
+                tracing::info!("[suivi] confirmation de replacement ouverte.")
             }
             ResetTarget::CombatPosition => {
                 tracing::info!("[combat] confirmation de replacement ouverte.")
@@ -3664,6 +3873,21 @@ impl App {
         );
     }
 
+    /// **La flèche de repli du panneau Combat** (2026-09-28) : même politique que le cadenas — un
+    /// seul bouton, deux états, écrit tout de suite dans la config.
+    fn toggle_combat_collapsed(&mut self) {
+        self.combat_collapsed = !self.combat_collapsed;
+        self.persist_config();
+        tracing::info!(
+            "[combat] panneau {}.",
+            if self.combat_collapsed {
+                "réduit"
+            } else {
+                "déplié"
+            }
+        );
+    }
+
     /// **Le cadenas du panneau Combat** (2026-09-17) : même geste que celui de la bande Récap, et
     /// même politique — un seul bouton, deux états, pas de confirmation, écrit tout de suite.
     fn toggle_combat_lock(&mut self) {
@@ -3703,13 +3927,15 @@ impl App {
             (ResetTarget::RecapSession, false) => {
                 tracing::info!("[session] remise à zéro annulée.")
             }
-            (ResetTarget::RecapPosition, true) => {
-                self.recap_position = None;
+            (ResetTarget::WatchlistPosition, true) => {
+                self.watchlist_position = None;
                 self.persist_config();
-                self.reposition_recap();
-                tracing::info!("[recap] bande revenue à son emplacement d'origine.");
+                self.reposition_watchlist();
+                tracing::info!("[suivi] bandeau revenu à son emplacement d'origine.");
             }
-            (ResetTarget::RecapPosition, false) => tracing::info!("[recap] replacement annulé."),
+            (ResetTarget::WatchlistPosition, false) => {
+                tracing::info!("[suivi] replacement annulé.")
+            }
             (ResetTarget::CombatPosition, true) => {
                 self.combat_position_y = None;
                 self.persist_config();
@@ -3767,17 +3993,36 @@ impl App {
     /// message d'erreur et RIEN n'est pris en compte — ni les alertes, ni le suivi, ni l'affichage
     /// du panneau de combat. Un commit partiel laisserait l'utilisateur devant une fenêtre en
     /// erreur sans savoir ce qui a déjà été écrit.
-    /// Recolle chaque bande Récap sur sa fenêtre de jeu — pour les fois où c'est la POSITION qui
-    /// change alors que les fenêtres de jeu, elles, n'ont pas bougé (bouton « Replacer au
-    /// défaut »). `sync_windows` s'en charge le reste du temps, mais au prochain tick seulement :
-    /// le geste et son effet doivent être dans la même passe, comme pour les cases à cocher (voir
-    /// `sync_panel_visibility`).
-    fn reposition_recap(&mut self) {
-        self.reposition_kind(OverlayKind::Recap);
+    /// Recolle chaque bandeau Suivi sur sa fenêtre de jeu — pour les fois où c'est la POSITION
+    /// qui change alors que les fenêtres de jeu, elles, n'ont pas bougé (glyphe de replacement de
+    /// sa poignée, 2026-09-28). `sync_windows` s'en charge le reste du temps, mais au prochain tick
+    /// seulement : le geste et son effet doivent être dans la même passe, comme pour les cases à
+    /// cocher (voir `sync_panel_visibility`). Le redessin qui suit recalcule le gabarit entier.
+    ///
+    /// Ce fut `reposition_recap` jusqu'au même jour, pour le glyphe de replacement de la bande
+    /// Récap, retiré depuis.
+    fn reposition_watchlist(&mut self) {
+        self.reposition_kind(OverlayKind::Watchlist);
+        self.request_watchlist_redraw();
+    }
+
+    /// Ce que l'application sait des deux fenêtres qui se placent librement — voir
+    /// [`FreeAnchor`] ; `reposition` y ajoute ce que chaque fenêtre sait d'elle-même.
+    fn free_anchor(&self) -> FreeAnchor {
+        FreeAnchor {
+            click_through_offset: self.click_through_position,
+            watchlist_offset: self.watchlist_position,
+            watchlist_state: watchlist_placement::StripState {
+                tracking_enabled: self.features.suivi,
+                vertical: self.watchlist_vertical,
+                ..Default::default()
+            },
+            ..FreeAnchor::default()
+        }
     }
 
     /// Recolle chaque panneau Combat sur sa fenêtre de jeu — le pendant de
-    /// [`Self::reposition_recap`] pour la hauteur du panneau (glyphe de replacement de sa rangée
+    /// [`Self::reposition_watchlist`] pour la hauteur du panneau (glyphe de replacement de sa rangée
     /// d'actions, bouton des Options).
     fn reposition_combat(&mut self) {
         self.reposition_kind(OverlayKind::Combat);
@@ -3787,6 +4032,7 @@ impl App {
     /// appelants ci-dessus.
     fn reposition_kind(&mut self, kind: OverlayKind) {
         let recap_position = self.recap_position;
+        let free = self.free_anchor();
         let combat_on_right = self.combat_on_right;
         let combat_position_y = self.combat_position_y;
         for overlay in self.windows.values_mut() {
@@ -3798,6 +4044,7 @@ impl App {
                     combat_on_right,
                     combat_position_y,
                     recap_position,
+                    free,
                 );
             }
         }
@@ -3832,9 +4079,13 @@ impl App {
         saved.set_completion(self.completion);
         saved.set_recap_resume(self.recap_session.resume_settings());
         saved.set_recap_position(self.recap_position);
+        saved.set_click_through_position(self.click_through_position);
+        saved.set_watchlist_position(self.watchlist_position);
+        saved.watchlist_vertical = self.watchlist_vertical;
         saved.recap_locked = self.recap_locked;
         saved.combat_position_y = self.combat_position_y;
         saved.combat_locked = self.combat_locked;
+        saved.combat_collapsed = self.combat_collapsed;
         saved.set_features(self.features);
         saved.set_alert_mutes(self.alert_mutes);
         config::save(&saved);
@@ -4237,6 +4488,10 @@ enum PostRedraw {
     ToggleRecapLock,
     /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
     ToggleCombatLock,
+    /// La flèche de repli du panneau Combat vient d\'être cliquée (voir `toggle_combat_collapsed`).
+    ToggleCombatCollapsed,
+    /// Le bouton œil vient d'être cliqué (voir `toggle_interactive`, `panels::click_through`).
+    ToggleInteractive,
     /// Carte d'alerte de chat cliquée : préparer la réponse en privé à cet auteur (voir
     /// `whisper_from_toast`) — après le rendu, comme tout ce qui touche `self` entier.
     Whisper(String),
@@ -4320,6 +4575,10 @@ impl App {
         // Même mécanique pour la hauteur du panneau Combat (2026-09-17) : écrite une fois, au
         // relâchement.
         let mut persist_combat_position = false;
+        // Et pour le bouton œil (2026-09-28).
+        let mut persist_click_through_position = false;
+        // Position ou orientation du bandeau Suivi changée cette frame (2026-09-28).
+        let mut persist_watchlist = false;
         let Some(overlay) = self.windows.get_mut(&id) else {
             return;
         };
@@ -4352,23 +4611,46 @@ impl App {
         };
         let watchlist_toast_guard = self.watchlist_toast.load();
         let watchlist_toast: Option<&WatchlistToast> = (**watchlist_toast_guard).as_ref();
+        // **Le gabarit du bandeau Suivi** : taille ET position, orientation et extension de survol
+        // du bandeau vertical comprises (2026-09-28) — tout le calcul est dans
+        // `watchlist_placement::plan`, partagé avec le binaire X11.
+        //
+        // Gabarit piloté par le CONTENU (retour utilisateur 2026-09-02 : une fenêtre plus large que
+        // nécessaire reste cliquable/bloquante sur toute sa zone même transparente, l'utilisateur
+        // ne peut alors pas deviner où s'arrête l'overlay). Comparé à la dernière valeur DEMANDÉE
+        // (`last_watchlist_width`/`_height`), pas à la taille réelle actuelle de la fenêtre, pour
+        // ne pas rappeler `request_inner_size` en boucle tant que rien n'a changé.
+        //
+        // Le survol se lit sur le curseur d'ÉCRAN, rapporté à la fenêtre de base du gabarit
+        // précédent (`watchlist_placement::hovers`, qui dit pourquoi pas celui d'egui).
+        let mut watchlist_plan = None;
         if overlay.kind == OverlayKind::Watchlist {
-            // Gabarit piloté par le CONTENU (retour utilisateur 2026-09-02 : une fenêtre
-            // plus large que nécessaire reste cliquable/bloquante sur toute sa zone même
-            // transparente, l'utilisateur ne peut alors pas deviner où s'arrête l'overlay)
-            // — voir la doc de `watchlist_target_width`/`watchlist_target_height`.
-            // Comparé à la dernière valeur DEMANDÉE (`last_watchlist_width`/`_height`), pas
-            // à la taille réelle actuelle de la fenêtre, pour ne pas rappeler
-            // `request_inner_size` en boucle tant que rien n'a changé.
-            let toast_active = panels::watchlist::is_active(watchlist_toast, now);
-            let target_width = watchlist_target_width(
-                watchlist.len(),
-                self.features.suivi,
-                toast_active,
-                overlay.game_rect.width,
+            let toast = watchlist_toast
+                .filter(|toast| panels::watchlist::is_active(Some(*toast), now))
+                .map(|toast| panels::watchlist::toast_extent(&overlay.gpu.egui_ctx, toast));
+            let hovered = self.interactive
+                && overlay.watchlist_plan.is_some_and(|plan| {
+                    game_window::cursor_position()
+                        .is_some_and(|cursor| watchlist_placement::hovers(cursor, &plan))
+                });
+            let state = watchlist_placement::StripState {
+                entry_count: watchlist.len(),
+                tracking_enabled: self.features.suivi,
+                toast,
+                select_open: self.watchlist_selection.is_open(),
+                vertical: self.watchlist_vertical,
+                hovered,
+            };
+            let plan = watchlist_placement::plan(
+                state,
+                self.watchlist_position,
+                client_area(overlay.game_rect),
+                overlay.window.scale_factor(),
             );
-            let target_height =
-                watchlist_target_height(toast_active, self.watchlist_selection.is_open());
+            overlay.watchlist_state = Some(state);
+            overlay.watchlist_plan = Some(plan);
+            watchlist_plan = Some(plan);
+            let (target_width, target_height) = plan.size;
             if overlay.last_watchlist_width != Some(target_width)
                 || overlay.last_watchlist_height != Some(target_height)
             {
@@ -4389,6 +4671,46 @@ impl App {
                 overlay.last_watchlist_width = Some(target_width);
                 overlay.last_watchlist_height = Some(target_height);
             }
+            let position = PhysicalPosition::new(plan.position.0, plan.position.1);
+            if overlay.last_position != Some(position) {
+                overlay.window.set_outer_position(position);
+                overlay.last_position = Some(position);
+            }
+        }
+        // **Le bouton œil survolé s'étend pour son infobulle** (2026-09-28) — voir
+        // `panels::click_through` : survol lu sur le curseur d'ÉCRAN (la fenêtre qui s'étend à
+        // gauche ou au-dessus décalerait celui d'egui), fenêtre étendue ou rétractée dans la même
+        // frame, le bouton immobile à l'écran.
+        let mut click_through_tip = click_through::ClickThroughTip::default();
+        if overlay.kind == OverlayKind::ClickThrough {
+            let scale = overlay.window.scale_factor();
+            let client = client_area(overlay.game_rect);
+            let base = click_through_window(self.click_through_position, false, client, scale);
+            let hovered = self.click_through_drag.is_none()
+                && game_window::cursor_position().is_some_and(|(x, y)| {
+                    (base.position.0..base.position.0 + base.size.0).contains(&x)
+                        && (base.position.1..base.position.1 + base.size.1).contains(&y)
+                });
+            let tip = click_through_window(self.click_through_position, hovered, client, scale);
+            if hovered != overlay.click_through_hovered {
+                overlay.click_through_hovered = hovered;
+                if let Some(actual) = overlay
+                    .window
+                    .request_inner_size(PhysicalSize::new(tip.size.0 as u32, tip.size.1 as u32))
+                {
+                    Self::reconfigure_surface(&mut overlay.gpu, actual);
+                }
+                let position = PhysicalPosition::new(tip.position.0, tip.position.1);
+                overlay.window.set_outer_position(position);
+                overlay.last_position = Some(position);
+            }
+            click_through_tip = click_through::ClickThroughTip {
+                button_origin: egui::vec2(
+                    (tip.button_origin.0 as f64 / scale) as f32,
+                    (tip.button_origin.1 as f64 / scale) as f32,
+                ),
+                above: tip.above,
+            };
         }
         let catalog = self.catalog.load();
         let game_servers = self.game_servers.load();
@@ -4478,7 +4800,6 @@ impl App {
         // fenêtre de JEU (`recap_placement::actions_below`), que le panneau ne connaît pas.
         let recap_chrome = panels::recap::RecapChrome {
             locked: self.recap_locked,
-            moved: self.recap_position.is_some(),
             actions_below: overlay.kind == OverlayKind::Recap && {
                 let outer = overlay.window.outer_size();
                 let (client, band) = RecapAnchor::new(None, overlay.window.scale_factor())
@@ -4492,6 +4813,7 @@ impl App {
         let combat_chrome = panels::combat::CombatChrome {
             locked: self.combat_locked,
             moved: self.combat_position_y.is_some(),
+            collapsed: self.combat_collapsed,
         };
         let (repaint_delay, outcome) = render(
             &mut overlay.gpu,
@@ -4530,6 +4852,14 @@ impl App {
                 options: overlay.options_state.as_mut(),
                 veiled,
                 recap_chrome,
+                watchlist_chrome: panels::watchlist::WatchlistChrome {
+                    vertical: self.watchlist_vertical,
+                    moved: self.watchlist_position.is_some(),
+                    side: watchlist_plan.map(|plan| plan.side).unwrap_or_default(),
+                    flipped: watchlist_plan.is_some_and(|plan| plan.flipped),
+                },
+                watchlist_base: watchlist_plan.and_then(|plan| plan.base),
+                click_through_tip,
                 login: overlay.login_state.as_mut(),
                 card_settings: card_settings.as_mut(),
             },
@@ -4637,6 +4967,165 @@ impl App {
                         }
                     }
                 }
+            }
+        }
+        // **Le bouton œil saisi à la souris** (2026-09-28, « permets à l'utilisateur de placer ce
+        // bouton où il le souhaite ») : la même mécanique que la bande Récap ci-dessus — point de
+        // saisie figé au premier appui, curseur d'ÉCRAN ensuite, aimantation et écriture au
+        // relâchement. Voir `click_through_placement`.
+        if overlay.kind == OverlayKind::ClickThrough {
+            let scale = overlay.window.scale_factor();
+            let client = client_area(overlay.game_rect);
+            // La taille AU REPOS : c'est la section que le point de saisie tient, infobulle
+            // refermée pendant le geste.
+            let side = click_through_window(None, false, client, scale).size;
+            let physical = |pos: egui::Pos2| {
+                (
+                    (pos.x as f64 * scale).round() as i32,
+                    (pos.y as f64 * scale).round() as i32,
+                )
+            };
+            let mut place = |position: Option<(i32, i32)>| {
+                let tip = click_through_window(position, false, client, scale);
+                if overlay.click_through_hovered {
+                    overlay.click_through_hovered = false;
+                    if let Some(actual) = overlay
+                        .window
+                        .request_inner_size(PhysicalSize::new(tip.size.0 as u32, tip.size.1 as u32))
+                    {
+                        Self::reconfigure_surface(&mut overlay.gpu, actual);
+                    }
+                }
+                let posed = PhysicalPosition::new(tip.position.0, tip.position.1);
+                if overlay.last_position != Some(posed) {
+                    overlay.window.set_outer_position(posed);
+                    overlay.last_position = Some(posed);
+                }
+            };
+            match outcome.click_through_drag {
+                panels::drag::PanelDrag::None => {}
+                panels::drag::PanelDrag::Started(pos) => {
+                    self.click_through_drag = Some(RecapDragState {
+                        window: id,
+                        grab: physical(pos),
+                    });
+                }
+                panels::drag::PanelDrag::Moved => {
+                    if let Some(drag) = self.click_through_drag.filter(|drag| drag.window == id) {
+                        if let Some(cursor) = game_window::cursor_position() {
+                            let offset = click_through_placement::drag_offset(
+                                cursor, drag.grab, client, side,
+                            );
+                            if self.click_through_position != Some(offset) {
+                                self.click_through_position = Some(offset);
+                                place(Some(offset));
+                            }
+                        }
+                    }
+                }
+                panels::drag::PanelDrag::Released => {
+                    if self
+                        .click_through_drag
+                        .is_some_and(|drag| drag.window == id)
+                    {
+                        self.click_through_drag = None;
+                        self.click_through_position = self
+                            .click_through_position
+                            .and_then(click_through_placement::snap);
+                        place(self.click_through_position);
+                        persist_click_through_position = true;
+                        match self.click_through_position {
+                            Some((x, y)) => {
+                                tracing::info!("[bascule] bouton œil posé en {x} / {y}.")
+                            }
+                            None => tracing::info!(
+                                "[bascule] bouton œil revenu à son emplacement d'origine."
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+        // **Le bandeau Suivi saisi par sa poignée** (2026-09-28, « que l'utilisateur puisse
+        // déplacer le suivi comme il l'entend, n'importe où sur l'écran ») : la même mécanique que
+        // la bande Récap — point de saisie figé au premier appui, curseur d'ÉCRAN ensuite,
+        // aimantation et écriture au relâchement. Le point de saisie se compte depuis la fenêtre
+        // de BASE du bandeau (`panels::watchlist::WatchlistOutcome::drag`), et le gabarit est
+        // recalculé à chaque position — extension de survol comprise. Voir `watchlist_placement`.
+        if overlay.kind == OverlayKind::Watchlist {
+            if let Some(plan) = overlay.watchlist_plan {
+                let scale = overlay.window.scale_factor();
+                let client = client_area(overlay.game_rect);
+                let state = overlay.watchlist_state.unwrap_or_default();
+                let physical = |pos: egui::Pos2| {
+                    (
+                        (pos.x as f64 * scale).round() as i32,
+                        (pos.y as f64 * scale).round() as i32,
+                    )
+                };
+                let mut place = |position: Option<(i32, i32)>| {
+                    let plan = watchlist_placement::plan(state, position, client, scale);
+                    overlay.watchlist_plan = Some(plan);
+                    let posed = PhysicalPosition::new(plan.position.0, plan.position.1);
+                    if overlay.last_position != Some(posed) {
+                        overlay.window.set_outer_position(posed);
+                        overlay.last_position = Some(posed);
+                    }
+                };
+                match outcome.watchlist_drag {
+                    panels::drag::PanelDrag::None => {}
+                    panels::drag::PanelDrag::Started(pos) => {
+                        self.watchlist_drag = Some(RecapDragState {
+                            window: id,
+                            grab: physical(pos),
+                        });
+                    }
+                    panels::drag::PanelDrag::Moved => {
+                        if let Some(drag) = self.watchlist_drag.filter(|drag| drag.window == id) {
+                            if let Some(cursor) = game_window::cursor_position() {
+                                let offset = watchlist_placement::drag_offset(
+                                    cursor, drag.grab, client, plan.strip,
+                                );
+                                if self.watchlist_position != Some(offset) {
+                                    self.watchlist_position = Some(offset);
+                                    place(Some(offset));
+                                }
+                            }
+                        }
+                    }
+                    panels::drag::PanelDrag::Released => {
+                        if self.watchlist_drag.is_some_and(|drag| drag.window == id) {
+                            self.watchlist_drag = None;
+                            self.watchlist_position = self.watchlist_position.and_then(|offset| {
+                                watchlist_placement::snap(offset, client, plan.strip)
+                            });
+                            place(self.watchlist_position);
+                            persist_watchlist = true;
+                            match self.watchlist_position {
+                                Some((x, y)) => {
+                                    tracing::info!("[suivi] bandeau posé en {x} / {y}.")
+                                }
+                                None => tracing::info!(
+                                    "[suivi] bandeau revenu à son emplacement d'origine."
+                                ),
+                            }
+                        }
+                    }
+                }
+            }
+            // L'icône d'orientation : bascule immédiate et persistée, sans confirmation — un
+            // second clic la défait. Tous les bandeaux se retaillent au prochain redessin.
+            if outcome.watchlist_toggle_orientation {
+                self.watchlist_vertical = !self.watchlist_vertical;
+                persist_watchlist = true;
+                tracing::info!(
+                    "[suivi] bandeau {}.",
+                    if self.watchlist_vertical {
+                        "vertical"
+                    } else {
+                        "horizontal"
+                    }
+                );
             }
         }
         // **Le panneau Combat saisi par sa poignée latérale** (2026-09-17) : la même mécanique que
@@ -4853,14 +5342,14 @@ impl App {
                 ResetTarget::RecapSession,
             );
         }
-        // Le glyphe de replacement de la rangée d'actions (2026-09-17) : même fenêtre, même
-        // voile, autre question — « on remet le récap à son emplacement initial seulement si
-        // l'utilisateur appuie sur oui ».
-        if outcome.recap_restore_requested {
+        // Le glyphe de replacement du bandeau Suivi (2026-09-28) : même fenêtre, même voile,
+        // autre question — « toujours avec le système de confirm box, comme pour l'overlay de
+        // combat ».
+        if outcome.watchlist_restore_requested {
             post_redraw = PostRedraw::OpenResetConfirm(
                 this_game_hwnd,
                 this_game_rect,
-                ResetTarget::RecapPosition,
+                ResetTarget::WatchlistPosition,
             );
         }
         // Le cadenas : la bascule est immédiate et persistée, sans confirmation — rien ne se
@@ -4880,6 +5369,14 @@ impl App {
         }
         if outcome.combat_toggle_lock {
             post_redraw = PostRedraw::ToggleCombatLock;
+        }
+        if outcome.combat_toggle_collapsed {
+            post_redraw = PostRedraw::ToggleCombatCollapsed;
+        }
+        // Le bouton œil (2026-09-28) : la même bascule que le raccourci, après le rendu parce
+        // qu'elle touche toutes les fenêtres.
+        if outcome.toggle_interactive {
+            post_redraw = PostRedraw::ToggleInteractive;
         }
         if let OverlayKind::ResetConfirm(target) = overlay.kind {
             match outcome.reset_choice {
@@ -4924,8 +5421,17 @@ impl App {
 
         // Après la dernière ligne qui touche `overlay` : `persist_config` a besoin de tout
         // `self`, fenêtres comprises.
-        if persist_recap_position || persist_combat_position {
+        if persist_recap_position
+            || persist_combat_position
+            || persist_click_through_position
+            || persist_watchlist
+        {
             self.persist_config();
+        }
+        // Une orientation changée retaille TOUS les bandeaux, pas seulement celui qu'on vient de
+        // cliquer : c'est un réglage de l'application.
+        if persist_watchlist {
+            self.request_watchlist_redraw();
         }
 
         match post_redraw {
@@ -4945,6 +5451,8 @@ impl App {
             }
             PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
             PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),
+            PostRedraw::ToggleCombatCollapsed => self.toggle_combat_collapsed(),
+            PostRedraw::ToggleInteractive => self.toggle_interactive(),
             PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
             // La déconnexion referme la fenêtre : l'overlay revient à son écran de connexion, et
             // ce qu'on y réglait (liste suivie, alertes) appartient au compte qu'on vient de
@@ -5323,6 +5831,7 @@ impl ApplicationHandler<UserEvent> for App {
         // vient peut-être de créer la fenêtre, `sync_topmost` doit voir son état final.
         self.sync_panel_visibility();
         self.sync_topmost();
+        self.sync_hit_tests();
         // Surveillance de tour (§9.1 decies) — après `sync_windows`, qui vient de mettre à jour
         // la liste des fenêtres de jeu qu'elle lit.
         self.sync_turn_watch();
@@ -5469,6 +5978,8 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         egui_winit,
         egui_renderer,
         occluded_since: None,
+        hit_region: Default::default(),
+        hit_test: None,
     }
 }
 
@@ -5685,6 +6196,7 @@ fn main() {
         combat_on_right: saved_config.combat_on_right,
         combat_position_y: saved_config.combat_position_y,
         combat_locked: saved_config.combat_locked,
+        combat_collapsed: saved_config.combat_collapsed,
         turn_notification: saved_config.turn_notification,
         turn_notification_muted: saved_config.turn_notification_muted,
         features: saved_config.features(),
@@ -5709,6 +6221,9 @@ fn main() {
             std::time::SystemTime::now(),
         ),
         recap_position: saved_config.recap_position(),
+        click_through_position: saved_config.click_through_position(),
+        watchlist_position: saved_config.watchlist_position(),
+        watchlist_vertical: saved_config.watchlist_vertical,
         recap_locked: saved_config.recap_locked,
         catalog,
         catalog_stale,
