@@ -264,6 +264,33 @@ fn infobulles_de_la_pastille_sous_le_carre() {
     }
 }
 
+/// Le centre du glyphe `index` de la pastille couchée SOUS la rangée de boutons du bandeau vide :
+/// la rangée fait 34 px de haut, la pastille commence 4 px sous elle, un glyphe de 14 px tous
+/// les 20 px après 4 px de rembourrage.
+fn glyphe_sous_la_rangee(index: usize) -> egui::Pos2 {
+    egui::pos2(
+        MARGE_HARNAIS + 4.0 + 7.0 + 20.0 * index as f32,
+        MARGE_HARNAIS + 34.0 + 4.0 + 4.0 + 7.0,
+    )
+}
+
+/// Bandeau vide, boutons en rangée : la pastille se couche SOUS la rangée, ses glyphes en ligne,
+/// et chaque infobulle s'ouvre sous son glyphe (demande utilisateur 2026-09-28). Plus aucune
+/// colonne gardée à gauche des boutons.
+#[test]
+fn bandeau_vide_pastille_couchee_sous_la_rangee() {
+    let mut harness = harnais(0, false, Some((300, 400)), false, Rc::default());
+    for (index, nom) in [
+        (0, "suivi_vide_infobulle_orientation"),
+        (1, "suivi_vide_infobulle_poignee"),
+        (2, "suivi_vide_infobulle_replacer"),
+    ] {
+        harness.hover_at(glyphe_sous_la_rangee(index));
+        harness.run();
+        harness.snapshot(nom);
+    }
+}
+
 /// Sans pointeur, rien : la place de la pastille reste vide.
 #[test]
 fn bandeau_sans_pointeur_ne_montre_pas_sa_poignee() {

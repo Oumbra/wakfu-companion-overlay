@@ -261,7 +261,7 @@ pub fn plan(state: StripState, offset: Option<(i32, i32)>, client: ClientArea, s
         chrome_left: if state.vertical {
             0
         } else {
-            physical(watchlist::CHROME_RESERVE as f64)
+            physical(watchlist::chrome_left(state.entry_count, state.tracking_enabled) as f64)
         },
     };
     let base_position = window_position(offset, client, strip);

@@ -694,7 +694,19 @@ pub fn content_width(entry_count: usize, tracking_enabled: bool) -> f32 {
         entry_count as f32 * TILE_SIZE + (entry_count as f32 - 1.0) * TILE_GAP
     };
     let right_of_control = (TILE_GAP + entries_width).max(layout.tooltip_reserve());
-    CHROME_RESERVE + control_row_width(layout) + right_of_control
+    chrome_left(entry_count, tracking_enabled) + control_row_width(layout) + right_of_control
+}
+
+/// **Colonne gardée à GAUCHE du bandeau couché pour la pastille** ([`chrome_pill`]) :
+/// [`CHROME_RESERVE`] quand les boutons forment un carré, rien quand ils s'alignent en rangée
+/// (bandeau vide, Suivi coupé) — la pastille se couche alors SOUS la rangée (demande utilisateur
+/// 2026-09-28), dans la hauteur que la fenêtre garde déjà sous elle pour les infobulles.
+pub fn chrome_left(entry_count: usize, tracking_enabled: bool) -> f32 {
+    if ControlLayout::for_state(entry_count, tracking_enabled) == ControlLayout::Square {
+        CHROME_RESERVE
+    } else {
+        0.0
+    }
 }
 
 /// **Taille du contenu du bandeau VERTICAL** (2026-09-28), SANS la marge de fenêtre — le pendant
@@ -1255,6 +1267,9 @@ pub fn show(
     // Le bloc des boutons de contrôle tel que peint : la pastille y accroche ses infobulles (voir
     // [`chrome_pill`]).
     let mut control_rect = egui::Rect::NOTHING;
+    // Bandeau couché dont les boutons s'alignent en rangée : la pastille se couche sous eux au
+    // lieu de se dresser à leur gauche (demande utilisateur 2026-09-28).
+    let pill_under_row = !chrome.vertical && layout != ControlLayout::Square;
     // Où la pastille de la poignée se pose (voir [`chrome_pill`]) : la colonne gardée à gauche du
     // bandeau couché, la rangée gardée au-dessus du bandeau dressé.
     let pill_origin;
@@ -1311,8 +1326,11 @@ pub fn show(
         }
     } else {
         ui.horizontal_top(|ui| {
-            // La colonne de la pastille, gardée en permanence (voir [`CHROME_RESERVE`]).
-            ui.add_space(CHROME_RESERVE);
+            // La colonne de la pastille, gardée en permanence à côté du carré ; en rangée, la
+            // pastille passe dessous (voir [`chrome_left`]).
+            if !pill_under_row {
+                ui.add_space(CHROME_RESERVE);
+            }
             // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08), descendu
             // de deux hauteurs qui s'additionnent :
             //
@@ -1353,8 +1371,13 @@ pub fn show(
             strip_rect = strip.inner_rect;
         });
         // La pastille se centre sur la rangée des tuiles, sous la barre de défilement quand elle
-        // est là — au même niveau que le carré de contrôle.
-        pill_origin = ui.max_rect().min + egui::vec2(0.0, strip_scroll_area().space_before(ui));
+        // est là — au même niveau que le carré de contrôle. En rangée, elle se couche sous les
+        // boutons, alignée sur leur bord gauche.
+        pill_origin = if pill_under_row {
+            control_rect.left_bottom() + egui::vec2(0.0, CHROME_MARGIN)
+        } else {
+            ui.max_rect().min + egui::vec2(0.0, strip_scroll_area().space_before(ui))
+        };
     }
     let TileHarvest {
         tiles_rect,
@@ -1429,7 +1452,7 @@ pub fn show(
     // La pastille de la poignée, une fois tout le reste déclaré : elle ne recouvre rien (sa place
     // est gardée), et sa zone de survol est le bandeau entier tel qu'il vient d'être peint.
     let band = ui.min_rect();
-    let pill = chrome_pill(ui, pill_origin, band, chrome, control_rect);
+    let pill = chrome_pill(ui, pill_origin, band, chrome, control_rect, pill_under_row);
 
     ui.add_space(6.0);
 
@@ -1613,11 +1636,15 @@ fn chrome_pill(
     band: egui::Rect,
     chrome: WatchlistChrome,
     controls: egui::Rect,
+    under_row: bool,
 ) -> PillOutcome {
     let glyphs = 2 + usize::from(chrome.moved);
     let span =
         glyphs as f32 * CHROME_ICON_SIZE + (glyphs - 1) as f32 * CHROME_GAP + 2.0 * CHROME_PADDING;
-    let pill = if chrome.vertical {
+    // Couchée au-dessus du bandeau dressé, et sous la rangée de boutons du bandeau couché ;
+    // dressée à gauche du carré sinon.
+    let lying = chrome.vertical || under_row;
+    let pill = if lying {
         egui::Rect::from_min_size(origin, egui::vec2(span, CHROME_THICKNESS))
     } else {
         // Centrée sur la rangée des tuiles, de la hauteur d'une case.
@@ -1642,11 +1669,7 @@ fn chrome_pill(
         .rect_filled(pill, PANEL_BACKDROP_ROUNDING, PANEL_BACKDROP_FILL);
     let slot = |index: usize| {
         let offset = index as f32 * (CHROME_ICON_SIZE + CHROME_GAP);
-        let (dx, dy) = if chrome.vertical {
-            (offset, 0.0)
-        } else {
-            (0.0, offset)
-        };
+        let (dx, dy) = if lying { (offset, 0.0) } else { (0.0, offset) };
         egui::Rect::from_min_size(
             pill.min + egui::vec2(CHROME_PADDING + dx, CHROME_PADDING + dy),
             egui::Vec2::splat(CHROME_ICON_SIZE),
@@ -1657,10 +1680,13 @@ fn chrome_pill(
     // tombait sur le glyphe suivant et sur la tuile, « extrêmement dure à lire ») : accrochées au
     // bloc des boutons, du même côté — sous lui à l'horizontale, vers le centre du jeu à la
     // verticale. Le survol reste celui du glyphe (voir `design::Tooltip::anchor`).
+    //
+    // Couchée sous une rangée, la pastille est elle-même une rangée : chaque infobulle s'ouvre
+    // sous SON glyphe, comme sous les boutons de la rangée.
     let side = chrome.tooltip_side();
     let tip = |response: &egui::Response, text: &str| {
         let infobulle = design::tooltip(response).side(side);
-        if controls.is_positive() {
+        if controls.is_positive() && !under_row {
             infobulle.anchor(controls).text(text);
         } else {
             infobulle.text(text);
