@@ -35,14 +35,22 @@ use crate::design::{self, DsIcon, IconContext};
 pub const BUTTON_SIZE: f32 = 40.0;
 
 /// Décalage du bouton, en pixels physiques depuis le coin haut-gauche de la zone cliente du jeu
-/// (`GameRect::left`, `GameRect::client_top`) — **à calibrer sur capture d'écran**.
+/// (`GameRect::left`, `GameRect::client_top`).
 ///
 /// - En ordonnée, 32 : le haut des boutons du jeu (24 px de fausse barre de titre, 8 px de vide,
 ///   même relevé que `recap_placement::DEFAULT_OFFSET`).
-/// - En abscisse, 214 : le bouton Boutique finit à x = 210 (le bloc Récap, 206 px posés à x = 4,
-///   « finit au bord droit du bouton Boutique »), plus 4 px d'écart — l'écart entre deux boutons
-///   du jeu n'a pas encore été relevé.
-pub const DEFAULT_OFFSET: (i32, i32) = (214, 32);
+/// - En abscisse, 212 : le bouton Boutique finit à x = 210 (le bloc Récap, 206 px posés à x = 4,
+///   « finit au bord droit du bouton Boutique »), plus [`GAME_BUTTON_GAP`].
+pub const DEFAULT_OFFSET: (i32, i32) = (210 + GAME_BUTTON_GAP, 32);
+
+/// **Écart entre deux boutons de premier plan du jeu** (demande utilisateur 2026-09-28 : « le
+/// même espacement entre ce nouveau bouton et ceux du jeu »).
+///
+/// Mesuré sur `assets/design-system/menu-button-icon-first-plan.png`, capture à l'échelle 1 de la
+/// colonne de boutons de premier plan du jeu : le socle `button-icon-first-plan.png` (36 px) s'y
+/// recale tous les 38 px, huit fois de suite (y = 5, 43, 81 … 271), soit 2 px de vide entre deux
+/// socles. La rangée Menu … Boutique n'a pas de capture à elle ; elle est de la même famille.
+pub const GAME_BUTTON_GAP: i32 = 2;
 
 /// Nom du bouton dans le journal (`design::icon_button::log_name`).
 const LOG_NAME: &str = "clic-traversant.bascule";
