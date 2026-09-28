@@ -80,6 +80,7 @@ mod linux_main {
     };
     use overlay_ui::build_info;
     use overlay_ui::chat_command::{self, ChatCommand};
+    use overlay_ui::click_through_placement;
     use overlay_ui::combat_placement;
     use overlay_ui::config;
     use overlay_ui::engine_thread::{
@@ -366,6 +367,10 @@ mod linux_main {
         recap_locked: bool,
         /// Le glissement de la bande en cours, s'il y en a un — voir `RecapDragState`.
         recap_drag: Option<RecapDragState>,
+        /// Où l'utilisateur a posé le bouton œil — voir `main.rs::App::click_through_position`.
+        click_through_position: Option<(i32, i32)>,
+        /// Le glissement du bouton œil en cours, s'il y en a un.
+        click_through_drag: Option<RecapDragState>,
         banner_printed: bool,
         /// Dialogue de fichier natif (`rfd`) en cours, le cas échéant — voir
         /// `App::start_file_dialog`. Un seul à la fois (une seule modale Options peut être ouverte,
@@ -550,6 +555,8 @@ mod linux_main {
         recap_session: RecapSession,
         /// La position de la bande Récap relue de la config — voir `App::recap_position`.
         recap_position: Option<(i32, i32)>,
+        /// La position du bouton œil relue de la config — voir `App::click_through_position`.
+        click_through_position: Option<(i32, i32)>,
         /// Le verrou de la bande Récap relu de la config — voir `App::recap_locked`.
         recap_locked: bool,
         /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`.
@@ -597,6 +604,7 @@ mod linux_main {
                 completions_rx,
                 recap_session,
                 recap_position,
+                click_through_position,
                 recap_locked,
                 shortcuts,
                 snapshot,
@@ -668,6 +676,8 @@ mod linux_main {
                 recap_position,
                 recap_locked,
                 recap_drag: None,
+                click_through_position,
+                click_through_drag: None,
                 combat_drag: None,
                 banner_printed: false,
                 pending_dialog: None,
@@ -1145,6 +1155,7 @@ mod linux_main {
                             self.combat_on_right,
                             self.combat_position_y,
                             self.recap_position,
+                            self.click_through_position,
                         );
                         continue;
                     }
@@ -1170,6 +1181,7 @@ mod linux_main {
                         self.combat_on_right,
                         self.combat_position_y,
                         self.recap_position,
+                        self.click_through_position,
                     );
                     tracing::info!(
                         "[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé."
@@ -1248,6 +1260,8 @@ mod linux_main {
             overlay_height: i32,
             combat: CombatAnchor,
             recap: RecapAnchor,
+            // Où l'utilisateur a posé le bouton œil — sans objet pour les autres zones.
+            click_through_offset: Option<(i32, i32)>,
         ) -> PhysicalPosition<i32> {
             match kind {
                 // Combat : bord vertical au choix, centré verticalement tant qu'il n'a pas été
@@ -1280,10 +1294,15 @@ mod linux_main {
                 OverlayKind::ResetConfirm(_) => PhysicalPosition::new(rect.left, rect.top),
                 // Le bouton œil, juste après le bouton Boutique du jeu — voir
                 // `main.rs::App::anchor_position`.
-                OverlayKind::ClickThrough => PhysicalPosition::new(
-                    rect.left + click_through::DEFAULT_OFFSET.0,
-                    rect.client_top + click_through::DEFAULT_OFFSET.1,
-                ),
+                OverlayKind::ClickThrough => {
+                    let (client, _) = RecapAnchor::default().geometry(rect, 0, 0);
+                    let (x, y) = click_through_placement::window_position(
+                        click_through_offset,
+                        client,
+                        overlay_width,
+                    );
+                    PhysicalPosition::new(x, y)
+                }
                 // Rattachée à une fenêtre de jeu, la fenêtre Options la couvre entière et voile
                 // tout sauf la modale, centrée par le rendu (2026-09-17) — voir
                 // `main.rs::App::anchor_position`. Détachée, ce bras n'est pas lu.
@@ -1311,6 +1330,8 @@ mod linux_main {
             combat_offset: Option<i32>,
             // Où poser la bande Récap (`App::recap_position`) — sans objet pour les autres zones.
             recap_offset: Option<(i32, i32)>,
+            // Où poser le bouton œil (`App::click_through_position`).
+            click_through_offset: Option<(i32, i32)>,
         ) -> OverlayWindow {
             let size = match kind {
                 OverlayKind::Combat => WINDOW_SIZE,
@@ -1409,6 +1430,7 @@ mod linux_main {
                 outer.height as i32,
                 CombatAnchor::new(combat_on_right, combat_offset, window.scale_factor()),
                 RecapAnchor::new(recap_offset, window.scale_factor()),
+                click_through_offset,
             );
             window.set_outer_position(position);
 
@@ -1452,6 +1474,7 @@ mod linux_main {
             combat_on_right: bool,
             combat_offset: Option<i32>,
             recap_offset: Option<(i32, i32)>,
+            click_through_offset: Option<(i32, i32)>,
         ) {
             overlay.game_rect = rect;
             let outer = overlay.window.outer_size();
@@ -1463,6 +1486,7 @@ mod linux_main {
                 outer.height as i32,
                 CombatAnchor::new(combat_on_right, combat_offset, scale),
                 RecapAnchor::new(recap_offset, scale),
+                click_through_offset,
             );
             if overlay.last_position != Some(desired) {
                 overlay.window.set_outer_position(desired);
@@ -1720,7 +1744,8 @@ mod linux_main {
                 // `Combat` peut naître masqué (voir `sync_panel_visibility`).
                 true,
                 self.combat_on_right,
-                // Sans objet : cette fenêtre-ci n'est ni le panneau Combat ni la bande Récap.
+                // Sans objet : ni le panneau Combat, ni la bande Récap, ni le bouton œil.
+                None,
                 None,
                 None,
             );
@@ -2094,7 +2119,8 @@ mod linux_main {
                 true,
                 self.combat_on_right,
                 // La confirmation couvre la fenêtre de jeu entière — elle ne suit ni le panneau
-                // Combat ni la bande Récap.
+                // Combat, ni la bande Récap, ni le bouton œil.
+                None,
                 None,
                 None,
             );
@@ -2370,6 +2396,7 @@ mod linux_main {
         /// Recolle toutes les fenêtres d'une zone, fenêtres de jeu inchangées.
         fn reposition_kind(&mut self, kind: OverlayKind) {
             let recap_position = self.recap_position;
+            let click_through_position = self.click_through_position;
             let combat_on_right = self.combat_on_right;
             let combat_position_y = self.combat_position_y;
             for overlay in self.windows.values_mut() {
@@ -2381,6 +2408,7 @@ mod linux_main {
                         combat_on_right,
                         combat_position_y,
                         recap_position,
+                        click_through_position,
                     );
                 }
             }
@@ -2406,6 +2434,7 @@ mod linux_main {
             saved.set_completion(self.completion);
             saved.set_recap_resume(self.recap_session.resume_settings());
             saved.set_recap_position(self.recap_position);
+            saved.set_click_through_position(self.click_through_position);
             saved.recap_locked = self.recap_locked;
             saved.combat_position_y = self.combat_position_y;
             saved.combat_locked = self.combat_locked;
@@ -2893,6 +2922,8 @@ mod linux_main {
             let mut persist_recap_position = false;
             // Même mécanique pour la hauteur du panneau Combat (2026-09-17).
             let mut persist_combat_position = false;
+            // Et pour le bouton œil (2026-09-28).
+            let mut persist_click_through_position = false;
 
             let Some(overlay) = self.windows.get_mut(&id) else {
                 return;
@@ -3240,6 +3271,73 @@ mod linux_main {
                             }
                         }
                     }
+                    // **Le bouton œil saisi à la souris** (2026-09-28) — voir
+                    // `main.rs::App::redraw`, même calcul au pixel près que la bande Récap.
+                    if overlay.kind == OverlayKind::ClickThrough {
+                        let scale = overlay.window.scale_factor();
+                        let side = overlay.window.outer_size().width as i32;
+                        let (client, _) = RecapAnchor::default().geometry(overlay.game_rect, 0, 0);
+                        let physical = |pos: egui::Pos2| {
+                            (
+                                (pos.x as f64 * scale).round() as i32,
+                                (pos.y as f64 * scale).round() as i32,
+                            )
+                        };
+                        let mut place = |position: Option<(i32, i32)>| {
+                            let (x, y) =
+                                click_through_placement::window_position(position, client, side);
+                            let posed = PhysicalPosition::new(x, y);
+                            if overlay.last_position != Some(posed) {
+                                overlay.window.set_outer_position(posed);
+                                overlay.last_position = Some(posed);
+                            }
+                        };
+                        match outcome.click_through_drag {
+                            panels::drag::PanelDrag::None => {}
+                            panels::drag::PanelDrag::Started(pos) => {
+                                self.click_through_drag = Some(RecapDragState {
+                                    window: id,
+                                    grab: physical(pos),
+                                });
+                            }
+                            panels::drag::PanelDrag::Moved => {
+                                if let Some(drag) =
+                                    self.click_through_drag.filter(|drag| drag.window == id)
+                                {
+                                    if let Some(cursor) = self.game_window.cursor_position() {
+                                        let offset = click_through_placement::drag_offset(
+                                            cursor, drag.grab, client, side,
+                                        );
+                                        if self.click_through_position != Some(offset) {
+                                            self.click_through_position = Some(offset);
+                                            place(Some(offset));
+                                        }
+                                    }
+                                }
+                            }
+                            panels::drag::PanelDrag::Released => {
+                                if self
+                                    .click_through_drag
+                                    .is_some_and(|drag| drag.window == id)
+                                {
+                                    self.click_through_drag = None;
+                                    self.click_through_position = self
+                                        .click_through_position
+                                        .and_then(click_through_placement::snap);
+                                    place(self.click_through_position);
+                                    persist_click_through_position = true;
+                                    match self.click_through_position {
+                                        Some((x, y)) => tracing::info!(
+                                            "[bascule] bouton œil posé en {x} / {y}."
+                                        ),
+                                        None => tracing::info!(
+                                            "[bascule] bouton œil revenu à son emplacement d'origine."
+                                        ),
+                                    }
+                                }
+                            }
+                        }
+                    }
                     // **Le panneau Combat saisi par sa poignée latérale** (2026-09-17) — voir
                     // `main.rs::App::redraw`, même calcul au pixel près, en une seule dimension :
                     // seule la hauteur bouge.
@@ -3534,7 +3632,7 @@ mod linux_main {
             }
 
             // Après la dernière ligne qui touche `overlay` — voir `main.rs`.
-            if persist_recap_position || persist_combat_position {
+            if persist_recap_position || persist_combat_position || persist_click_through_position {
                 self.persist_config();
             }
 
@@ -4088,6 +4186,7 @@ mod linux_main {
                 std::time::SystemTime::now(),
             ),
             recap_position: saved_config.recap_position(),
+            click_through_position: saved_config.click_through_position(),
             recap_locked: saved_config.recap_locked,
             shortcuts: saved_config.shortcuts(),
             snapshot,

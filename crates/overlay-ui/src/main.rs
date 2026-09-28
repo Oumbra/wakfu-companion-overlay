@@ -76,6 +76,7 @@ use overlay_ui::background::{
 };
 use overlay_ui::build_info;
 use overlay_ui::chat_command::{self, ChatCommand};
+use overlay_ui::click_through_placement;
 use overlay_ui::combat_placement;
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
@@ -786,6 +787,13 @@ struct App {
     /// Le glissement de la bande Récap **en cours**, s'il y en a un — voir `RecapDragState` et
     /// `panels::recap::RecapDrag`. `None` le reste du temps, c'est-à-dire presque toujours.
     recap_drag: Option<RecapDragState>,
+    /// **Où l'utilisateur a posé le bouton œil** (2026-09-28) — relative à la fenêtre de jeu, une
+    /// seule pour tous les clients comme `recap_position`. `None` : jamais déplacé, il suit son
+    /// ancrage d'origine (`click_through_placement::DEFAULT_OFFSET`).
+    click_through_position: Option<(i32, i32)>,
+    /// Le glissement du bouton œil en cours, s'il y en a un — même état que pour la bande Récap
+    /// (la fenêtre saisie et le point de saisie).
+    click_through_drag: Option<RecapDragState>,
     /// N'affiche la bannière de démarrage qu'une fois — `resumed()` peut être rappelé par winit
     /// (perte/reprise de focus applicatif), `sync_windows` doit rester idempotent mais pas cette
     /// bannière.
@@ -928,6 +936,8 @@ struct AppState {
     /// Voir `App::recap_position` — relue du disque au démarrage (`config::OverlayConfig::
     /// recap_position`), et réécrite à chaque bande reposée.
     recap_position: Option<(i32, i32)>,
+    /// Voir `App::click_through_position` — relue de la config au démarrage.
+    click_through_position: Option<(i32, i32)>,
     /// Voir `App::recap_locked` — relu de la config au démarrage
     /// (`config::OverlayConfig::recap_locked`).
     recap_locked: bool,
@@ -975,6 +985,7 @@ impl App {
             completions_rx,
             recap_session,
             recap_position,
+            click_through_position,
             recap_locked,
             catalog,
             catalog_stale,
@@ -1047,6 +1058,8 @@ impl App {
             account_was_connected: false,
             recap_session,
             recap_position,
+            click_through_position,
+            click_through_drag: None,
             recap_locked,
             recap_drag: None,
             banner_printed: false,
@@ -1589,6 +1602,7 @@ impl App {
                         self.combat_on_right,
                         self.combat_position_y,
                         self.recap_position,
+                        self.click_through_position,
                     );
                     if existing.active_character != *character_name {
                         existing.active_character = character_name.clone();
@@ -1618,6 +1632,7 @@ impl App {
                     self.combat_on_right,
                     self.combat_position_y,
                     self.recap_position,
+                    self.click_through_position,
                 );
                 tracing::info!(
                     "[fenêtre de jeu] {character_name} trouvée — overlay {kind:?} créé."
@@ -1864,6 +1879,9 @@ impl App {
         overlay_height: i32,
         combat: CombatAnchor,
         recap: RecapAnchor,
+        // Où l'utilisateur a posé le bouton œil (`App::click_through_position`) — sans objet
+        // pour les autres zones.
+        click_through_offset: Option<(i32, i32)>,
     ) -> PhysicalPosition<i32> {
         match kind {
             // Combat : collé à un bord vertical (`CombatAnchor::on_right`), centré verticalement
@@ -1898,12 +1916,19 @@ impl App {
             // La confirmation de remise à zéro couvre la fenêtre de jeu ENTIÈRE, barre de titre
             // comprise : son voile part du coin de la fenêtre, pas de la zone cliente.
             OverlayKind::ResetConfirm(_) => PhysicalPosition::new(rect.left, rect.top),
-            // Le bouton œil : juste après le bouton Boutique du jeu, à la hauteur de sa rangée
-            // (voir `panels::click_through::DEFAULT_OFFSET`, pixels physiques comme le Récap).
-            OverlayKind::ClickThrough => PhysicalPosition::new(
-                rect.left + click_through::DEFAULT_OFFSET.0,
-                rect.client_top + click_through::DEFAULT_OFFSET.1,
-            ),
+            // Le bouton œil : juste après le bouton Boutique du jeu tant que l'utilisateur ne l'a
+            // pas déplacé, là où il l'a posé ensuite (2026-09-28) — tout le calcul, bornage
+            // compris, est dans `overlay_ui::click_through_placement`, partagé avec le binaire X11.
+            // Sa fenêtre EST le bouton : son côté physique est la largeur de la fenêtre.
+            OverlayKind::ClickThrough => {
+                let (client, _) = RecapAnchor::default().geometry(rect, 0, 0);
+                let (x, y) = click_through_placement::window_position(
+                    click_through_offset,
+                    client,
+                    overlay_width,
+                );
+                PhysicalPosition::new(x, y)
+            }
             // **Rattachée à une fenêtre de jeu, la fenêtre Options EST la fenêtre de jeu**
             // (2026-09-17) : elle la couvre entière, barre de titre comprise, comme la
             // confirmation ci-dessus — son voile part du coin, et c'est le rendu qui centre la
@@ -1942,6 +1967,8 @@ impl App {
         // Où poser la bande Récap (`App::recap_position`) — sans objet pour les autres zones,
         // qui n'en lisent rien.
         recap_offset: Option<(i32, i32)>,
+        // Où poser le bouton œil (`App::click_through_position`) — sans objet pour les autres.
+        click_through_offset: Option<(i32, i32)>,
     ) -> OverlayWindow {
         let size = match kind {
             OverlayKind::Combat => WINDOW_SIZE,
@@ -2070,6 +2097,7 @@ impl App {
             outer.height as i32,
             CombatAnchor::new(combat_on_right, combat_offset, window.scale_factor()),
             RecapAnchor::new(recap_offset, window.scale_factor()),
+            click_through_offset,
         );
         window.set_outer_position(position);
         if kind == OverlayKind::Watchlist {
@@ -2134,6 +2162,7 @@ impl App {
         combat_on_right: bool,
         combat_offset: Option<i32>,
         recap_offset: Option<(i32, i32)>,
+        click_through_offset: Option<(i32, i32)>,
     ) {
         overlay.game_rect = rect;
         let outer = overlay.window.outer_size();
@@ -2145,6 +2174,7 @@ impl App {
             outer.height as i32,
             CombatAnchor::new(combat_on_right, combat_offset, scale),
             RecapAnchor::new(recap_offset, scale),
+            click_through_offset,
         );
         if overlay.last_position != Some(desired) {
             overlay.window.set_outer_position(desired);
@@ -3054,7 +3084,9 @@ impl App {
             // peut naître masqué (voir `sync_panel_visibility`).
             true,
             self.combat_on_right,
-            // Sans objet : cette fenêtre-ci n'est ni le panneau Combat ni la bande Récap.
+            // Sans objet : cette fenêtre-ci n'est ni le panneau Combat, ni la bande Récap, ni le
+            // bouton œil.
+            None,
             None,
             None,
         );
@@ -3627,7 +3659,8 @@ impl App {
             true,
             self.combat_on_right,
             // La confirmation couvre la fenêtre de jeu entière — elle ne suit ni le panneau
-            // Combat ni la bande Récap.
+            // Combat, ni la bande Récap, ni le bouton œil.
+            None,
             None,
             None,
         );
@@ -3809,6 +3842,7 @@ impl App {
     /// appelants ci-dessus.
     fn reposition_kind(&mut self, kind: OverlayKind) {
         let recap_position = self.recap_position;
+        let click_through_position = self.click_through_position;
         let combat_on_right = self.combat_on_right;
         let combat_position_y = self.combat_position_y;
         for overlay in self.windows.values_mut() {
@@ -3820,6 +3854,7 @@ impl App {
                     combat_on_right,
                     combat_position_y,
                     recap_position,
+                    click_through_position,
                 );
             }
         }
@@ -3854,6 +3889,7 @@ impl App {
         saved.set_completion(self.completion);
         saved.set_recap_resume(self.recap_session.resume_settings());
         saved.set_recap_position(self.recap_position);
+        saved.set_click_through_position(self.click_through_position);
         saved.recap_locked = self.recap_locked;
         saved.combat_position_y = self.combat_position_y;
         saved.combat_locked = self.combat_locked;
@@ -4344,6 +4380,8 @@ impl App {
         // Même mécanique pour la hauteur du panneau Combat (2026-09-17) : écrite une fois, au
         // relâchement.
         let mut persist_combat_position = false;
+        // Et pour le bouton œil (2026-09-28).
+        let mut persist_click_through_position = false;
         let Some(overlay) = self.windows.get_mut(&id) else {
             return;
         };
@@ -4663,6 +4701,72 @@ impl App {
                 }
             }
         }
+        // **Le bouton œil saisi à la souris** (2026-09-28, « permets à l'utilisateur de placer ce
+        // bouton où il le souhaite ») : la même mécanique que la bande Récap ci-dessus — point de
+        // saisie figé au premier appui, curseur d'ÉCRAN ensuite, aimantation et écriture au
+        // relâchement. Voir `click_through_placement`.
+        if overlay.kind == OverlayKind::ClickThrough {
+            let scale = overlay.window.scale_factor();
+            let side = overlay.window.outer_size().width as i32;
+            let (client, _) = RecapAnchor::default().geometry(overlay.game_rect, 0, 0);
+            let physical = |pos: egui::Pos2| {
+                (
+                    (pos.x as f64 * scale).round() as i32,
+                    (pos.y as f64 * scale).round() as i32,
+                )
+            };
+            let mut place = |position: Option<(i32, i32)>| {
+                let (x, y) = click_through_placement::window_position(position, client, side);
+                let posed = PhysicalPosition::new(x, y);
+                if overlay.last_position != Some(posed) {
+                    overlay.window.set_outer_position(posed);
+                    overlay.last_position = Some(posed);
+                }
+            };
+            match outcome.click_through_drag {
+                panels::drag::PanelDrag::None => {}
+                panels::drag::PanelDrag::Started(pos) => {
+                    self.click_through_drag = Some(RecapDragState {
+                        window: id,
+                        grab: physical(pos),
+                    });
+                }
+                panels::drag::PanelDrag::Moved => {
+                    if let Some(drag) = self.click_through_drag.filter(|drag| drag.window == id) {
+                        if let Some(cursor) = game_window::cursor_position() {
+                            let offset = click_through_placement::drag_offset(
+                                cursor, drag.grab, client, side,
+                            );
+                            if self.click_through_position != Some(offset) {
+                                self.click_through_position = Some(offset);
+                                place(Some(offset));
+                            }
+                        }
+                    }
+                }
+                panels::drag::PanelDrag::Released => {
+                    if self
+                        .click_through_drag
+                        .is_some_and(|drag| drag.window == id)
+                    {
+                        self.click_through_drag = None;
+                        self.click_through_position = self
+                            .click_through_position
+                            .and_then(click_through_placement::snap);
+                        place(self.click_through_position);
+                        persist_click_through_position = true;
+                        match self.click_through_position {
+                            Some((x, y)) => {
+                                tracing::info!("[bascule] bouton œil posé en {x} / {y}.")
+                            }
+                            None => tracing::info!(
+                                "[bascule] bouton œil revenu à son emplacement d'origine."
+                            ),
+                        }
+                    }
+                }
+            }
+        }
         // **Le panneau Combat saisi par sa poignée latérale** (2026-09-17) : la même mécanique que
         // la bande ci-dessus, en une seule dimension — le côté ne se déplace pas à la souris (voir
         // `combat_placement`), seule la hauteur bouge. Le curseur vient de l'OS et non d'egui,
@@ -4953,7 +5057,7 @@ impl App {
 
         // Après la dernière ligne qui touche `overlay` : `persist_config` a besoin de tout
         // `self`, fenêtres comprises.
-        if persist_recap_position || persist_combat_position {
+        if persist_recap_position || persist_combat_position || persist_click_through_position {
             self.persist_config();
         }
 
@@ -5739,6 +5843,7 @@ fn main() {
             std::time::SystemTime::now(),
         ),
         recap_position: saved_config.recap_position(),
+        click_through_position: saved_config.click_through_position(),
         recap_locked: saved_config.recap_locked,
         catalog,
         catalog_stale,

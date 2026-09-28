@@ -526,6 +526,10 @@ pub struct RenderOutcome {
     /// mode interactif / clic-traversant de tout l'overlay, comme `ShortcutAction::Toggle`. Voir
     /// `panels::click_through`.
     pub toggle_interactive: bool,
+    /// Le bouton œil est saisi à la souris (`kind == ClickThrough`, 2026-09-28) : l'hôte pose sa
+    /// fenêtre sous le curseur et persiste la position au relâchement — voir
+    /// `click_through_placement`.
+    pub click_through_drag: panels::drag::PanelDrag,
     /// Le glyphe de replacement du panneau Combat vient d'être cliqué (`kind == Combat`) : l'hôte
     /// ouvre la confirmation `OverlayKind::ResetConfirm(ResetTarget::CombatPosition)`.
     pub combat_restore_requested: bool,
@@ -968,7 +972,9 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // Le bouton œil (2026-09-28) — voir `panels::click_through`. `interactive` est
                 // ici le mode GLOBAL, que l'hôte transmet tel quel pour cette fenêtre.
                 OverlayKind::ClickThrough => {
-                    outcome.toggle_interactive = panels::click_through::show(ui, interactive);
+                    let bouton = panels::click_through::show(ui, interactive);
+                    outcome.toggle_interactive = bouton.toggle;
+                    outcome.click_through_drag = bouton.drag;
                 }
                 // La confirmation de remise à zéro (2026-09-17) — voir `OverlayKind::ResetConfirm`.
                 // `over(max_rect)` : le voile couvre la fenêtre entière, qui est celle du jeu.

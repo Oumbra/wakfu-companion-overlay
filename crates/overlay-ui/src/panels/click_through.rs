@@ -27,6 +27,7 @@
 //! fenêtre fait donc exactement la taille du bouton.
 
 use crate::design::{self, DsIcon, IconContext};
+use crate::panels::drag::PanelDrag;
 
 /// Côté du bouton, en points logiques — la **hauteur des boutons Menu/Boutique du jeu** : relevée
 /// sur la capture annotée de `recap_placement::DEFAULT_OFFSET`, ils occupent y = 32 à 71 dans la
@@ -34,45 +35,63 @@ use crate::design::{self, DsIcon, IconContext};
 /// compris (voir `design::icon_button`).
 pub const BUTTON_SIZE: f32 = 40.0;
 
-/// Décalage du bouton, en pixels physiques depuis le coin haut-gauche de la zone cliente du jeu
-/// (`GameRect::left`, `GameRect::client_top`).
-///
-/// - En ordonnée, 32 : le haut des boutons du jeu (24 px de fausse barre de titre, 8 px de vide,
-///   même relevé que `recap_placement::DEFAULT_OFFSET`).
-/// - En abscisse, 212 : le bouton Boutique finit à x = 210 (le bloc Récap, 206 px posés à x = 4,
-///   « finit au bord droit du bouton Boutique »), plus [`GAME_BUTTON_GAP`].
-pub const DEFAULT_OFFSET: (i32, i32) = (210 + GAME_BUTTON_GAP, 32);
-
-/// **Écart entre deux boutons de premier plan du jeu** (demande utilisateur 2026-09-28 : « le
-/// même espacement entre ce nouveau bouton et ceux du jeu »).
-///
-/// Mesuré sur `assets/design-system/menu-button-icon-first-plan.png`, capture à l'échelle 1 de la
-/// colonne de boutons de premier plan du jeu : le socle `button-icon-first-plan.png` (36 px) s'y
-/// recale tous les 38 px, huit fois de suite (y = 5, 43, 81 … 271), soit 2 px de vide entre deux
-/// socles. La rangée Menu … Boutique n'a pas de capture à elle ; elle est de la même famille.
-pub const GAME_BUTTON_GAP: i32 = 2;
-
 /// Nom du bouton dans le journal (`design::icon_button::log_name`).
 const LOG_NAME: &str = "clic-traversant.bascule";
 
-/// Peint le bouton dans toute la fenêtre et renvoie `true` à la frame où il est cliqué — c'est
-/// l'hôte qui bascule le mode (`App::toggle_interactive`), jamais le panneau.
+/// Ce que le bouton remonte à son hôte pour la frame en cours.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ClickThroughOutcome {
+    /// Le bouton vient d'être cliqué : l'hôte bascule le mode (`App::toggle_interactive`).
+    pub toggle: bool,
+    /// Le geste de déplacement, s'il y en a un — l'hôte pose la fenêtre, jamais le panneau (voir
+    /// `panels::drag`, `click_through_placement`).
+    pub drag: PanelDrag,
+}
+
+/// Peint le bouton dans toute la fenêtre et remonte le clic ou le glissement de la frame.
 ///
 /// `interactive` est le mode **global** de l'overlay, pas celui de cette fenêtre, qui l'est
 /// toujours : il choisit seulement le glyphe.
-pub fn show(ui: &mut egui::Ui, interactive: bool) -> bool {
+///
+/// **Cliquer ou déplacer, un seul geste de départ** (2026-09-28, « permets à l'utilisateur de
+/// placer ce bouton où il le souhaite ») : le bouton est à la fois cliquable et saisissable
+/// (`Sense::click_and_drag`). egui tranche au relâchement : un appui relâché sans bouger est un
+/// clic, un appui suivi d'un mouvement au-delà de son seuil devient un glissement, et ne bascule
+/// rien. Pas de poignée ni de cadenas comme la bande Récap : le bouton n'a pas la place d'en
+/// porter, et un clic qui bouge d'un pixel reste un clic. Le curseur « main fermée » pendant le
+/// geste dit qu'on déplace ; au repos, le bouton garde l'apparence d'un bouton.
+pub fn show(ui: &mut egui::Ui, interactive: bool) -> ClickThroughOutcome {
     let glyph = if interactive {
         DsIcon::Eye
     } else {
         DsIcon::EyeOff
     };
     let rect = egui::Rect::from_min_size(ui.max_rect().min, egui::Vec2::splat(BUTTON_SIZE));
-    ui.put(
-        rect,
-        design::icon_button(glyph)
-            .context(IconContext::FirstPlan)
-            .size(BUTTON_SIZE)
-            .log_name(LOG_NAME),
-    )
-    .clicked()
+    let response = ui
+        .put(
+            rect,
+            design::icon_button(glyph)
+                .context(IconContext::FirstPlan)
+                .size(BUTTON_SIZE)
+                .log_name(LOG_NAME),
+        )
+        .interact(egui::Sense::click_and_drag());
+    let drag = if response.drag_started() {
+        response
+            .interact_pointer_pos()
+            .map_or(PanelDrag::None, PanelDrag::Started)
+    } else if response.drag_stopped() {
+        PanelDrag::Released
+    } else if response.dragged() {
+        PanelDrag::Moved
+    } else {
+        PanelDrag::None
+    };
+    if response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
+    ClickThroughOutcome {
+        toggle: response.clicked(),
+        drag,
+    }
 }

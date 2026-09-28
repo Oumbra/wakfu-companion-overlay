@@ -14,7 +14,7 @@
 //! **Driver logiciel requis** : même prérequis que `tests/panels.rs` — `mesa-vulkan-drivers` sous
 //! Linux.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use egui_kittest::Harness;
@@ -22,6 +22,7 @@ use overlay_engine::CatalogIndex;
 use overlay_ui::panels::click_through::BUTTON_SIZE;
 use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
+use overlay_ui::panels::drag::PanelDrag;
 use overlay_ui::portraits::PortraitAtlas;
 use overlay_ui::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use overlay_ui::render_content::{
@@ -56,6 +57,15 @@ impl Textures {
 /// Le bouton dans sa fenêtre, le mode global valant `interactive` ; `clics` compte les frames où
 /// il a remonté `RenderOutcome::toggle_interactive`.
 fn harness_for(interactive: bool, clics: Rc<Cell<u32>>) -> Harness<'static> {
+    harness_with_gestes(interactive, clics, Rc::default())
+}
+
+/// Idem, en relevant aussi chaque geste de déplacement remonté (hors `PanelDrag::None`).
+fn harness_with_gestes(
+    interactive: bool,
+    clics: Rc<Cell<u32>>,
+    gestes: Rc<RefCell<Vec<PanelDrag>>>,
+) -> Harness<'static> {
     let mut textures = Textures {
         portraits: None,
         combat_frame: None,
@@ -117,6 +127,9 @@ fn harness_for(interactive: bool, clics: Rc<Cell<u32>>) -> Harness<'static> {
             if outcome.toggle_interactive {
                 clics.set(clics.get() + 1);
             }
+            if outcome.click_through_drag != PanelDrag::None {
+                gestes.borrow_mut().push(outcome.click_through_drag);
+            }
         })
 }
 
@@ -170,4 +183,44 @@ fn un_clic_remonte_une_bascule() {
     }
     harness.run();
     assert_eq!(clics.get(), 1, "un clic, une bascule");
+}
+
+/// Appuyer puis bouger au-delà du seuil de glissement **déplace** le bouton sans basculer le mode
+/// (2026-09-28, « permets à l'utilisateur de placer ce bouton où il le souhaite ») : le panneau
+/// remonte le point de saisie, le suivi, puis le relâchement — l'hôte pose la fenêtre.
+#[test]
+fn glisser_deplace_sans_basculer() {
+    let clics = Rc::new(Cell::new(0));
+    let gestes = Rc::new(RefCell::new(Vec::new()));
+    let mut harness = harness_with_gestes(true, Rc::clone(&clics), Rc::clone(&gestes));
+    harness.run();
+    harness.hover_at(centre());
+    let bouton = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    harness.event(bouton(centre(), true));
+    harness.run();
+    for pas in 1..=4 {
+        harness.event(egui::Event::PointerMoved(
+            centre() + egui::vec2(6.0 * pas as f32, 0.0),
+        ));
+        harness.run();
+    }
+    harness.event(bouton(centre() + egui::vec2(24.0, 0.0), false));
+    harness.run();
+
+    assert_eq!(clics.get(), 0, "un glissement ne bascule pas le mode");
+    let gestes = gestes.borrow();
+    assert!(
+        matches!(gestes.first(), Some(PanelDrag::Started(_))),
+        "le geste commence par le point de saisie : {gestes:?}"
+    );
+    assert!(
+        gestes.contains(&PanelDrag::Moved),
+        "le suivi remonte : {gestes:?}"
+    );
+    assert_eq!(gestes.last(), Some(&PanelDrag::Released), "{gestes:?}");
 }
