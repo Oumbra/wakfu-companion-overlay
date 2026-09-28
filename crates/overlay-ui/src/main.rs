@@ -781,6 +781,8 @@ struct App {
     /// Le panneau Combat est-il verrouillé en hauteur ? — le cadenas de sa rangée d'actions
     /// (`config::OverlayConfig::combat_locked`, déverrouillé par défaut).
     combat_locked: bool,
+    /// Le panneau Combat est-il réduit ? — sa flèche de repli (`config::OverlayConfig::combat_collapsed`).
+    combat_collapsed: bool,
     /// Le glissement du panneau Combat **en cours**, s'il y en a un — voir [`CombatDragState`].
     combat_drag: Option<CombatDragState>,
     /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
@@ -981,6 +983,8 @@ struct AppState {
     combat_position_y: Option<i32>,
     /// Voir `App::combat_locked` — relu de la config au démarrage.
     combat_locked: bool,
+    /// Le panneau Combat est-il réduit ? — sa flèche de repli (`config::OverlayConfig::combat_collapsed`).
+    combat_collapsed: bool,
     /// Voir `App::turn_notification` — même provenance que `combat_always_visible`.
     turn_notification: bool,
     /// Voir `App::turn_notification_muted`.
@@ -1048,6 +1052,7 @@ impl App {
             combat_on_right,
             combat_position_y,
             combat_locked,
+            combat_collapsed,
             turn_notification,
             turn_notification_muted,
             features,
@@ -1129,6 +1134,7 @@ impl App {
             combat_on_right,
             combat_position_y,
             combat_locked,
+            combat_collapsed,
             combat_drag: None,
             turn_notification,
             turn_notification_muted,
@@ -3832,6 +3838,21 @@ impl App {
         );
     }
 
+    /// **La flèche de repli du panneau Combat** (2026-09-28) : même politique que le cadenas — un
+    /// seul bouton, deux états, écrit tout de suite dans la config.
+    fn toggle_combat_collapsed(&mut self) {
+        self.combat_collapsed = !self.combat_collapsed;
+        self.persist_config();
+        tracing::info!(
+            "[combat] panneau {}.",
+            if self.combat_collapsed {
+                "réduit"
+            } else {
+                "déplié"
+            }
+        );
+    }
+
     /// **Le cadenas du panneau Combat** (2026-09-17) : même geste que celui de la bande Récap, et
     /// même politique — un seul bouton, deux états, pas de confirmation, écrit tout de suite.
     fn toggle_combat_lock(&mut self) {
@@ -4029,6 +4050,7 @@ impl App {
         saved.recap_locked = self.recap_locked;
         saved.combat_position_y = self.combat_position_y;
         saved.combat_locked = self.combat_locked;
+        saved.combat_collapsed = self.combat_collapsed;
         saved.set_features(self.features);
         saved.set_alert_mutes(self.alert_mutes);
         config::save(&saved);
@@ -4431,6 +4453,8 @@ enum PostRedraw {
     ToggleRecapLock,
     /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
     ToggleCombatLock,
+    /// La flèche de repli du panneau Combat vient d\'être cliquée (voir `toggle_combat_collapsed`).
+    ToggleCombatCollapsed,
     /// Le bouton œil vient d'être cliqué (voir `toggle_interactive`, `panels::click_through`).
     ToggleInteractive,
     /// Carte d'alerte de chat cliquée : préparer la réponse en privé à cet auteur (voir
@@ -4752,6 +4776,7 @@ impl App {
         let combat_chrome = panels::combat::CombatChrome {
             locked: self.combat_locked,
             moved: self.combat_position_y.is_some(),
+            collapsed: self.combat_collapsed,
         };
         let (repaint_delay, outcome) = render(
             &mut overlay.gpu,
@@ -5307,6 +5332,9 @@ impl App {
         if outcome.combat_toggle_lock {
             post_redraw = PostRedraw::ToggleCombatLock;
         }
+        if outcome.combat_toggle_collapsed {
+            post_redraw = PostRedraw::ToggleCombatCollapsed;
+        }
         // Le bouton œil (2026-09-28) : la même bascule que le raccourci, après le rendu parce
         // qu'elle touche toutes les fenêtres.
         if outcome.toggle_interactive {
@@ -5385,6 +5413,7 @@ impl App {
             }
             PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
             PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),
+            PostRedraw::ToggleCombatCollapsed => self.toggle_combat_collapsed(),
             PostRedraw::ToggleInteractive => self.toggle_interactive(),
             PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
             // La déconnexion referme la fenêtre : l'overlay revient à son écran de connexion, et
@@ -6126,6 +6155,7 @@ fn main() {
         combat_on_right: saved_config.combat_on_right,
         combat_position_y: saved_config.combat_position_y,
         combat_locked: saved_config.combat_locked,
+        combat_collapsed: saved_config.combat_collapsed,
         turn_notification: saved_config.turn_notification,
         turn_notification_muted: saved_config.turn_notification_muted,
         features: saved_config.features(),

@@ -545,6 +545,9 @@ pub struct RenderOutcome {
     /// inverse le verrou et l'écrit dans la config (`config::OverlayConfig::combat_locked`). Voir
     /// `panels::combat::CombatChrome`.
     pub combat_toggle_lock: bool,
+    /// La flèche de repli du panneau Combat vient d'être cliquée : l'hôte inverse l'état réduit et
+    /// l'écrit dans la config (`config::OverlayConfig::combat_collapsed`).
+    pub combat_toggle_collapsed: bool,
     /// Le bouton œil vient d'être cliqué (`kind == ClickThrough`, 2026-09-28) : l'hôte bascule le
     /// mode interactif / clic-traversant de tout l'overlay, comme `ShortcutAction::Toggle`. Voir
     /// `panels::click_through`.
@@ -913,6 +916,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         combat_chrome,
                     );
                     outcome.combat_toggle_lock = combat_outcome.toggle_lock;
+                    outcome.combat_toggle_collapsed = combat_outcome.toggle_collapsed;
                     outcome.combat_restore_requested = combat_outcome.restore_requested;
                     outcome.combat_drag = combat_outcome.drag;
                 }
