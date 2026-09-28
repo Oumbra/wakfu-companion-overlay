@@ -9,6 +9,7 @@ pub mod alerts_tab;
 pub mod bulk_select;
 pub mod chamfer;
 pub mod chat_tab;
+pub mod click_through;
 pub mod combat;
 pub mod combat_bars;
 pub mod combat_frame;

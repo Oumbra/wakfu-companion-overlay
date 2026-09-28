@@ -179,6 +179,13 @@ pub enum OverlayKind {
     /// auraient dédoublé, dans les deux hôtes, tout le cycle « ouvrir / centrer / voiler / fermer »
     /// pour ne changer qu'une phrase.
     ResetConfirm(ResetTarget),
+    /// **Bouton œil de la bascule interactif / clic-traversant** (2026-09-28, demande
+    /// utilisateur) — voir `panels::click_through`. Une fenêtre de la taille du bouton par
+    /// fenêtre de jeu, créée par `sync_windows` comme `Recap`, posée juste après le bouton
+    /// Boutique du jeu. **Toujours interactive et toujours opaque** : les deux hôtes l'excluent
+    /// de `toggle_interactive`, sans quoi le bouton qui ramène l'overlay en mode interactif
+    /// deviendrait lui-même traversant.
+    ClickThrough,
     /// Fenêtre de connexion (2026-09-14, §9.1 undecies du plan) — voir `panels::login`. **La
     /// première interface de l'overlay**, et la seule tant que `AuthStatus` n'est pas `Connected` :
     /// une fenêtre logicielle classique (barre des tâches, focus, centrée sur l'écran), jamais un
@@ -515,6 +522,10 @@ pub struct RenderOutcome {
     /// inverse le verrou et l'écrit dans la config (`config::OverlayConfig::combat_locked`). Voir
     /// `panels::combat::CombatChrome`.
     pub combat_toggle_lock: bool,
+    /// Le bouton œil vient d'être cliqué (`kind == ClickThrough`, 2026-09-28) : l'hôte bascule le
+    /// mode interactif / clic-traversant de tout l'overlay, comme `ShortcutAction::Toggle`. Voir
+    /// `panels::click_through`.
+    pub toggle_interactive: bool,
     /// Le glyphe de replacement du panneau Combat vient d'être cliqué (`kind == Combat`) : l'hôte
     /// ouvre la confirmation `OverlayKind::ResetConfirm(ResetTarget::CombatPosition)`.
     pub combat_restore_requested: bool,
@@ -793,13 +804,17 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         // La fenêtre de connexion peint sa carte jusqu'aux bords de sa fenêtre OS (fond
         // translucide, anneau animé sur le pourtour) — voir `panels::login`.
         OverlayKind::Login => egui::Margin::ZERO,
+        // Le bouton œil remplit sa fenêtre, taillée à sa mesure (`panels::click_through`).
+        OverlayKind::ClickThrough => egui::Margin::ZERO,
     };
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.inner_margin(inner_margin))
         .show(ui, |ui| {
             // Voir la doc de `build_ui` : seul indicateur de mode restant, en tout premier
             // avant le moindre widget pour que tout hérite de cette opacité.
-            ui.set_opacity(if interactive {
+            // Sauf le bouton œil : seul élément encore cliquable en clic-traversant, il reste
+            // opaque et dit le mode par son glyphe (voir `panels::click_through`).
+            ui.set_opacity(if interactive || kind == OverlayKind::ClickThrough {
                 1.0
             } else {
                 CLICK_THROUGH_OPACITY
@@ -949,6 +964,11 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     outcome.recap_toggle_lock = recap_outcome.toggle_lock;
                     outcome.recap_restore_requested = recap_outcome.restore_requested;
                     outcome.recap_drag = recap_outcome.drag;
+                }
+                // Le bouton œil (2026-09-28) — voir `panels::click_through`. `interactive` est
+                // ici le mode GLOBAL, que l'hôte transmet tel quel pour cette fenêtre.
+                OverlayKind::ClickThrough => {
+                    outcome.toggle_interactive = panels::click_through::show(ui, interactive);
                 }
                 // La confirmation de remise à zéro (2026-09-17) — voir `OverlayKind::ResetConfirm`.
                 // `over(max_rect)` : le voile couvre la fenêtre entière, qui est celle du jeu.

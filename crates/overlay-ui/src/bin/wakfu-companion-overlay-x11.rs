@@ -92,6 +92,7 @@ mod linux_main {
     use overlay_ui::panels;
     use overlay_ui::panels::alerts_tab;
     use overlay_ui::panels::chat_tab;
+    use overlay_ui::panels::click_through;
     use overlay_ui::panels::combat::{CombatMetric, CombatSide};
     use overlay_ui::panels::combat_frame::CombatFrame;
     use overlay_ui::panels::feature_switch::FeatureToggles;
@@ -1131,6 +1132,7 @@ mod linux_main {
                     OverlayKind::Combat,
                     OverlayKind::Watchlist,
                     OverlayKind::Recap,
+                    OverlayKind::ClickThrough,
                 ] {
                     if let Some(existing) = self
                         .windows
@@ -1276,6 +1278,12 @@ mod linux_main {
                 // La confirmation de remise à zéro couvre la fenêtre de jeu entière — voir
                 // `main.rs::App::anchor_position`.
                 OverlayKind::ResetConfirm(_) => PhysicalPosition::new(rect.left, rect.top),
+                // Le bouton œil, juste après le bouton Boutique du jeu — voir
+                // `main.rs::App::anchor_position`.
+                OverlayKind::ClickThrough => PhysicalPosition::new(
+                    rect.left + click_through::DEFAULT_OFFSET.0,
+                    rect.client_top + click_through::DEFAULT_OFFSET.1,
+                ),
                 // Rattachée à une fenêtre de jeu, la fenêtre Options la couvre entière et voile
                 // tout sauf la modale, centrée par le rendu (2026-09-17) — voir
                 // `main.rs::App::anchor_position`. Détachée, ce bras n'est pas lu.
@@ -1334,6 +1342,11 @@ mod linux_main {
                     panels::login::WINDOW_WIDTH as f64,
                     panels::login::INITIAL_HEIGHT as f64,
                 ),
+                // Exactement le bouton — voir `main.rs`, même raison.
+                OverlayKind::ClickThrough => (
+                    click_through::BUTTON_SIZE as f64,
+                    click_through::BUTTON_SIZE as f64,
+                ),
             };
             // Une fenêtre qui couvre le jeu se mesure en pixels PHYSIQUES, comme le rectangle
             // dont elle vient et la position qu'on lui pose — voir `main.rs`, même raison.
@@ -1351,6 +1364,7 @@ mod linux_main {
                 OverlayKind::ResetConfirm(_) => "Confirmation",
                 OverlayKind::Options => "Options",
                 OverlayKind::Login => "Connexion",
+                OverlayKind::ClickThrough => "Bascule",
             };
             let attrs = WindowAttributes::default()
                 .with_title(format!(
@@ -1374,6 +1388,8 @@ mod linux_main {
                 .expect("création de la fenêtre overlay");
             let window = Arc::new(window);
 
+            // Le bouton œil capte toujours les clics — voir `main.rs`, même raison.
+            let interactive = interactive || kind == OverlayKind::ClickThrough;
             if let Err(err) = window.set_cursor_hittest(interactive) {
                 tracing::warn!("set_cursor_hittest a échoué à la création : {err}");
             }
@@ -1482,8 +1498,11 @@ mod linux_main {
                 if overlay.kind == OverlayKind::Login {
                     continue;
                 }
-                if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
-                    tracing::warn!("set_cursor_hittest a échoué : {err}");
+                // Le bouton œil reste cliquable dans les deux modes — voir `main.rs`.
+                if overlay.kind != OverlayKind::ClickThrough {
+                    if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
+                        tracing::warn!("set_cursor_hittest a échoué : {err}");
+                    }
                 }
                 overlay.window.request_redraw();
             }
@@ -2827,6 +2846,8 @@ mod linux_main {
                 ToggleRecapLock,
                 /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
                 ToggleCombatLock,
+                /// Le bouton œil vient d'être cliqué (voir `toggle_interactive`).
+                ToggleInteractive,
                 /// Carte d'alerte de chat cliquée — voir `main.rs`.
                 Whisper(String),
                 BrowseOptions,
@@ -3451,6 +3472,10 @@ mod linux_main {
                     if outcome.combat_toggle_lock {
                         post_redraw = PostRedraw::ToggleCombatLock;
                     }
+                    // Le bouton œil (2026-09-28) — voir `main.rs`.
+                    if outcome.toggle_interactive {
+                        post_redraw = PostRedraw::ToggleInteractive;
+                    }
                     if let OverlayKind::ResetConfirm(target) = overlay_kind {
                         match outcome.reset_choice {
                             overlay_ui::design::ConfirmChoice::Pending => {}
@@ -3530,6 +3555,7 @@ mod linux_main {
                 }
                 PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
                 PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),
+                PostRedraw::ToggleInteractive => self.toggle_interactive(),
                 PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
                 PostRedraw::BrowseOptions => self.start_file_dialog(),
                 PostRedraw::ValidateOptions(commit) => self.validate_and_commit_options(id, commit),

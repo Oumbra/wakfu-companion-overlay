@@ -89,6 +89,7 @@ use overlay_ui::logging;
 use overlay_ui::panels;
 use overlay_ui::panels::alerts_tab;
 use overlay_ui::panels::chat_tab;
+use overlay_ui::panels::click_through;
 use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::feature_switch::FeatureToggles;
@@ -1575,6 +1576,7 @@ impl App {
                 OverlayKind::Combat,
                 OverlayKind::Watchlist,
                 OverlayKind::Recap,
+                OverlayKind::ClickThrough,
             ] {
                 if let Some(existing) = self
                     .windows
@@ -1896,6 +1898,12 @@ impl App {
             // La confirmation de remise à zéro couvre la fenêtre de jeu ENTIÈRE, barre de titre
             // comprise : son voile part du coin de la fenêtre, pas de la zone cliente.
             OverlayKind::ResetConfirm(_) => PhysicalPosition::new(rect.left, rect.top),
+            // Le bouton œil : juste après le bouton Boutique du jeu, à la hauteur de sa rangée
+            // (voir `panels::click_through::DEFAULT_OFFSET`, pixels physiques comme le Récap).
+            OverlayKind::ClickThrough => PhysicalPosition::new(
+                rect.left + click_through::DEFAULT_OFFSET.0,
+                rect.client_top + click_through::DEFAULT_OFFSET.1,
+            ),
             // **Rattachée à une fenêtre de jeu, la fenêtre Options EST la fenêtre de jeu**
             // (2026-09-17) : elle la couvre entière, barre de titre comprise, comme la
             // confirmation ci-dessus — son voile part du coin, et c'est le rendu qui centre la
@@ -1973,6 +1981,12 @@ impl App {
             OverlayKind::ResetConfirm(_) => (rect.width as f64, rect.height as f64),
             // Créée par `create_login_window`, jamais par ici — voir sa doc.
             OverlayKind::Login => (login::WINDOW_WIDTH as f64, login::INITIAL_HEIGHT as f64),
+            // Exactement le bouton : cette fenêtre capte toujours les clics, le moindre pixel de
+            // plus en volerait au jeu (voir `panels::click_through`).
+            OverlayKind::ClickThrough => (
+                click_through::BUTTON_SIZE as f64,
+                click_through::BUTTON_SIZE as f64,
+            ),
         };
         // **Une fenêtre qui couvre le jeu se mesure en pixels PHYSIQUES** : `GameRect` vient de
         // `GetWindowRect`, et la position posée plus bas (`set_outer_position`) est physique
@@ -1993,6 +2007,7 @@ impl App {
             OverlayKind::ResetConfirm(_) => "Confirmation",
             OverlayKind::Options => "Options",
             OverlayKind::Login => "Connexion",
+            OverlayKind::ClickThrough => "Bascule",
         };
         let attrs = WindowAttributes::default()
             .with_title(format!(
@@ -2033,6 +2048,9 @@ impl App {
         }
         // La modale Options force sa propre interactivité (voir `App::open_options_modal`) — voir
         // aussi le paramètre `interactive` passé explicitement `true` par cet appelant pour ce cas.
+        // Le bouton œil, lui, capte TOUJOURS les clics : c'est lui qui ramène l'overlay en mode
+        // interactif (voir `panels::click_through`).
+        let interactive = interactive || kind == OverlayKind::ClickThrough;
         if let Err(err) = window.set_cursor_hittest(interactive) {
             tracing::warn!("set_cursor_hittest a échoué à la création : {err}");
         }
@@ -2281,8 +2299,12 @@ impl App {
             if overlay.kind == OverlayKind::Login {
                 continue;
             }
-            if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
-                tracing::warn!("set_cursor_hittest a échoué : {err}");
+            // Le bouton œil reste cliquable dans les deux modes — seul son glyphe change, d'où
+            // le redessin sans `set_cursor_hittest` (voir `panels::click_through`).
+            if overlay.kind != OverlayKind::ClickThrough {
+                if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
+                    tracing::warn!("set_cursor_hittest a échoué : {err}");
+                }
             }
             overlay.next_redraw_at = Some(std::time::Instant::now());
         }
@@ -4237,6 +4259,8 @@ enum PostRedraw {
     ToggleRecapLock,
     /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
     ToggleCombatLock,
+    /// Le bouton œil vient d'être cliqué (voir `toggle_interactive`, `panels::click_through`).
+    ToggleInteractive,
     /// Carte d'alerte de chat cliquée : préparer la réponse en privé à cet auteur (voir
     /// `whisper_from_toast`) — après le rendu, comme tout ce qui touche `self` entier.
     Whisper(String),
@@ -4881,6 +4905,11 @@ impl App {
         if outcome.combat_toggle_lock {
             post_redraw = PostRedraw::ToggleCombatLock;
         }
+        // Le bouton œil (2026-09-28) : la même bascule que le raccourci, après le rendu parce
+        // qu'elle touche toutes les fenêtres.
+        if outcome.toggle_interactive {
+            post_redraw = PostRedraw::ToggleInteractive;
+        }
         if let OverlayKind::ResetConfirm(target) = overlay.kind {
             match outcome.reset_choice {
                 overlay_ui::design::ConfirmChoice::Pending => {}
@@ -4945,6 +4974,7 @@ impl App {
             }
             PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
             PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),
+            PostRedraw::ToggleInteractive => self.toggle_interactive(),
             PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
             // La déconnexion referme la fenêtre : l'overlay revient à son écran de connexion, et
             // ce qu'on y réglait (liste suivie, alertes) appartient au compte qu'on vient de
