@@ -83,7 +83,7 @@ use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
     SharedRosterDraft, WatchlistCompleted,
 };
-use overlay_ui::frame::{recreate_surface, render, GpuState};
+use overlay_ui::frame::{recreate_surface, render, sync_hit_test, GpuState};
 use overlay_ui::game_servers::GameServers;
 use overlay_ui::game_window::{self, GameRect, GameWindowTracker};
 use overlay_ui::logging;
@@ -2435,6 +2435,39 @@ impl App {
         }
     }
 
+    /// Les fenêtres dont `set_cursor_hittest` suit ce qu'elles ont peint (voir
+    /// `overlay_ui::hit_region`) : celles posées sur le jeu. Les modales, la confirmation et la
+    /// connexion captent toute leur surface — un voile ou un fond plein de toute façon.
+    fn follows_hit_region(kind: OverlayKind) -> bool {
+        matches!(
+            kind,
+            OverlayKind::Combat
+                | OverlayKind::Watchlist
+                | OverlayKind::Recap
+                | OverlayKind::ClickThrough
+        )
+    }
+
+    /// **Le clic traverse partout où une fenêtre de jeu n'a rien peint** (2026-09-28) — ses
+    /// réserves d'infobulle, les écarts entre les tuiles, les infobulles elles-mêmes. Sondé à
+    /// chaque tick sur le curseur d'écran : une fenêtre traversante ne reçoit plus d'événement
+    /// souris, c'est le seul moyen de savoir qu'il revient sur son contenu. Voir
+    /// `overlay_ui::frame::sync_hit_test`.
+    fn sync_hit_tests(&mut self) {
+        let cursor = game_window::cursor_position();
+        let now = std::time::Instant::now();
+        for overlay in self.windows.values_mut() {
+            if !Self::follows_hit_region(overlay.kind) || !overlay.visible {
+                continue;
+            }
+            // Le bouton œil capte toujours : c'est lui qui ramène l'overlay en mode interactif.
+            let allowed = self.interactive || overlay.kind == OverlayKind::ClickThrough;
+            if sync_hit_test(&mut overlay.gpu, &overlay.window, allowed, cursor) {
+                overlay.next_redraw_at = Some(now);
+            }
+        }
+    }
+
     fn toggle_interactive(&mut self) {
         self.interactive = !self.interactive;
         for overlay in self.windows.values_mut() {
@@ -2442,15 +2475,17 @@ impl App {
             if overlay.kind == OverlayKind::Login {
                 continue;
             }
-            // Le bouton œil reste cliquable dans les deux modes — seul son glyphe change, d'où
-            // le redessin sans `set_cursor_hittest` (voir `panels::click_through`).
-            if overlay.kind != OverlayKind::ClickThrough {
+            // Les fenêtres de jeu règlent leur `set_cursor_hittest` sur ce qu'elles ont peint
+            // (`sync_hit_tests`, juste après) ; le bouton œil reste cliquable dans les deux modes,
+            // seul son glyphe change (voir `panels::click_through`).
+            if !Self::follows_hit_region(overlay.kind) {
                 if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
                     tracing::warn!("set_cursor_hittest a échoué : {err}");
                 }
             }
             overlay.next_redraw_at = Some(std::time::Instant::now());
         }
+        self.sync_hit_tests();
         tracing::info!(
             ">>> Bascule ({}) : mode = {}",
             self.hotkeys.bindings().label(ShortcutAction::Toggle),
@@ -5764,6 +5799,7 @@ impl ApplicationHandler<UserEvent> for App {
         // vient peut-être de créer la fenêtre, `sync_topmost` doit voir son état final.
         self.sync_panel_visibility();
         self.sync_topmost();
+        self.sync_hit_tests();
         // Surveillance de tour (§9.1 decies) — après `sync_windows`, qui vient de mettre à jour
         // la liste des fenêtres de jeu qu'elle lit.
         self.sync_turn_watch();
@@ -5910,6 +5946,8 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         egui_winit,
         egui_renderer,
         occluded_since: None,
+        hit_region: Default::default(),
+        hit_test: None,
     }
 }
 

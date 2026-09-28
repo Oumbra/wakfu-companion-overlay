@@ -34,6 +34,12 @@ pub struct GpuState {
     /// si elle coïncide avec les bascules topmost (`main.rs::sync_topmost`) plutôt que de devoir
     /// ré-analyser une vidéo image par image à chaque fois.
     pub occluded_since: Option<std::time::Instant>,
+    /// La région cliquable de la dernière frame rendue (voir `crate::hit_region`) — lue par
+    /// l'hôte à chaque tick pour décider de `set_cursor_hittest`.
+    pub hit_region: crate::hit_region::HitRegion,
+    /// Dernier état passé à `Window::set_cursor_hittest` par [`sync_hit_test`] — `None` tant
+    /// qu'il ne l'a jamais réglé (la création l'a fait, avec sa propre valeur).
+    pub hit_test: Option<bool>,
 }
 
 /// Fenêtrage/GPU autour de `render_content::build_ui` (voir sa doc) : prend l'entrée egui de la
@@ -57,7 +63,8 @@ pub fn render(
     let watchlist_toast = content.watchlist_toast;
 
     let raw_input = gpu.egui_winit.take_egui_input(window);
-    let (mut full_output, outcome) = build_ui(&gpu.egui_ctx, raw_input, content);
+    let (mut full_output, mut outcome) = build_ui(&gpu.egui_ctx, raw_input, content);
+    gpu.hit_region = std::mem::take(&mut outcome.hit_region);
 
     // Repli `Duration::MAX` ("pas de redessin demandé") si jamais le viewport racine n'a pas
     // d'entrée — ne devrait pas arriver en pratique (une seule fenêtre racine par `egui::Context`,
@@ -276,4 +283,59 @@ pub fn recreate_surface(gpu: &mut GpuState, window: &std::sync::Arc<winit::windo
             tracing::warn!("recreate_surface : échec de recréation de la surface : {err}");
         }
     }
+}
+
+/// **Règle `set_cursor_hittest` d'une fenêtre sur ce qu'elle a peint** (voir `crate::hit_region`)
+/// — appelé par les deux hôtes à chaque tick, pour les fenêtres de jeu (Combat, Suivi, Récap,
+/// bouton œil). `allowed` est `false` en mode clic-traversant global : la fenêtre ne capte alors
+/// rien, comme avant. `cursor` est le curseur d'ÉCRAN en pixels physiques.
+///
+/// Renvoie `true` quand l'état a changé : l'hôte doit alors redessiner la fenêtre, egui venant
+/// d'apprendre que le pointeur est arrivé ou reparti. Une fenêtre traversante ne reçoit plus
+/// d'événement souris ; sans ce relais, le survol n'apparaîtrait qu'au mouvement suivant — et un
+/// clic donné sans bouger n'aurait pas de position —, et une infobulle resterait ouverte sur un
+/// pointeur que la fenêtre ne voit plus.
+pub fn sync_hit_test(
+    gpu: &mut GpuState,
+    window: &winit::window::Window,
+    allowed: bool,
+    cursor: Option<(i32, i32)>,
+) -> bool {
+    use winit::event::{DeviceId, WindowEvent};
+    let local = cursor.and_then(|(x, y)| {
+        let origin = window.inner_position().ok()?;
+        Some(winit::dpi::PhysicalPosition::new(
+            f64::from(x - origin.x),
+            f64::from(y - origin.y),
+        ))
+    });
+    let scale = window.scale_factor();
+    let wanted = allowed
+        && crate::hit_region::wants_hit_test(
+            &gpu.hit_region,
+            local.map(|pos| egui::pos2((pos.x / scale) as f32, (pos.y / scale) as f32)),
+        );
+    if gpu.hit_test == Some(wanted) {
+        return false;
+    }
+    if let Err(err) = window.set_cursor_hittest(wanted) {
+        tracing::warn!("set_cursor_hittest a échoué : {err}");
+        return false;
+    }
+    let first = gpu.hit_test.is_none();
+    gpu.hit_test = Some(wanted);
+    if first {
+        return false;
+    }
+    let device_id = DeviceId::dummy();
+    let event = match (wanted, local) {
+        (true, Some(position)) => WindowEvent::CursorMoved {
+            device_id,
+            position,
+        },
+        (true, None) => return true,
+        (false, _) => WindowEvent::CursorLeft { device_id },
+    };
+    let _ = gpu.egui_winit.on_window_event(window, &event);
+    true
 }

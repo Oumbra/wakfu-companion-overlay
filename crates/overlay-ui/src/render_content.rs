@@ -489,6 +489,9 @@ pub struct RenderContent<'a> {
 /// — voir la doc de tête du module pour pourquoi ces deux fonctions restent PURES.
 #[derive(Debug, Default)]
 pub struct RenderOutcome {
+    /// Où la fenêtre a peint ce qui doit capter les clics — tout sauf ses infobulles. L'hôte en
+    /// tire `set_cursor_hittest` au curseur d'écran (voir `crate::hit_region`).
+    pub hit_region: crate::hit_region::HitRegion,
     /// Voir la doc historique de `build_ui` : fermeture du toast de suivi (clic sur la carte ou sa
     /// croix, `panels::watchlist::toast_card`).
     pub close_toast: bool,
@@ -726,6 +729,9 @@ pub fn build_ui(
                 card_settings: content.card_settings.as_deref_mut(),
             },
         );
+        // Tout est peint, infobulles comprises : c'est le dernier moment où les couches sont
+        // encore séparées (voir `crate::hit_region::collect`).
+        outcome.hit_region = crate::hit_region::collect(ui.ctx());
     });
     (full_output, outcome)
 }

@@ -87,7 +87,7 @@ mod linux_main {
         spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
         SharedRosterDraft, WatchlistCompleted,
     };
-    use overlay_ui::frame::{render, GpuState};
+    use overlay_ui::frame::{render, sync_hit_test, GpuState};
     use overlay_ui::game_servers::GameServers;
     use overlay_ui::logging;
     use overlay_ui::panels;
@@ -133,6 +133,17 @@ mod linux_main {
     const COMPLETION_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
 
     const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+    /// Voir `main.rs::App::follows_hit_region`.
+    fn follows_hit_region(kind: OverlayKind) -> bool {
+        matches!(
+            kind,
+            OverlayKind::Combat
+                | OverlayKind::Watchlist
+                | OverlayKind::Recap
+                | OverlayKind::ClickThrough
+        )
+    }
     // Hauteur élargie de `render_content::COMBAT_TOP_MARGIN` (2026-09-06, retour utilisateur :
     // tooltips du switch Alliés/Ennemis affichées en dessous faute de place au-dessus, même
     // correctif que `main.rs::WINDOW_SIZE`) — voir sa doc.
@@ -1602,6 +1613,21 @@ mod linux_main {
             }
         }
 
+        /// Voir `main.rs::App::sync_hit_tests` : le clic traverse partout où une fenêtre de jeu
+        /// n'a rien peint, sondé à chaque tick sur le curseur d'écran.
+        fn sync_hit_tests(&mut self) {
+            let cursor = self.game_window.cursor_position();
+            for overlay in self.windows.values_mut() {
+                if !follows_hit_region(overlay.kind) || !overlay.visible {
+                    continue;
+                }
+                let allowed = self.interactive || overlay.kind == OverlayKind::ClickThrough;
+                if sync_hit_test(&mut overlay.gpu, &overlay.window, allowed, cursor) {
+                    overlay.window.request_redraw();
+                }
+            }
+        }
+
         fn toggle_interactive(&mut self) {
             self.interactive = !self.interactive;
             for overlay in self.windows.values() {
@@ -1609,14 +1635,16 @@ mod linux_main {
                 if overlay.kind == OverlayKind::Login {
                     continue;
                 }
-                // Le bouton œil reste cliquable dans les deux modes — voir `main.rs`.
-                if overlay.kind != OverlayKind::ClickThrough {
+                // Les fenêtres de jeu suivent ce qu'elles ont peint (`sync_hit_tests`, juste
+                // après) ; le bouton œil reste cliquable dans les deux modes — voir `main.rs`.
+                if !follows_hit_region(overlay.kind) {
                     if let Err(err) = overlay.window.set_cursor_hittest(self.interactive) {
                         tracing::warn!("set_cursor_hittest a échoué : {err}");
                     }
                 }
                 overlay.window.request_redraw();
             }
+            self.sync_hit_tests();
             tracing::info!(
                 ">>> Bascule ({}) : mode = {}",
                 self.hotkeys.bindings().label(ShortcutAction::Toggle),
@@ -4145,6 +4173,7 @@ mod linux_main {
             // doit voir son état final.
             self.sync_panel_visibility();
             self.sync_topmost();
+            self.sync_hit_tests();
 
             let now = std::time::Instant::now();
             let mut next_wake = now + POLL_INTERVAL;
@@ -4266,6 +4295,8 @@ mod linux_main {
             egui_winit,
             egui_renderer,
             occluded_since: None,
+            hit_region: Default::default(),
+            hit_test: None,
         }
     }
 
