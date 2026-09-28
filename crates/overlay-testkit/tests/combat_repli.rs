@@ -110,11 +110,20 @@ fn hote(collapsed: bool) -> Rc<Hote> {
 
 /// Le panneau Combat du premier combat du rejeu, dans les 800 × 600 par défaut.
 fn harness_for(hote: Rc<Hote>, on_right: bool) -> Harness<'static> {
-    let fight: FightSnapshot = replay_real_log()
+    harness_scaled(hote, on_right, 1)
+}
+
+/// Le même panneau, dégâts de chaque combattant multipliés par `scale` — pour un total à sept
+/// chiffres que le rejeu n'atteint pas.
+fn harness_scaled(hote: Rc<Hote>, on_right: bool, scale: i64) -> Harness<'static> {
+    let mut fight: FightSnapshot = replay_real_log()
         .fights
         .first()
         .cloned()
         .expect("au moins un combat dans le rejeu");
+    for fighter in &mut fight.fighters {
+        fighter.total_damage *= scale;
+    }
     let remote_icon_store = RemoteIconStore::empty();
     let mut remote_icon_textures = RemoteIconTextures::default();
     let mut textures = Textures {
@@ -249,6 +258,24 @@ fn reduit_a_droite_passe_en_miroir() {
     harness.hover_at(survol_neutre());
     harness.run();
     harness.snapshot("combat_repli_reduit_droite_survol");
+}
+
+/// **Un total à sept chiffres, panneau à droite** (retour utilisateur en jeu, 2026-09-28) : le
+/// total garde la marge du switch de camp depuis le bord de l'écran et grandit vers le jeu — il
+/// débordait auparavant hors de la fenêtre, premiers chiffres perdus. Même règle à gauche.
+#[test]
+fn grand_total_garde_la_marge_du_switch_a_droite() {
+    let mut harness = harness_scaled(hote(true), true, 30);
+    harness.run();
+    harness.snapshot("combat_repli_reduit_droite_sept_chiffres");
+}
+
+/// Le même total, panneau à gauche : même marge depuis le bord gauche de l'écran.
+#[test]
+fn grand_total_garde_la_marge_du_switch_a_gauche() {
+    let mut harness = harness_scaled(hote(true), false, 30);
+    harness.run();
+    harness.snapshot("combat_repli_reduit_sept_chiffres");
 }
 
 /// **Ce que l'hôte attend du panneau** : la flèche remonte sa bascule — déplié comme réduit, à sa

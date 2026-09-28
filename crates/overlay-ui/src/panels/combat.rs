@@ -829,19 +829,13 @@ pub fn show(
                 // module) — peint inconditionnellement, avant tout test sur le contenu du cadre, pour
                 // qu'il reste atteignable sans combat comme dans un camp vide (c'était déjà la raison
                 // qui le gardait dans le bandeau leader, elle ne change pas de colonne avec lui).
-                let side_row_width = show_side_row(ui, side, shortcuts);
+                show_side_row(ui, side, shortcuts);
                 ui.add_space(SIDE_ROW_GAP - ui.spacing().item_spacing.y);
                 // Réduit : le total de la grandeur se glisse entre le switch et le cadre, qui
                 // descend d'autant — progressivement, au rythme de `Fold::total`.
                 if fold.total > 0.0 {
-                    let cycle = show_folded_total(
-                        ui,
-                        *metric,
-                        shortcuts,
-                        total_damage_raw,
-                        side_row_width,
-                        fold.total,
-                    );
+                    let cycle =
+                        show_folded_total(ui, *metric, shortcuts, total_damage_raw, fold.total);
                     if cycle {
                         *metric = metric.next();
                     }
@@ -1085,7 +1079,7 @@ struct FoldGeometry {
 }
 
 /// **Le total du panneau réduit** : icône de la grandeur affichée puis chiffre, détourés comme le
-/// reste du texte flottant, centrés sur le bandeau du switch de camp (`width`), sans fond. Réserve
+/// reste du texte flottant, sans fond, à la marge du switch de camp depuis le bord extérieur. Réserve
 /// sa place progressivement (`reveal`, voir [`Fold`]) pour que le cadre descende en douceur. Rend
 /// `true` la frame où il est cliqué : la grandeur passe à la suivante, puisque ses onglets sont
 /// repliés.
@@ -1094,16 +1088,10 @@ fn show_folded_total(
     metric: CombatMetric,
     shortcuts: &ShortcutBindings,
     total: i64,
-    width: f32,
     reveal: f32,
 ) -> bool {
     let top = ui.cursor().min;
     ui.add_space((FOLDED_TOTAL_HEIGHT + SIDE_ROW_GAP) * reveal);
-    let rect = egui::Rect::from_min_size(
-        // Le total glisse depuis le switch pendant qu'il apparaît.
-        top - egui::vec2(0.0, 6.0 * (1.0 - reveal)),
-        egui::vec2(width, FOLDED_TOTAL_HEIGHT),
-    );
     let total_text = format_fr_thousands(total);
     let digits = total_text.chars().filter(char::is_ascii_digit).count();
     let font_size = if digits > TOTAL_FULL_SIZE_MAX_DIGITS {
@@ -1120,10 +1108,22 @@ fn show_folded_total(
         .layout_no_wrap(total_text.clone(), font.clone(), TEXT_COLOR)
         .size()
         .x;
+    // **Calé sur le bord extérieur, à la marge du switch de camp** (retour utilisateur en jeu,
+    // 2026-09-28) : centré sur le bandeau, un grand total débordait vers le bord de l'écran et y
+    // perdait ses premiers chiffres. Le bloc part donc toujours à `LEADER_PANEL_PADDING` du bord
+    // extérieur — l'écart du switch à ce même bord — et ne grandit que vers le jeu.
+    //
+    // Le rectangle épouse le CONTENU, pas le bandeau : c'est lui l'ancre du bloc à l'endroit, et
+    // posé à droite le miroir le place au reflet de cette ancre. Une ancre plus étroite que le
+    // contenu y laissait le surplus filer vers le bord de l'écran (seconde capture du retour).
     let content = icon_size.x + FOLDED_TOTAL_ICON_GAP + text_width;
-    let left = rect.center().x - content / 2.0;
+    let rect = egui::Rect::from_min_size(
+        // Le total glisse depuis le switch pendant qu'il apparaît.
+        top + egui::vec2(LEADER_PANEL_PADDING, -6.0 * (1.0 - reveal)),
+        egui::vec2(content, FOLDED_TOTAL_HEIGHT),
+    );
     let icon_rect = egui::Rect::from_min_size(
-        egui::pos2(left, rect.center().y - icon_size.y / 2.0),
+        egui::pos2(rect.min.x, rect.center().y - icon_size.y / 2.0),
         icon_size,
     );
     let response = ui.interact(
@@ -1585,8 +1585,7 @@ fn paint_action(
 /// : c'est la même exigence qu'avant le déplacement, le switch ne doit jamais devenir inatteignable.
 /// Reste aussi le TOUT PREMIER widget peint du panneau, ce dont dépend la marge supérieure réservée
 /// à son infobulle (voir `render_content::COMBAT_TOOLTIP_HEADROOM`).
-/// Rend la largeur du bandeau peint — celle sur laquelle se centre le total du panneau réduit.
-fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutBindings) -> f32 {
+fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutBindings) {
     let row_height = SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(FRAME_WIDTH, row_height), egui::Sense::hover());
@@ -1620,7 +1619,6 @@ fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutB
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
         switch.show(&mut child);
     });
-    backdrop.width()
 }
 
 /// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir
