@@ -187,11 +187,14 @@ pub const HEIGHT_FRACTION: f32 = 0.6;
 pub const VERTICAL_TIP_RESERVE: f32 = 280.0;
 
 /// Ce que le bandeau affiche cette frame, tel que l'hôte le sait.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct StripState {
     pub entry_count: usize,
     pub tracking_enabled: bool,
-    pub toast_active: bool,
+    /// La place du toast affiché, s'il y en a un (`panels::watchlist::toast_extent`) — mesurée
+    /// sur la carte elle-même : la carte de chat est plus large que la couche de confettis, et sa
+    /// hauteur suit le message.
+    pub toast: Option<egui::Vec2>,
     pub select_open: bool,
     pub vertical: bool,
     /// La souris est sur le bandeau (fenêtre de base) — voir [`Expansion`]. Sans effet à
@@ -243,23 +246,17 @@ pub fn plan(state: StripState, offset: Option<(i32, i32)>, client: ClientArea, s
     } else {
         let ceiling = (client.width as f32 * WIDTH_FRACTION).min(MAX_CEILING);
         let tiles = watchlist::content_width(state.entry_count, state.tracking_enabled);
-        // La couche de confettis du toast est centrée sur le MÊME axe que la bande : sans cette
-        // largeur minimale pendant qu'un toast est affiché, ses confettis les plus excentrés
-        // seraient rognés par le bord de la fenêtre (voir `main.rs`).
-        let toast = if state.toast_active {
-            watchlist::TOAST_LAYER_WIDTH
-        } else {
-            0.0
-        };
-        let width = (tiles.max(toast) + HORIZONTAL_INNER_MARGIN)
+        // Le toast est centré sur le MÊME axe que la bande : sans cette largeur minimale pendant
+        // qu'il est affiché, sa carte et ses confettis seraient rognés par le bord de la fenêtre.
+        // **Hors plafond** : le plafond borne les TUILES, qui défilent ; la carte, elle, ne défile
+        // pas — plafonnée, elle perdrait son cadre et le début de ses lignes (2026-09-28).
+        let toast = state.toast.unwrap_or_default();
+        let width = (tiles + HORIZONTAL_INNER_MARGIN)
             .min(ceiling)
+            .max(toast.x + HORIZONTAL_INNER_MARGIN)
             .max(HORIZONTAL_INNER_MARGIN);
         let height = HORIZONTAL_HEIGHT
-            + if state.toast_active {
-                watchlist::TOAST_AREA_HEIGHT
-            } else {
-                0.0
-            }
+            + toast.y
             + if state.select_open {
                 watchlist::SELECTION_BAR_HEIGHT
             } else {
@@ -286,7 +283,7 @@ pub fn plan(state: StripState, offset: Option<(i32, i32)>, client: ClientArea, s
     let flipped = !state.vertical
         && watchlist::controls_in_row(state.entry_count, state.tracking_enabled)
         && base_position.1 + strip.height >= client.top + client.height;
-    let expanded = state.vertical && (state.hovered || state.toast_active);
+    let expanded = state.vertical && (state.hovered || state.toast.is_some());
     if !expanded {
         return Plan {
             size: base_size,
@@ -298,16 +295,9 @@ pub fn plan(state: StripState, offset: Option<(i32, i32)>, client: ClientArea, s
             flipped,
         };
     }
-    let reserve = if state.toast_active {
-        VERTICAL_TIP_RESERVE.max(watchlist::TOAST_LAYER_WIDTH)
-    } else {
-        VERTICAL_TIP_RESERVE
-    } as f64;
-    let min_height = if state.toast_active {
-        watchlist::TOAST_AREA_HEIGHT as f64
-    } else {
-        0.0
-    };
+    let toast = state.toast.unwrap_or_default();
+    let reserve = VERTICAL_TIP_RESERVE.max(toast.x) as f64;
+    let min_height = toast.y as f64;
     let expansion = Expansion {
         side,
         width: physical(reserve),
@@ -528,5 +518,40 @@ mod tests {
             ..vide
         };
         assert!(!plan(dresse, Some((600, 5000)), CLIENT, 1.0).flipped);
+    }
+
+    /// La fenêtre s'élargit à la place du toast — même au-delà du plafond des tuiles, qui
+    /// défilent, alors que la carte ne défile pas (capture utilisateur du 2026-09-28).
+    #[test]
+    fn la_fenetre_contient_toute_la_carte_du_toast() {
+        let toast = egui::vec2(492.0, 230.0);
+        let etat = StripState {
+            entry_count: 4,
+            tracking_enabled: true,
+            toast: Some(toast),
+            ..Default::default()
+        };
+        let etroit = ClientArea {
+            width: 600,
+            ..CLIENT
+        };
+        for client in [CLIENT, etroit] {
+            let couche = plan(etat, None, client, 1.0);
+            assert!(couche.size.0 >= (toast.x + HORIZONTAL_INNER_MARGIN) as f64);
+            assert_eq!(couche.size.1, (HORIZONTAL_HEIGHT + toast.y) as f64);
+        }
+
+        let dresse = plan(
+            StripState {
+                vertical: true,
+                ..etat
+            },
+            None,
+            CLIENT,
+            1.0,
+        );
+        let base = dresse.base.expect("étendu tant que le toast s'affiche");
+        assert!(dresse.size.0 - base.width() as f64 >= toast.x as f64);
+        assert!(dresse.size.1 >= toast.y as f64);
     }
 }

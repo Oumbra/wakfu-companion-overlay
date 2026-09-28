@@ -209,7 +209,7 @@ const WINDOW_SIZE: (f64, f64) = (420.0, 480.0 + render_content::COMBAT_TOP_MARGI
 // s'il n'y a pas besoin » — une fenêtre plus large que son contenu reste cliquable/bloquante sur
 // toute sa zone même là où rien n'est peint (pas de test de transparence par pixel côté Win32),
 // l'utilisateur ne peut alors pas deviner où s'arrête l'overlay. Toujours le MINIMUM entre ce que
-// le contenu demande (`content_width`, croît avec le nombre d'entrées, et avec `toast_active` —
+// le contenu demande (`content_width`, croît avec le nombre d'entrées, et avec la place du toast —
 // voir `panels::watchlist::TOAST_LAYER_WIDTH`) et le plafond (`WATCHLIST_WIDTH_FRACTION` de la
 // fenêtre de jeu, `WATCHLIST_MAX_CEILING`) — jamais l'inverse : avec peu d'entrées et sans toast,
 // la fenêtre reste étroite même si le plafond est large.
@@ -4625,7 +4625,9 @@ impl App {
         // précédent (`watchlist_placement::hovers`, qui dit pourquoi pas celui d'egui).
         let mut watchlist_plan = None;
         if overlay.kind == OverlayKind::Watchlist {
-            let toast_active = panels::watchlist::is_active(watchlist_toast, now);
+            let toast = watchlist_toast
+                .filter(|toast| panels::watchlist::is_active(Some(*toast), now))
+                .map(|toast| panels::watchlist::toast_extent(&overlay.gpu.egui_ctx, toast));
             let hovered = self.interactive
                 && overlay.watchlist_plan.is_some_and(|plan| {
                     game_window::cursor_position()
@@ -4634,7 +4636,7 @@ impl App {
             let state = watchlist_placement::StripState {
                 entry_count: watchlist.len(),
                 tracking_enabled: self.features.suivi,
-                toast_active,
+                toast,
                 select_open: self.watchlist_selection.is_open(),
                 vertical: self.watchlist_vertical,
                 hovered,

@@ -3166,7 +3166,9 @@ mod linux_main {
                     // (`watchlist_placement::plan`).
                     let mut watchlist_plan = None;
                     if overlay.kind == OverlayKind::Watchlist {
-                        let toast_active = watchlist_toast.is_some();
+                        let toast = watchlist_toast.map(|toast| {
+                            panels::watchlist::toast_extent(&overlay.gpu.egui_ctx, toast)
+                        });
                         let hovered = self.interactive
                             && overlay.watchlist_plan.is_some_and(|plan| {
                                 self.game_window.cursor_position().is_some_and(|cursor| {
@@ -3176,7 +3178,7 @@ mod linux_main {
                         let state = watchlist_placement::StripState {
                             entry_count: watchlist.len(),
                             tracking_enabled: self.features.suivi,
-                            toast_active,
+                            toast,
                             select_open: self.watchlist_selection.is_open(),
                             vertical: self.watchlist_vertical,
                             hovered,

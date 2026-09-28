@@ -1125,6 +1125,11 @@ const CLOSE_BTN_MARGIN: f32 = 4.0;
 /// de transformation `scale`, l'entrée est ici un fondu + léger glissement vertical plutôt qu'un
 /// vrai zoom (voir `toast_card`).
 const POP_DURATION: f32 = 0.35;
+/// Glissement vertical de l'entrée : la carte part de `POP_SLIDE` plus bas et remonte à sa place
+/// pendant [`POP_DURATION`].
+const POP_SLIDE: f32 = 10.0;
+/// Décalage vertical de l'ombre portée de la carte de ramassage/décompte (`toast_card`).
+const TOAST_SHADOW_OFFSET: f32 = 6.0;
 /// Les confettis démarrent au-dessus du haut de la carte — miroir de `top: -10px` du calque de
 /// confettis relatif au conteneur, dont le `margin-top: 40px` pousse la carte plus bas (ici
 /// ramené à une valeur plus modeste, la fenêtre Suivi ayant nettement moins de hauteur disponible
@@ -1364,10 +1369,9 @@ pub fn show(
             if chrome.flipped {
                 // Collé au bas du jeu : la rangée et sa pastille descendent au pied de la fenêtre,
                 // la place des infobulles passe au-dessus. Le toast, lui, reste sous le tout.
-                let toast_area = if is_active(toast, now) {
-                    TOAST_AREA_HEIGHT
-                } else {
-                    0.0
+                let toast_area = match toast {
+                    Some(toast) if is_active(Some(toast), now) => measure_toast(ui.ctx(), toast).y,
+                    _ => 0.0,
                 };
                 ui.add_space(
                     (ui.available_height()
@@ -2080,6 +2084,103 @@ fn rotated_square(center: egui::Pos2, half: f32, angle: f32) -> [egui::Pos2; 4] 
     .map(|c| center + egui::vec2(c.x * cos - c.y * sin, c.x * sin + c.y * cos))
 }
 
+/// Le titre et le nom de la carte de ramassage/décompte. Partagé par la peinture
+/// ([`toast_card`]) et la mesure ([`toast_extent`]), comme [`chat_card_galleys`].
+fn loot_card_galleys(
+    ctx: &egui::Context,
+    toast: &WatchlistToast,
+) -> (std::sync::Arc<egui::Galley>, std::sync::Arc<egui::Galley>) {
+    let title = match &toast.reason {
+        WatchlistToastReason::Countdown => "COMPTEUR ÉPUISÉ !",
+        WatchlistToastReason::Goal => "OBJECTIF ATTEINT !",
+        WatchlistToastReason::Loot { .. } | WatchlistToastReason::Chat { .. } => "OBJET OBTENU !",
+    };
+    let name_text = match &toast.reason {
+        WatchlistToastReason::Loot { quantity } if *quantity > 1 => {
+            format!("{} × {quantity}", toast.name)
+        }
+        _ => toast.name.clone(),
+    };
+    // Police du design system, et non la proportionnelle par défaut d'egui — une Ubuntu *Light*,
+    // plus maigre que tout ce que le jeu écrit. Les corps, eux, ne bougent pas : ce sont des cotes
+    // du portage web, pas des mesures du client.
+    let title_font = text::label_font(ctx, 11.0);
+    let name_font = text::label_font(ctx, 14.0);
+    ctx.fonts_mut(|fonts| {
+        (
+            fonts.layout_no_wrap(title.to_string(), title_font, ACCENT),
+            fonts.layout_no_wrap(name_text, name_font, TEXT_BRIGHT),
+        )
+    })
+}
+
+/// Taille du cadre de la carte de ramassage/décompte — au texte, qui ne retourne pas à la ligne.
+fn loot_card_size(title: &egui::Galley, name: &egui::Galley) -> egui::Vec2 {
+    let text_width = title.size().x.max(name.size().x);
+    let text_height = title.size().y + CARD_TEXT_GAP + name.size().y;
+    egui::vec2(
+        CARD_PAD_LEFT + ICON_SIZE + CARD_ICON_GAP + text_width + CARD_PAD_RIGHT,
+        ICON_SIZE.max(text_height) + 2.0 * CARD_PAD_V,
+    )
+}
+
+/// **La place qu'un toast occupe sous le bandeau** — largeur et hauteur de la zone que l'hôte doit
+/// ajouter à la fenêtre Suivi le temps qu'il s'affiche (`watchlist_placement::plan`).
+///
+/// Jusqu'au 2026-09-28, cette zone était fixe : [`TOAST_LAYER_WIDTH`] × [`TOAST_AREA_HEIGHT`], la
+/// couche de confettis de la carte de ramassage. La carte de chat, arrivée ensuite, est pourtant
+/// **plus large** ([`CHAT_CARD_WIDTH`], ~490 px) et sa hauteur suit le message : la fenêtre la
+/// rognait des deux côtés — cadre, légende du canal et début des lignes coupés (capture
+/// utilisateur du 2026-09-28). Un nom d'objet long débordait de même les 320 px. La zone se mesure
+/// donc désormais sur la carte réellement peinte, avec les mêmes mises en page
+/// ([`chat_card_galleys`], [`loot_card_galleys`]) ; les cotes fixes restent un plancher, celui des
+/// confettis.
+///
+/// Appelée par l'hôte ENTRE deux frames : les polices d'egui n'existent qu'après la première
+/// (`Context::fonts` panique avant), d'où le repli sur une estimation tant qu'aucune frame n'a
+/// tourné — la largeur de la carte de chat, qui ne dépend pas du texte, y est déjà juste.
+pub fn toast_extent(ctx: &egui::Context, toast: &WatchlistToast) -> egui::Vec2 {
+    if ctx.cumulative_pass_nr() == 0 {
+        let width = match toast.reason {
+            WatchlistToastReason::Chat { .. } => CHAT_CARD_WIDTH,
+            _ => TOAST_LAYER_WIDTH,
+        };
+        return egui::vec2(width, TOAST_AREA_HEIGHT);
+    }
+    measure_toast(ctx, toast)
+}
+
+/// Voir [`toast_extent`] — sans la garde des polices, pour l'appel depuis une frame.
+fn measure_toast(ctx: &egui::Context, toast: &WatchlistToast) -> egui::Vec2 {
+    let card = match &toast.reason {
+        WatchlistToastReason::Chat {
+            word,
+            author,
+            message,
+            ..
+        } => {
+            let (word_galley, body_galley) =
+                chat_card_galleys(ctx, word, author, message, &|color| color);
+            egui::vec2(
+                CHAT_CARD_WIDTH,
+                chat_card_height(word_galley.size().y + CARD_TEXT_GAP + body_galley.size().y),
+            )
+        }
+        _ => {
+            let (title, name) = loot_card_galleys(ctx, toast);
+            // L'ombre portée descend de `TOAST_SHADOW_OFFSET` sous le cadre.
+            loot_card_size(&title, &name) + egui::vec2(0.0, TOAST_SHADOW_OFFSET)
+        }
+    };
+    // Le haut de la carte, la carte, puis le glissement d'entrée : pendant le fondu, la carte
+    // descend jusqu'à `POP_SLIDE` plus bas que sa place finale.
+    let height = CONFETTI_TOP_OVERSHOOT + CARD_TOP_GAP + card.y + POP_SLIDE;
+    egui::vec2(
+        card.x.max(TOAST_LAYER_WIDTH).ceil(),
+        height.max(TOAST_AREA_HEIGHT).ceil(),
+    )
+}
+
 /// Carte d'alerte de ramassage/décompte — miroir visuel de `loot-alert.component.html`/`.css` du
 /// dépôt web : icône réelle, titre coloré (`ACCENT`, identique pour les deux `reason` — voir sa
 /// doc), nom (+ quantité si > 1), bouton de fermeture, confettis tombants en fond. Contrairement à
@@ -2115,7 +2216,7 @@ fn toast_card(
     let pop_t = (elapsed / POP_DURATION).min(1.0);
     let pop_eased = 1.0 - (1.0 - pop_t) * (1.0 - pop_t); // ease-out quadratique
     let card_alpha = pop_eased;
-    let slide = (1.0 - pop_eased) * 10.0;
+    let slide = (1.0 - pop_eased) * POP_SLIDE;
 
     // La carte de chat a son propre gabarit — celui des tuiles de recherche de l'onglet Chat.
     if let WatchlistToastReason::Chat {
@@ -2127,32 +2228,12 @@ fn toast_card(
     {
         return chat_toast_card(ui, toast, now, *channel, word, author, message);
     }
-    let title = match &toast.reason {
-        WatchlistToastReason::Countdown => "COMPTEUR ÉPUISÉ !",
-        WatchlistToastReason::Goal => "OBJECTIF ATTEINT !",
-        WatchlistToastReason::Loot { .. } | WatchlistToastReason::Chat { .. } => "OBJET OBTENU !",
-    };
-    let name_text = match &toast.reason {
-        WatchlistToastReason::Loot { quantity } if *quantity > 1 => {
-            format!("{} × {quantity}", toast.name)
-        }
-        _ => toast.name.clone(),
-    };
-
-    // Police du design system, et non la proportionnelle par défaut d'egui — une Ubuntu *Light*,
-    // plus maigre que tout ce que le jeu écrit. Les corps, eux, ne bougent pas : ce sont des cotes
-    // du portage web, pas des mesures du client.
-    let title_font = text::label_font(ui.ctx(), 11.0);
-    let name_font = text::label_font(ui.ctx(), 14.0);
-    let painter = ui.painter();
-    let title_galley = painter.layout_no_wrap(title.to_string(), title_font, ACCENT);
-    let name_galley = painter.layout_no_wrap(name_text, name_font, TEXT_BRIGHT);
-
-    let text_width = title_galley.size().x.max(name_galley.size().x);
+    let (title_galley, name_galley) = loot_card_galleys(ui.ctx(), toast);
     let text_height = title_galley.size().y + CARD_TEXT_GAP + name_galley.size().y;
-    let content_height = ICON_SIZE.max(text_height);
-    let card_width = CARD_PAD_LEFT + ICON_SIZE + CARD_ICON_GAP + text_width + CARD_PAD_RIGHT;
-    let card_height = content_height + 2.0 * CARD_PAD_V;
+    let egui::Vec2 {
+        x: card_width,
+        y: card_height,
+    } = loot_card_size(&title_galley, &name_galley);
 
     let center_x = ui.max_rect().center().x;
     let confetti_top = ui.cursor().top() + slide;
@@ -2202,7 +2283,7 @@ fn toast_card(
     // --- Carte ---
     let painter = ui.painter();
     painter.rect_filled(
-        card_rect.translate(egui::vec2(0.0, 6.0)),
+        card_rect.translate(egui::vec2(0.0, TOAST_SHADOW_OFFSET)),
         CARD_ROUNDING,
         egui::Color32::from_rgba_unmultiplied(0, 0, 0, (90.0 * card_alpha) as u8),
     ); // ombre portée approximée (`box-shadow`) en une seule passe plutôt qu'un flou multi-passes
@@ -2329,60 +2410,14 @@ fn chat_toast_card(
     let pop_t = (elapsed / POP_DURATION).min(1.0);
     let pop_eased = 1.0 - (1.0 - pop_t) * (1.0 - pop_t);
     let card_alpha = pop_eased;
-    let slide = (1.0 - pop_eased) * 10.0;
+    let slide = (1.0 - pop_eased) * POP_SLIDE;
     let fade = |color: egui::Color32| with_alpha(color, card_alpha);
 
     let ctx = ui.ctx().clone();
-    let painter = ui.painter();
-    let wrapped = |max_width: f32| egui::text::LayoutJob {
-        wrap: egui::text::TextWrapping {
-            max_width,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    // « Recherche : « gelano » » — dans le gris des légendes de tuile, en italique : c'est la
-    // même information que sur la tuile, dite en aparté au-dessus du message. Une expression
-    // longue retourne à la ligne comme le message.
-    let word_galley = {
-        let mut job = wrapped(CHAT_CARD_TEXT_MAX_WIDTH);
-        job.append(
-            &format!("Recherche : « {word} »"),
-            0.0,
-            egui::text::TextFormat {
-                font_id: text::label_font(&ctx, CHAT_CARD_WORD_FONT_SIZE),
-                color: fade(design::tokens::HEADING_TEXT),
-                italics: true,
-                ..Default::default()
-            },
-        );
-        painter.layout_job(job)
-    };
-    let body_galley = {
-        let mut job = wrapped(CHAT_CARD_TEXT_MAX_WIDTH);
-        job.append(
-            author,
-            0.0,
-            egui::text::TextFormat {
-                font_id: text::label_strong_font(&ctx, 14.0),
-                color: fade(design::tokens::TEXT_GOLD),
-                ..Default::default()
-            },
-        );
-        job.append(
-            &format!(" : {message}"),
-            0.0,
-            egui::text::TextFormat {
-                font_id: text::label_font(&ctx, 14.0),
-                color: fade(TEXT_BRIGHT),
-                ..Default::default()
-            },
-        );
-        painter.layout_job(job)
-    };
+    let (word_galley, body_galley) = chat_card_galleys(&ctx, word, author, message, &fade);
 
     let text_height = word_galley.size().y + CARD_TEXT_GAP + body_galley.size().y;
-    let card_height = text_height.max(CHAT_CARD_ICON_SIZE) + 2.0 * CHAT_CARD_PAD_V;
+    let card_height = chat_card_height(text_height);
 
     // Même haut de cadre que la carte de ramassage : la légende, elle, déborde au-dessus.
     let center_x = ui.max_rect().center().x;
@@ -2486,6 +2521,73 @@ fn chat_toast_card(
         close: whisper || card_response.clicked(),
         whisper_to: whisper.then(|| author.to_string()),
     }
+}
+
+/// Les deux blocs de texte de la carte de chat — la ligne « Recherche : « … » » et le message —
+/// mis en page à [`CHAT_CARD_TEXT_MAX_WIDTH`]. Partagé par la peinture ([`chat_toast_card`]) et la
+/// mesure ([`toast_extent`]) : la fenêtre que l'hôte réserve au toast doit être calculée sur les
+/// MÊMES lignes que celles qui seront peintes, sans quoi un message qui retourne une fois de plus à
+/// la ligne déborde.
+fn chat_card_galleys(
+    ctx: &egui::Context,
+    word: &str,
+    author: &str,
+    message: &str,
+    fade: &dyn Fn(egui::Color32) -> egui::Color32,
+) -> (std::sync::Arc<egui::Galley>, std::sync::Arc<egui::Galley>) {
+    let wrapped = |max_width: f32| egui::text::LayoutJob {
+        wrap: egui::text::TextWrapping {
+            max_width,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // « Recherche : « gelano » » — dans le gris des légendes de tuile, en italique : c'est la
+    // même information que sur la tuile, dite en aparté au-dessus du message. Une expression
+    // longue retourne à la ligne comme le message.
+    let word_galley = {
+        let mut job = wrapped(CHAT_CARD_TEXT_MAX_WIDTH);
+        job.append(
+            &format!("Recherche : « {word} »"),
+            0.0,
+            egui::text::TextFormat {
+                font_id: text::label_font(ctx, CHAT_CARD_WORD_FONT_SIZE),
+                color: fade(design::tokens::HEADING_TEXT),
+                italics: true,
+                ..Default::default()
+            },
+        );
+        ctx.fonts_mut(|fonts| fonts.layout_job(job))
+    };
+    let body_galley = {
+        let mut job = wrapped(CHAT_CARD_TEXT_MAX_WIDTH);
+        job.append(
+            author,
+            0.0,
+            egui::text::TextFormat {
+                font_id: text::label_strong_font(ctx, 14.0),
+                color: fade(design::tokens::TEXT_GOLD),
+                ..Default::default()
+            },
+        );
+        job.append(
+            &format!(" : {message}"),
+            0.0,
+            egui::text::TextFormat {
+                font_id: text::label_font(ctx, 14.0),
+                color: fade(TEXT_BRIGHT),
+                ..Default::default()
+            },
+        );
+        ctx.fonts_mut(|fonts| fonts.layout_job(job))
+    };
+
+    (word_galley, body_galley)
+}
+
+/// Hauteur du cadre de la carte de chat pour une colonne de texte de `text_height`.
+fn chat_card_height(text_height: f32) -> f32 {
+    text_height.max(CHAT_CARD_ICON_SIZE) + 2.0 * CHAT_CARD_PAD_V
 }
 
 /// Ce qu'un clic sur le toast demande — voir `toast_card`.
@@ -3329,5 +3431,56 @@ mod tests {
             Some(0.0),
             "l'animation repart de la seconde complétion",
         );
+    }
+
+    fn toast_de_chat(message: &str) -> WatchlistToast {
+        WatchlistToast {
+            name: "hello".to_string(),
+            kind: WatchlistKind::Item,
+            reason: WatchlistToastReason::Chat {
+                channel: overlay_engine::ChatChannel::Guilde,
+                word: "hello".to_string(),
+                author: "Astrum Magister".to_string(),
+                message: message.to_string(),
+            },
+            catalog_id: None,
+            created_at: std::time::Instant::now(),
+            confetti: Vec::new(),
+            hide_at: None,
+        }
+    }
+
+    /// Un contexte dont les polices existent — celles du design system, comme dans l'overlay.
+    fn contexte_avec_polices() -> egui::Context {
+        let ctx = egui::Context::default();
+        crate::style::apply(&ctx);
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .textures_delta
+            .clear();
+        ctx
+    }
+
+    /// Capture utilisateur du 2026-09-28 : la carte de chat, plus large que la couche de
+    /// confettis, était rognée des deux côtés par la fenêtre Suivi.
+    #[test]
+    fn la_place_du_toast_de_chat_contient_toute_la_carte() {
+        let ctx = contexte_avec_polices();
+        let court = toast_extent(&ctx, &toast_de_chat("hello"));
+        assert!(court.x >= CHAT_CARD_WIDTH, "{court:?}");
+        assert!(court.y >= TOAST_AREA_HEIGHT);
+
+        // Un long message retourne plusieurs fois à la ligne : la place s'allonge avec lui.
+        let long = toast_extent(&ctx, &toast_de_chat(&"bonjour à tous ".repeat(40)));
+        assert_eq!(long.x, court.x);
+        assert!(long.y > TOAST_AREA_HEIGHT, "{long:?}");
+    }
+
+    /// Avant la première frame, les polices n'existent pas : l'estimation garde au moins la
+    /// largeur de la carte de chat, qui ne dépend pas du texte.
+    #[test]
+    fn la_place_du_toast_s_estime_avant_la_premiere_frame() {
+        let ctx = egui::Context::default();
+        let place = toast_extent(&ctx, &toast_de_chat("hello"));
+        assert_eq!(place, egui::vec2(CHAT_CARD_WIDTH, TOAST_AREA_HEIGHT));
     }
 }
