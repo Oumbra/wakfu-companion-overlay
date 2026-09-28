@@ -37,6 +37,10 @@
 //! panneau se colle, la hauteur que l'utilisateur lui donne à la souris, son bornage et son
 //! aimantation au centre. Même raison d'être ici que `recap_placement` ci-dessous.
 //!
+//! `click_through_placement` (2026-09-28, bouton œil déplaçable) : son ancrage d'origine après
+//! le bouton Boutique du jeu, la position que l'utilisateur lui donne, bornage et aimantation.
+//! Même raison d'être ici que `recap_placement` ci-dessous.
+//!
 //! `recap_placement` (2026-09-17, bande Récap déplaçable) : l'ancrage de la bande sur la fenêtre
 //! de jeu, le décalage que l'utilisateur lui donne à la souris, son bornage et son aimantation.
 //! Exposé pour la même raison que `config` — les deux binaires font le même calcul, qui n'est que
@@ -59,6 +63,7 @@ pub mod avatars;
 pub mod background;
 pub mod build_info;
 pub mod chat_command;
+pub mod click_through_placement;
 pub mod combat_placement;
 pub mod config;
 pub mod cursor;
@@ -67,6 +72,7 @@ pub mod engine_thread;
 pub mod frame;
 pub mod game_servers;
 pub mod game_window;
+pub mod hit_region;
 #[cfg(not(target_os = "windows"))]
 pub mod linux_tray;
 pub mod local_data;
@@ -86,6 +92,7 @@ pub mod startup;
 pub mod style;
 pub mod turn_watch;
 pub mod ui_icons;
+pub mod watchlist_placement;
 
 /// Le mécanisme de mise à jour automatique vit dans `overlay-sync` (réseau) ; réexporté ici pour
 /// que le harnais de rendu (`overlay-testkit`, qui ne dépend que de cette crate) construise les

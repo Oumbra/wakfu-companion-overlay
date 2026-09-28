@@ -185,6 +185,9 @@ fn harness_sized(
                 recap: &Default::default(),
                 recap_cells: Default::default(),
                 recap_chrome: Default::default(),
+                watchlist_chrome: Default::default(),
+                watchlist_base: None,
+                click_through_tip: Default::default(),
                 combat_chrome: chrome.get(),
                 options: None,
                 veiled: false,
@@ -287,6 +290,7 @@ fn panneau_deverrouille_et_deplace_montre_ses_deux_glyphes() {
         CombatChrome {
             locked: false,
             moved: true,
+            collapsed: false,
         },
         false,
     );
@@ -306,6 +310,7 @@ fn panneau_sans_pointeur_ne_montre_pas_sa_pastille() {
         CombatChrome {
             locked: false,
             moved: true,
+            collapsed: false,
         },
         false,
     );
@@ -330,6 +335,7 @@ fn panneau_plein_replie_ses_actions_cote_a_cote() {
     let chrome = std::rc::Rc::new(std::cell::Cell::new(CombatChrome {
         locked: false,
         moved: true,
+        collapsed: false,
     }));
     let remontees = std::rc::Rc::new(std::cell::RefCell::new(Remontees::default()));
     let mut harness = harness_sized(
@@ -366,6 +372,7 @@ fn panneau_verrouille_ne_montre_que_son_cadenas() {
         CombatChrome {
             locked: true,
             moved: false,
+            collapsed: false,
         },
         false,
     );
@@ -383,6 +390,7 @@ fn poignee_laterale_survolee_montre_sa_lisiere() {
         CombatChrome {
             locked: false,
             moved: false,
+            collapsed: false,
         },
         false,
     );
@@ -400,6 +408,7 @@ fn panneau_a_droite_garde_ses_actions_au_bord_exterieur() {
         CombatChrome {
             locked: false,
             moved: true,
+            collapsed: false,
         },
         true,
     );
@@ -423,6 +432,7 @@ fn le_panneau_remonte_ses_gestes_et_jamais_verrouille() {
     let chrome = std::rc::Rc::new(std::cell::Cell::new(CombatChrome {
         locked: true,
         moved: false,
+        collapsed: false,
     }));
     let remontees = std::rc::Rc::new(std::cell::RefCell::new(Remontees::default()));
     let mut harness = harness_for(
@@ -449,6 +459,7 @@ fn le_panneau_remonte_ses_gestes_et_jamais_verrouille() {
     chrome.set(CombatChrome {
         locked: false,
         moved: false,
+        collapsed: false,
     });
     harness.run();
     press(&mut harness, poignee(), true);
@@ -498,6 +509,7 @@ fn le_panneau_remonte_ses_gestes_et_jamais_verrouille() {
     chrome.set(CombatChrome {
         locked: false,
         moved: true,
+        collapsed: false,
     });
     harness.run();
     press(&mut harness, replacer(), true);
@@ -522,6 +534,7 @@ fn les_glyphes_d_actions_ne_font_pas_partir_le_panneau() {
     let chrome = std::rc::Rc::new(std::cell::Cell::new(CombatChrome {
         locked: false,
         moved: true,
+        collapsed: false,
     }));
     let remontees = std::rc::Rc::new(std::cell::RefCell::new(Remontees::default()));
     let mut harness = harness_for(
@@ -577,6 +590,7 @@ fn la_lisiere_porte_la_croix_flechee_du_jeu() {
         let chrome = std::rc::Rc::new(std::cell::Cell::new(CombatChrome {
             locked: true,
             moved: false,
+            collapsed: false,
         }));
         let mut harness = harness_for(
             std::rc::Rc::clone(&chrome),
@@ -599,6 +613,7 @@ fn la_lisiere_porte_la_croix_flechee_du_jeu() {
         chrome.set(CombatChrome {
             locked: false,
             moved: false,
+            collapsed: false,
         });
         harness.run();
         harness.hover_at(saisie);
