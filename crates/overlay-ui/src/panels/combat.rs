@@ -1187,7 +1187,9 @@ fn paint_fold_button(
     let hovered = ui
         .input(|i| i.pointer.latest_pos())
         .is_some_and(|pos| panel.contains(pos));
-    if !hovered {
+    // Maintenue un instant après le départ du pointeur : voir `panels::hover_reveal`.
+    if !crate::panels::hover_reveal::reveal(ui.ctx(), ui.id().with("combat-repli-survol"), hovered)
+    {
         return false;
     }
     let x = geometry.folded_x + (geometry.open_x - geometry.folded_x) * fold.detail;
@@ -1452,7 +1454,8 @@ fn paint_actions_row(
     let hovered = ui
         .input(|i| i.pointer.latest_pos())
         .is_some_and(|pos| panel.contains(pos));
-    if !hovered {
+    // Maintenue un instant après le départ du pointeur : voir `panels::hover_reveal`.
+    if !crate::panels::hover_reveal::reveal(ui.ctx(), ui.id().with("combat-actions"), hovered) {
         return ActionsOutcome::default();
     }
     let ds = design::DesignSystem::get(ui.ctx());

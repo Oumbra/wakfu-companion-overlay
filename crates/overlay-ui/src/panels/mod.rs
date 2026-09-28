@@ -18,6 +18,7 @@ mod combat_scrollbar;
 pub mod combat_spell_block;
 pub mod drag;
 pub mod feature_switch;
+pub mod hover_reveal;
 pub mod login;
 pub mod notifications;
 pub mod options_modal;

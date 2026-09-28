@@ -1724,7 +1724,8 @@ fn chrome_pill(
         .input(|i| i.pointer.latest_pos())
         .is_some_and(|pos| band.union(pill).contains(pos))
         || ui.ctx().is_being_dragged(grip_id);
-    if !hovered {
+    // Maintenue un instant après le départ du pointeur : voir `panels::hover_reveal`.
+    if !crate::panels::hover_reveal::reveal(ui.ctx(), grip_id.with("survol"), hovered) {
         return PillOutcome::default();
     }
     let ds = design::DesignSystem::get(ui.ctx());
