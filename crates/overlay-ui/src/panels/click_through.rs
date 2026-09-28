@@ -42,6 +42,12 @@
 //! tip_window`) : le bouton ne bouge pas d'un pixel à l'écran, il se peint au décalage que
 //! l'hôte lui donne ([`ClickThroughTip`]), et l'infobulle s'ouvre dans la réserve. Dès que la
 //! souris quitte le bouton, la fenêtre se rétracte.
+//!
+//! L'infobulle se lit **centrée sur le bouton**, dessous par défaut, au-dessus quand il est posé
+//! trop bas, et glissée juste assez pour ne jamais sortir du jeu quand il est contre un bord
+//! (demande utilisateur 2026-09-28, voir `click_through_placement::tip_window` et
+//! `design::Tooltip::slide`). Et même agrandie, la fenêtre ne capte le clic que sur le bouton :
+//! la réserve et l'infobulle le laissent passer au jeu (`crate::hit_region`).
 
 use crate::design::{self, DsIcon, DsTexture, IconContext};
 use crate::panels::drag::PanelDrag;
@@ -67,9 +73,12 @@ const SOCKET_SIZE: f32 = crate::design::tokens::ICON_BUTTON_SIZE;
 /// l'infobulle : sa largeur totale (bouton compris) et la hauteur ajoutée au-dessus ou en dessous.
 ///
 /// Mesurée sur le libellé le plus long, « Afficher l'overlay (Ctrl+Shift+W) » : ~210 px de large
-/// et 27 px de haut, plus `design::tokens::TOOLTIP_GAP` (5 px) sous le bouton. Arrondi à 240 × 36
-/// pour qu'un raccourci personnalisé un peu plus long tienne encore.
-pub const TIP_RESERVE: egui::Vec2 = egui::vec2(240.0, 36.0);
+/// et 33 px de haut cadre compris, plus `design::tokens::TOOLTIP_GAP` (5 px) sous le cadre de la
+/// section. Arrondi à 240 × 40 pour qu'un raccourci personnalisé un peu plus long tienne encore.
+///
+/// 36 px de haut jusqu'au 2026-09-28 : l'infobulle, ancrée alors sur le socle caché dans le cadre,
+/// y tenait tout juste — et paraissait collée au bouton. Ancrée sur le cadre, elle en demande 38.
+pub const TIP_RESERVE: egui::Vec2 = egui::vec2(240.0, 40.0);
 
 /// **Où est le bouton dans sa fenêtre, et de quel côté son infobulle s'ouvre** — ce que l'hôte
 /// décide au survol (voir la doc de module). Au repos, le bouton est au coin de sa fenêtre et
@@ -158,7 +167,11 @@ pub fn show(
     if response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     } else {
+        // Ancrée sur la SECTION, pas sur le socle : l'écart du design system se compte depuis le
+        // cadre visible — depuis le socle, caché dedans, l'infobulle paraissait collée.
         design::tooltip(&response)
+            .anchor(section)
+            .slide()
             .side(if tip.above {
                 design::TooltipSide::Above
             } else {

@@ -12,8 +12,10 @@
 //!
 //! La fenêtre du harnais est celle du bouton (`panels::click_through::SECTION_SIZE`), plus les
 //! 8 px de marge du harnais de chaque côté : le bouton remplit sa fenêtre OS en production. Les
-//! planches d'infobulle prennent la fenêtre étendue que l'hôte donne au survol
-//! (`panels::click_through::TIP_RESERVE`).
+//! planches d'infobulle prennent la fenêtre étendue que l'hôte donne au survol, calculée par la
+//! même fonction que lui (`click_through_placement::tip_window`) pour un bouton posé au centre,
+//! contre chaque bord et dans un coin : l'infobulle y est centrée sur le bouton, dessous sauf
+//! tout en bas, et glissée pour rester dans le jeu.
 //!
 //! **Driver logiciel requis** : même prérequis que `tests/panels.rs` — `mesa-vulkan-drivers` sous
 //! Linux.
@@ -23,6 +25,7 @@ use std::rc::Rc;
 
 use egui_kittest::Harness;
 use overlay_engine::CatalogIndex;
+use overlay_ui::click_through_placement::{self, ClientArea};
 use overlay_ui::panels::click_through::{ClickThroughTip, SECTION_SIZE, TIP_RESERVE};
 use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
@@ -64,18 +67,39 @@ fn harness_for(interactive: bool, clics: Rc<Cell<u32>>) -> Harness<'static> {
     harness_with_gestes(interactive, clics, Rc::default())
 }
 
-/// La fenêtre étendue pour l'infobulle, telle que l'hôte la donne au survol d'un bouton posé sous
-/// les boutons du jeu : la réserve à droite et en dessous, le bouton au coin.
-fn harness_infobulle(interactive: bool) -> Harness<'static> {
-    harness_complet(
+/// Une fenêtre de jeu 1920 × 1080 à l'origine de l'écran, échelle 1 : de quoi placer le bouton
+/// contre chacun de ses bords.
+const JEU: ClientArea = ClientArea {
+    left: 0,
+    top: 0,
+    width: 1920,
+    height: 1080,
+};
+
+/// La fenêtre étendue pour l'infobulle, **telle que l'hôte la calcule** au survol d'un bouton posé
+/// à `offset` dans le jeu (`None` : son ancrage d'origine, sous les boutons du jeu) — la même
+/// fonction, `click_through_placement::tip_window`. Renvoie aussi le point à survoler : le centre
+/// du socle, là où il est peint dans cette fenêtre.
+fn harness_infobulle(
+    interactive: bool,
+    offset: Option<(i32, i32)>,
+) -> (Harness<'static>, egui::Pos2) {
+    let size = (SECTION_SIZE.x as i32, SECTION_SIZE.y as i32);
+    let reserve = (TIP_RESERVE.x as i32, TIP_RESERVE.y as i32);
+    let base = click_through_placement::window_position(offset, JEU, size);
+    let tip = click_through_placement::tip_window(base, size, reserve, JEU);
+    let origin = egui::vec2(tip.button_origin.0 as f32, tip.button_origin.1 as f32);
+    let harness = harness_complet(
         interactive,
         Rc::default(),
         Rc::default(),
-        egui::vec2(
-            TIP_RESERVE.x.max(SECTION_SIZE.x),
-            SECTION_SIZE.y + TIP_RESERVE.y,
-        ),
-    )
+        egui::vec2(tip.size.0 as f32, tip.size.1 as f32),
+        ClickThroughTip {
+            button_origin: origin,
+            above: tip.above,
+        },
+    );
+    (harness, centre() + origin)
 }
 
 /// Idem, en relevant aussi chaque geste de déplacement remonté (hors `PanelDrag::None`).
@@ -84,7 +108,13 @@ fn harness_with_gestes(
     clics: Rc<Cell<u32>>,
     gestes: Rc<RefCell<Vec<PanelDrag>>>,
 ) -> Harness<'static> {
-    harness_complet(interactive, clics, gestes, SECTION_SIZE)
+    harness_complet(
+        interactive,
+        clics,
+        gestes,
+        SECTION_SIZE,
+        ClickThroughTip::default(),
+    )
 }
 
 /// Le harnais, pour une fenêtre de `fenetre` points — celle du bouton au repos, ou la fenêtre
@@ -94,6 +124,7 @@ fn harness_complet(
     clics: Rc<Cell<u32>>,
     gestes: Rc<RefCell<Vec<PanelDrag>>>,
     fenetre: egui::Vec2,
+    tip: ClickThroughTip,
 ) -> Harness<'static> {
     let mut textures = Textures {
         portraits: None,
@@ -148,7 +179,7 @@ fn harness_complet(
                     recap_chrome: Default::default(),
                     watchlist_chrome: Default::default(),
                     watchlist_base: None,
-                    click_through_tip: ClickThroughTip::default(),
+                    click_through_tip: tip,
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -187,12 +218,12 @@ fn oeil_ouvert_en_clic_traversant_sans_estompe() {
     harness.snapshot("clic_traversant_oeil_ouvert");
 }
 
-/// Survolé en mode interactif, dans la fenêtre étendue : « Masquer l'overlay » et le raccourci,
-/// sous le bouton (2026-09-28).
+/// Survolé en mode interactif, à son ancrage d'origine : « Masquer l'overlay » et le raccourci,
+/// **centrée sous le bouton**, à l'écart du design system sous son cadre (2026-09-28).
 #[test]
 fn infobulle_masquer_l_overlay() {
-    let mut harness = harness_infobulle(true);
-    harness.hover_at(centre());
+    let (mut harness, survol) = harness_infobulle(true, None);
+    harness.hover_at(survol);
     harness.run();
     harness.snapshot("clic_traversant_infobulle_masquer");
 }
@@ -200,10 +231,47 @@ fn infobulle_masquer_l_overlay() {
 /// Survolé en clic-traversant : « Afficher l'overlay » et le raccourci.
 #[test]
 fn infobulle_afficher_l_overlay() {
-    let mut harness = harness_infobulle(false);
-    harness.hover_at(centre());
+    let (mut harness, survol) = harness_infobulle(false, None);
+    harness.hover_at(survol);
     harness.run();
     harness.snapshot("clic_traversant_infobulle_afficher");
+}
+
+/// Posé contre le bord gauche du jeu : l'infobulle reste dessous, glissée vers la droite juste
+/// assez pour ne pas sortir du jeu.
+#[test]
+fn infobulle_contre_le_bord_gauche() {
+    let (mut harness, survol) = harness_infobulle(true, Some((0, 300)));
+    harness.hover_at(survol);
+    harness.run();
+    harness.snapshot("clic_traversant_infobulle_bord_gauche");
+}
+
+/// Contre le bord droit : glissée vers la gauche.
+#[test]
+fn infobulle_contre_le_bord_droit() {
+    let (mut harness, survol) = harness_infobulle(true, Some((5000, 300)));
+    harness.hover_at(survol);
+    harness.run();
+    harness.snapshot("clic_traversant_infobulle_bord_droit");
+}
+
+/// Tout en bas du jeu, sans la place dessous : au-dessus, centrée.
+#[test]
+fn infobulle_tout_en_bas() {
+    let (mut harness, survol) = harness_infobulle(true, Some((900, 5000)));
+    harness.hover_at(survol);
+    harness.run();
+    harness.snapshot("clic_traversant_infobulle_en_bas");
+}
+
+/// Dans un coin, en bas à droite : au-dessus, et glissée vers la gauche.
+#[test]
+fn infobulle_dans_le_coin_bas_droit() {
+    let (mut harness, survol) = harness_infobulle(true, Some((5000, 5000)));
+    harness.hover_at(survol);
+    harness.run();
+    harness.snapshot("clic_traversant_infobulle_coin_bas_droit");
 }
 
 /// Un clic remonte UNE intention de bascule — c'est l'hôte qui bascule, jamais le panneau.

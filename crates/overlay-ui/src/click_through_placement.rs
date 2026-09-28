@@ -86,10 +86,16 @@ pub fn window_position(
 /// au-dessus. Tout en pixels physiques ; `base` est la position au repos ([`window_position`]),
 /// `size` la taille au repos, `reserve` la place de l'infobulle (largeur totale, hauteur ajoutée).
 ///
-/// **Le bouton ne bouge pas d'un pixel à l'écran** : la fenêtre s'étend vers la droite et vers le
-/// bas tant que la zone cliente le permet, et bascule à gauche ou au-dessus — l'origine recule
-/// alors d'autant, et le bouton est peint à ce décalage — quand il est posé contre le bord droit
-/// ou le bas du jeu.
+/// **Le bouton ne bouge pas d'un pixel à l'écran**, et l'infobulle se lit centrée sur lui
+/// (demande utilisateur 2026-09-28) :
+///
+/// - **En largeur**, la réserve est une bande centrée sur le bouton, **bornée à la zone cliente**
+///   du jeu : contre le bord gauche, elle commence au bord et l'infobulle glisse vers la droite ;
+///   contre le bord droit, l'inverse. L'infobulle, centrée sur le bouton puis retenue dans la
+///   fenêtre (`design::Tooltip::slide`), ne dépasse donc jamais du jeu.
+/// - **En hauteur**, dessous par défaut ; au-dessus seulement quand le bouton est posé si bas que
+///   la réserve ne tient plus dessous — et qu'elle tient dessus. Un jeu trop petit pour l'un
+///   comme l'autre garde le dessous.
 pub fn tip_window(
     base: (i32, i32),
     size: (i32, i32),
@@ -97,19 +103,20 @@ pub fn tip_window(
     client: ClientArea,
 ) -> TipWindow {
     let width = reserve.0.max(size.0);
-    let height = size.1 + reserve.1;
-    let grow_left = base.0 + width > client.left + client.width;
-    let above = base.1 + height > client.top + client.height;
-    let origin_x = if grow_left {
-        base.0 + size.0 - width
-    } else {
-        base.0
-    };
-    let origin_y = if above { base.1 - reserve.1 } else { base.1 };
+    let client_right = client.left + client.width;
+    let centre = base.0 + size.0 / 2;
+    let band_left =
+        (centre - width / 2).clamp(client.left, (client_right - width).max(client.left));
+    let left = band_left.min(base.0);
+    let right = (band_left + width).max(base.0 + size.0);
+    let below_fits = base.1 + size.1 + reserve.1 <= client.top + client.height;
+    let above_fits = base.1 - reserve.1 >= client.top;
+    let above = !below_fits && above_fits;
+    let top = if above { base.1 - reserve.1 } else { base.1 };
     TipWindow {
-        position: (origin_x, origin_y),
-        size: (width, height),
-        button_origin: (base.0 - origin_x, base.1 - origin_y),
+        position: (left, top),
+        size: (right - left, size.1 + reserve.1),
+        button_origin: (base.0 - left, base.1 - top),
         above,
     }
 }
@@ -164,28 +171,73 @@ mod tests {
         assert_eq!(window_position(None, CLIENT, SIDE), (100 + 218, 50 + 31));
     }
 
-    /// Au survol, la fenêtre s'étend vers la droite et le bas, et bascule contre les bords —
-    /// sans jamais déplacer le bouton à l'écran.
-    #[test]
-    fn l_infobulle_s_ouvre_sans_deplacer_le_bouton() {
-        let reserve = (240, 36);
-        let base = window_position(None, CLIENT, SIDE);
-        let tip = tip_window(base, SIDE, reserve, CLIENT);
-        assert_eq!(tip.position, base);
-        assert_eq!(tip.size, (240, 78));
-        assert!(!tip.above);
+    /// Au survol, la fenêtre s'étend sans jamais déplacer le bouton à l'écran.
+    fn button_on_screen(tip: &TipWindow) -> (i32, i32) {
+        (
+            tip.position.0 + tip.button_origin.0,
+            tip.position.1 + tip.button_origin.1,
+        )
+    }
 
-        let coin = window_position(Some((5000, 5000)), CLIENT, SIDE);
-        let tip = tip_window(coin, SIDE, reserve, CLIENT);
+    const RESERVE: (i32, i32) = (240, 40);
+
+    /// Par défaut, la réserve est centrée sous le bouton.
+    #[test]
+    fn l_infobulle_s_ouvre_centree_dessous() {
+        let base = window_position(None, CLIENT, SIDE);
+        let tip = tip_window(base, SIDE, RESERVE, CLIENT);
+        assert_eq!(button_on_screen(&tip), base);
+        assert!(!tip.above);
+        assert_eq!(tip.size, (240, 82));
+        assert_eq!(tip.position.0 + tip.size.0 / 2, base.0 + SIDE.0 / 2);
+        assert_eq!(tip.position.1, base.1);
+    }
+
+    /// Contre le bord gauche du jeu, la réserve commence au bord : l'infobulle glisse à droite.
+    #[test]
+    fn contre_le_bord_gauche_elle_glisse_a_droite() {
+        let base = window_position(Some((0, 300)), CLIENT, SIDE);
+        let tip = tip_window(base, SIDE, RESERVE, CLIENT);
+        assert_eq!(button_on_screen(&tip), base);
+        assert_eq!(tip.position.0, CLIENT.left);
+        assert_eq!(tip.size.0, 240);
+        assert!(!tip.above);
+    }
+
+    /// Contre le bord droit, elle finit au bord : l'infobulle glisse à gauche.
+    #[test]
+    fn contre_le_bord_droit_elle_glisse_a_gauche() {
+        let base = window_position(Some((5000, 300)), CLIENT, SIDE);
+        let tip = tip_window(base, SIDE, RESERVE, CLIENT);
+        assert_eq!(button_on_screen(&tip), base);
+        assert_eq!(tip.position.0 + tip.size.0, CLIENT.left + CLIENT.width);
+        assert_eq!(tip.size.0, 240);
+    }
+
+    /// Tout en bas, la réserve ne tient plus dessous : elle passe au-dessus, toujours centrée.
+    #[test]
+    fn tout_en_bas_elle_passe_au_dessus() {
+        let base = window_position(Some((900, 5000)), CLIENT, SIDE);
+        let tip = tip_window(base, SIDE, RESERVE, CLIENT);
         assert!(tip.above);
-        assert_eq!(
-            (
-                tip.position.0 + tip.button_origin.0,
-                tip.position.1 + tip.button_origin.1
-            ),
-            coin
-        );
-        assert_eq!(tip.position.0 + tip.size.0, coin.0 + SIDE.0);
+        assert_eq!(button_on_screen(&tip), base);
+        assert_eq!(tip.position.1, base.1 - RESERVE.1);
+        assert_eq!(tip.position.0 + tip.size.0 / 2, base.0 + SIDE.0 / 2);
+        // Juste assez de place dessous : elle y reste.
+        let juste = (900, CLIENT.height - SIDE.1 - RESERVE.1);
+        let base = window_position(Some(juste), CLIENT, SIDE);
+        assert!(!tip_window(base, SIDE, RESERVE, CLIENT).above);
+    }
+
+    /// Un jeu trop bas pour l'un comme l'autre garde le dessous, le défaut.
+    #[test]
+    fn sans_place_nulle_part_elle_reste_dessous() {
+        let tiny = ClientArea {
+            height: 60,
+            ..CLIENT
+        };
+        let base = window_position(None, tiny, SIDE);
+        assert!(!tip_window(base, SIDE, RESERVE, tiny).above);
     }
 
     #[test]
