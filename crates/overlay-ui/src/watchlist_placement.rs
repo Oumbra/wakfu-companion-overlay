@@ -43,13 +43,20 @@ pub struct Strip {
     /// dans le centrage : le bandeau jamais déplacé reste exactement où il était avant qu'elle
     /// n'existe, et la poignée vient se poser à sa gauche.
     pub chrome_left: i32,
+    /// La rangée de la poignée, AU-DESSUS du bandeau horizontal dont les boutons s'alignent en
+    /// rangée (`panels::watchlist::chrome_top`). Même règle que [`Self::chrome_left`] : elle ne
+    /// compte pas dans l'ancrage, le bandeau jamais déplacé garde ses boutons à [`DEFAULT_TOP`].
+    pub chrome_top: i32,
 }
 
 /// Décalage du bandeau jamais déplacé, depuis le coin haut-gauche de la zone cliente : centré
 /// horizontalement (poignée exclue, voir [`Strip::chrome_left`]), à [`DEFAULT_TOP`] du haut.
 pub fn default_offset(client: ClientArea, strip: Strip) -> (i32, i32) {
     let band = strip.width - strip.chrome_left;
-    ((client.width - band) / 2 - strip.chrome_left, DEFAULT_TOP)
+    (
+        (client.width - band) / 2 - strip.chrome_left,
+        DEFAULT_TOP - strip.chrome_top,
+    )
 }
 
 /// Borne un décalage à la zone cliente du jeu : le bandeau reste entièrement dans le cadre, sa
@@ -209,6 +216,11 @@ pub struct Plan {
     /// La fenêtre de base dans la fenêtre OS, en points — `Some` seulement étendue
     /// (`render_content::RenderContent::watchlist_base`).
     pub base: Option<egui::Rect>,
+    /// **Bandeau couché en rangée, collé au bord bas du jeu** (demande utilisateur 2026-09-28) :
+    /// sa fenêtre touche le bas de la zone cliente, il n'y a plus de place sous lui — la pastille
+    /// passe sous les boutons et les infobulles au-dessus (`panels::watchlist::WatchlistChrome::
+    /// flipped`).
+    pub flipped: bool,
 }
 
 /// Voir [`Plan`]. `offset` est la position voulue par l'utilisateur
@@ -263,9 +275,17 @@ pub fn plan(state: StripState, offset: Option<(i32, i32)>, client: ClientArea, s
         } else {
             physical(watchlist::chrome_left(state.entry_count, state.tracking_enabled) as f64)
         },
+        chrome_top: if state.vertical {
+            0
+        } else {
+            physical(watchlist::chrome_top(state.entry_count, state.tracking_enabled) as f64)
+        },
     };
     let base_position = window_position(offset, client, strip);
     let side = side(base_position, client, strip);
+    let flipped = !state.vertical
+        && watchlist::controls_in_row(state.entry_count, state.tracking_enabled)
+        && base_position.1 + strip.height >= client.top + client.height;
     let expanded = state.vertical && (state.hovered || state.toast_active);
     if !expanded {
         return Plan {
@@ -275,6 +295,7 @@ pub fn plan(state: StripState, offset: Option<(i32, i32)>, client: ClientArea, s
             base_position,
             side,
             base: None,
+            flipped,
         };
     }
     let reserve = if state.toast_active {
@@ -307,6 +328,7 @@ pub fn plan(state: StripState, offset: Option<(i32, i32)>, client: ClientArea, s
             egui::pos2(left, 0.0),
             egui::vec2(base_size.0 as f32, base_size.1 as f32),
         )),
+        flipped,
     }
 }
 
@@ -335,6 +357,7 @@ mod tests {
         width: 400,
         height: 120,
         chrome_left: 26,
+        chrome_top: 0,
     };
 
     /// Jamais déplacé, le bandeau reste où il était avant la poignée : centré sur le jeu, la
@@ -396,6 +419,7 @@ mod tests {
             width: 90,
             height: 400,
             chrome_left: 0,
+            chrome_top: 0,
         };
         assert_eq!(side((CLIENT.left, 300), CLIENT, colonne), Side::Right);
         assert_eq!(
@@ -412,6 +436,7 @@ mod tests {
             width: 90,
             height: 400,
             chrome_left: 0,
+            chrome_top: 0,
         };
         let base = (1500, 300);
         for side in [Side::Left, Side::Right] {
@@ -462,5 +487,46 @@ mod tests {
         );
         assert_eq!(survol.size.0, repos.size.0 + VERTICAL_TIP_RESERVE as f64);
         assert!(hovers(repos.base_position, &repos));
+    }
+
+    /// Bandeau vide (boutons en rangée) : la rangée de la pastille est gardée au-dessus, et le
+    /// bandeau jamais déplacé garde pourtant ses boutons à [`DEFAULT_TOP`].
+    #[test]
+    fn en_rangee_la_pastille_se_garde_au_dessus_sans_descendre_les_boutons() {
+        let vide = StripState {
+            entry_count: 0,
+            tracking_enabled: true,
+            ..Default::default()
+        };
+        let repos = plan(vide, None, CLIENT, 1.0);
+        assert_eq!(repos.strip.chrome_left, 0);
+        assert_eq!(repos.strip.chrome_top, 26);
+        assert_eq!(
+            repos.base_position.1 + repos.strip.chrome_top,
+            CLIENT.top + DEFAULT_TOP
+        );
+        assert!(!repos.flipped);
+    }
+
+    /// Collé au bas du jeu, le bandeau en rangée s'inverse ; le carré, lui, jamais.
+    #[test]
+    fn colle_en_bas_le_bandeau_en_rangee_s_inverse() {
+        let vide = StripState {
+            entry_count: 0,
+            tracking_enabled: true,
+            ..Default::default()
+        };
+        assert!(plan(vide, Some((600, 5000)), CLIENT, 1.0).flipped);
+        assert!(!plan(vide, Some((600, 500)), CLIENT, 1.0).flipped);
+        let carre = StripState {
+            entry_count: 3,
+            ..vide
+        };
+        assert!(!plan(carre, Some((600, 5000)), CLIENT, 1.0).flipped);
+        let dresse = StripState {
+            vertical: true,
+            ..vide
+        };
+        assert!(!plan(dresse, Some((600, 5000)), CLIENT, 1.0).flipped);
     }
 }

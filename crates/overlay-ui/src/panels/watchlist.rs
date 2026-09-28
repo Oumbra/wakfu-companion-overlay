@@ -694,15 +694,44 @@ pub fn content_width(entry_count: usize, tracking_enabled: bool) -> f32 {
         entry_count as f32 * TILE_SIZE + (entry_count as f32 - 1.0) * TILE_GAP
     };
     let right_of_control = (TILE_GAP + entries_width).max(layout.tooltip_reserve());
-    chrome_left(entry_count, tracking_enabled) + control_row_width(layout) + right_of_control
+    let width =
+        chrome_left(entry_count, tracking_enabled) + control_row_width(layout) + right_of_control;
+    // En rangée, toutes les infobulles s'ouvrent centrées sous les boutons (voir
+    // [`control_button_row`]) : la fenêtre doit loger la plus longue, celle du replacement de la
+    // pastille — sans quoi elle passerait sur deux lignes au-dessus d'un Suivi coupé.
+    if controls_in_row(entry_count, tracking_enabled) {
+        width.max(ROW_TOOLTIP_MIN_WIDTH)
+    } else {
+        width
+    }
 }
+
+/// Largeur minimale du bandeau couché en rangée : « Replacer à l'emplacement d'origine », la plus
+/// longue de ses infobulles, mesurée à ~205 px sur les captures du 2026-09-28, plus une garde.
+const ROW_TOOLTIP_MIN_WIDTH: f32 = 216.0;
 
 /// **Colonne gardée à GAUCHE du bandeau couché pour la pastille** ([`chrome_pill`]) :
 /// [`CHROME_RESERVE`] quand les boutons forment un carré, rien quand ils s'alignent en rangée
-/// (bandeau vide, Suivi coupé) — la pastille se couche alors SOUS la rangée (demande utilisateur
-/// 2026-09-28), dans la hauteur que la fenêtre garde déjà sous elle pour les infobulles.
+/// (bandeau vide, Suivi coupé) — la pastille se couche alors AU-DESSUS de la rangée, centrée
+/// sur elle (demande utilisateur 2026-09-28, [`chrome_top`]).
 pub fn chrome_left(entry_count: usize, tracking_enabled: bool) -> f32 {
-    if ControlLayout::for_state(entry_count, tracking_enabled) == ControlLayout::Square {
+    if controls_in_row(entry_count, tracking_enabled) {
+        0.0
+    } else {
+        CHROME_RESERVE
+    }
+}
+
+/// **Les boutons de contrôle s'alignent-ils en rangée ?** (bandeau vide, Suivi coupé) — la
+/// pastille se couche alors sur eux ([`chrome_top`]) au lieu de se dresser à leur gauche.
+pub fn controls_in_row(entry_count: usize, tracking_enabled: bool) -> bool {
+    ControlLayout::for_state(entry_count, tracking_enabled) != ControlLayout::Square
+}
+
+/// **Rangée gardée AU-DESSUS du bandeau couché pour la pastille** — le pendant de
+/// [`chrome_left`] quand les boutons s'alignent en rangée : [`CHROME_RESERVE`], zéro en carré.
+pub fn chrome_top(entry_count: usize, tracking_enabled: bool) -> f32 {
+    if controls_in_row(entry_count, tracking_enabled) {
         CHROME_RESERVE
     } else {
         0.0
@@ -1160,6 +1189,10 @@ pub struct WatchlistChrome {
     /// par l'hôte (`watchlist_placement::side`). Sans objet à l'horizontale, où tout s'ouvre en
     /// dessous.
     pub side: crate::watchlist_placement::Side,
+    /// **Bandeau couché en rangée, collé au bord BAS du jeu** (2026-09-28, calculé par l'hôte :
+    /// `watchlist_placement::Plan::flipped`) : l'ordre s'inverse — les infobulles s'ouvrent
+    /// au-dessus de la rangée et la pastille passe dessous, faute de place sous le bandeau.
+    pub flipped: bool,
 }
 
 impl WatchlistChrome {
@@ -1167,6 +1200,7 @@ impl WatchlistChrome {
     /// doc de module, refonte du 2026-09-13), vers le centre du jeu à la verticale.
     fn tooltip_side(self) -> design::TooltipSide {
         match (self.vertical, self.side) {
+            (false, _) if self.flipped => design::TooltipSide::Above,
             (false, _) => design::TooltipSide::Below,
             (true, crate::watchlist_placement::Side::Left) => design::TooltipSide::Left,
             (true, crate::watchlist_placement::Side::Right) => design::TooltipSide::Right,
@@ -1267,9 +1301,10 @@ pub fn show(
     // Le bloc des boutons de contrôle tel que peint : la pastille y accroche ses infobulles (voir
     // [`chrome_pill`]).
     let mut control_rect = egui::Rect::NOTHING;
-    // Bandeau couché dont les boutons s'alignent en rangée : la pastille se couche sous eux au
-    // lieu de se dresser à leur gauche (demande utilisateur 2026-09-28).
-    let pill_under_row = !chrome.vertical && layout != ControlLayout::Square;
+    // Bandeau couché dont les boutons s'alignent en rangée : la pastille se couche au-dessus
+    // d'eux, centrée — dessous quand le bandeau est collé au bas du jeu — au lieu de se dresser à
+    // leur gauche (demande utilisateur 2026-09-28, voir [`chrome_pill`]).
+    let pill_row = !chrome.vertical && layout != ControlLayout::Square;
     // Où la pastille de la poignée se pose (voir [`chrome_pill`]) : la colonne gardée à gauche du
     // bandeau couché, la rangée gardée au-dessus du bandeau dressé.
     let pill_origin;
@@ -1325,10 +1360,31 @@ pub fn show(
             strip_rect = strip.inner_rect;
         }
     } else {
+        if pill_row {
+            if chrome.flipped {
+                // Collé au bas du jeu : la rangée et sa pastille descendent au pied de la fenêtre,
+                // la place des infobulles passe au-dessus. Le toast, lui, reste sous le tout.
+                let toast_area = if is_active(toast, now) {
+                    TOAST_AREA_HEIGHT
+                } else {
+                    0.0
+                };
+                ui.add_space(
+                    (ui.available_height()
+                        - toast_area
+                        - control_row_height(layout)
+                        - CHROME_RESERVE)
+                        .max(0.0),
+                );
+            } else {
+                // La rangée de la pastille, gardée en permanence au-dessus des boutons.
+                ui.add_space(CHROME_RESERVE);
+            }
+        }
         ui.horizontal_top(|ui| {
-            // La colonne de la pastille, gardée en permanence à côté du carré ; en rangée, la
-            // pastille passe dessous (voir [`chrome_left`]).
-            if !pill_under_row {
+            // La colonne de la pastille, gardée en permanence à côté du carré ; en rangée, elle
+            // passe au-dessus (voir [`chrome_left`]).
+            if !pill_row {
                 ui.add_space(CHROME_RESERVE);
             }
             // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08), descendu
@@ -1371,13 +1427,9 @@ pub fn show(
             strip_rect = strip.inner_rect;
         });
         // La pastille se centre sur la rangée des tuiles, sous la barre de défilement quand elle
-        // est là — au même niveau que le carré de contrôle. En rangée, elle se couche sous les
-        // boutons, alignée sur leur bord gauche.
-        pill_origin = if pill_under_row {
-            control_rect.left_bottom() + egui::vec2(0.0, CHROME_MARGIN)
-        } else {
-            ui.max_rect().min + egui::vec2(0.0, strip_scroll_area().space_before(ui))
-        };
+        // est là — au même niveau que le carré de contrôle. En rangée, `chrome_pill` la pose
+        // lui-même sur la rangée des boutons.
+        pill_origin = ui.max_rect().min + egui::vec2(0.0, strip_scroll_area().space_before(ui));
     }
     let TileHarvest {
         tiles_rect,
@@ -1452,7 +1504,7 @@ pub fn show(
     // La pastille de la poignée, une fois tout le reste déclaré : elle ne recouvre rien (sa place
     // est gardée), et sa zone de survol est le bandeau entier tel qu'il vient d'être peint.
     let band = ui.min_rect();
-    let pill = chrome_pill(ui, pill_origin, band, chrome, control_rect, pill_under_row);
+    let pill = chrome_pill(ui, pill_origin, band, chrome, control_rect, pill_row);
 
     ui.add_space(6.0);
 
@@ -1636,15 +1688,26 @@ fn chrome_pill(
     band: egui::Rect,
     chrome: WatchlistChrome,
     controls: egui::Rect,
-    under_row: bool,
+    row: bool,
 ) -> PillOutcome {
     let glyphs = 2 + usize::from(chrome.moved);
     let span =
         glyphs as f32 * CHROME_ICON_SIZE + (glyphs - 1) as f32 * CHROME_GAP + 2.0 * CHROME_PADDING;
-    // Couchée au-dessus du bandeau dressé, et sous la rangée de boutons du bandeau couché ;
-    // dressée à gauche du carré sinon.
-    let lying = chrome.vertical || under_row;
-    let pill = if lying {
+    // Couchée au-dessus du bandeau dressé ; couchée et centrée sur la rangée de boutons du
+    // bandeau couché, au-dessus — dessous quand il est collé au bas du jeu ; dressée à gauche du
+    // carré sinon.
+    let lying = chrome.vertical || row;
+    let pill = if row {
+        let y = if chrome.flipped {
+            controls.max.y + CHROME_MARGIN
+        } else {
+            controls.min.y - CHROME_MARGIN - CHROME_THICKNESS
+        };
+        egui::Rect::from_min_size(
+            egui::pos2(controls.center().x - span / 2.0, y),
+            egui::vec2(span, CHROME_THICKNESS),
+        )
+    } else if lying {
         egui::Rect::from_min_size(origin, egui::vec2(span, CHROME_THICKNESS))
     } else {
         // Centrée sur la rangée des tuiles, de la hauteur d'une case.
@@ -1681,16 +1744,19 @@ fn chrome_pill(
     // bloc des boutons, du même côté — sous lui à l'horizontale, vers le centre du jeu à la
     // verticale. Le survol reste celui du glyphe (voir `design::Tooltip::anchor`).
     //
-    // Couchée sous une rangée, la pastille est elle-même une rangée : chaque infobulle s'ouvre
-    // sous SON glyphe, comme sous les boutons de la rangée.
+    // En rangée, toutes — les quatre boutons comme les trois glyphes — s'ouvrent exactement au
+    // même endroit : centrées sous la rangée (au-dessus quand elle est collée au bas du jeu),
+    // glissées le long du bord de la fenêtre plutôt que réalignées (`design::Tooltip::slide`).
     let side = chrome.tooltip_side();
     let tip = |response: &egui::Response, text: &str| {
-        let infobulle = design::tooltip(response).side(side);
-        if controls.is_positive() && !under_row {
-            infobulle.anchor(controls).text(text);
-        } else {
-            infobulle.text(text);
+        let mut infobulle = design::tooltip(response).side(side);
+        if controls.is_positive() {
+            infobulle = infobulle.anchor(controls);
         }
+        if row {
+            infobulle = infobulle.slide();
+        }
+        infobulle.text(text);
     };
 
     let (orientation_tip, rotated) = if chrome.vertical {
@@ -2501,13 +2567,23 @@ fn control_button_row(
             remove_top_left + egui::vec2(0.0, step),
             Some(row_rect),
         ),
-        // En rangée, rien n'est jamais recouvert en dessous : chaque infobulle reste centrée sur
-        // SON bouton, ce qui dit lequel elle décrit.
-        ControlLayout::Row => (remove_top_left + along, remove_top_left + along * 2.0, None),
+        // En rangée couchée, toutes les infobulles s'ouvrent au MÊME endroit, centrées sous la
+        // rangée — celles de la pastille aussi (demande utilisateur 2026-09-28, voir
+        // [`chrome_pill`]). Dressée en colonne, chacune reste sur SON bouton.
+        ControlLayout::Row => (
+            remove_top_left + along,
+            remove_top_left + along * 2.0,
+            (!vertical).then_some(row_rect),
+        ),
         // Suivi coupé : "+"/"−" ne sont pas peints, "Détails" prend la première place de la rangée
         // (voir la doc ci-dessus). Même règle d'infobulle que la rangée complète.
-        ControlLayout::RowTrackingOff => (add_top_left, remove_top_left, None),
+        ControlLayout::RowTrackingOff => (
+            add_top_left,
+            remove_top_left,
+            (!vertical).then_some(row_rect),
+        ),
     };
+    let slide = !vertical && layout != ControlLayout::Square;
 
     // Les deux boutons de suivi ne sont peints QUE si la fonctionnalité est active — voir la doc
     // ci-dessus (2026-09-15). `Option` plutôt qu'un état `Disabled` : la demande est de les
@@ -2528,6 +2604,7 @@ fn control_button_row(
             ButtonTip {
                 anchor,
                 side: orientation.side,
+                slide,
             },
         )
     });
@@ -2569,6 +2646,7 @@ fn control_button_row(
             ButtonTip {
                 anchor,
                 side: orientation.side,
+                slide,
             },
         )
     });
@@ -2586,6 +2664,7 @@ fn control_button_row(
         ButtonTip {
             anchor,
             side: orientation.side,
+            slide,
         },
     );
     // Le clic est seulement REMONTÉ, jamais exécuté ici. Ce bouton appelait
@@ -2612,6 +2691,7 @@ fn control_button_row(
         ButtonTip {
             anchor,
             side: orientation.side,
+            slide,
         },
     );
     ControlRowClicks {
@@ -2632,6 +2712,9 @@ fn control_button_row(
 struct ButtonTip {
     anchor: Option<egui::Rect>,
     side: design::TooltipSide,
+    /// Centrée puis glissée le long du bord, jamais réalignée (`design::Tooltip::slide`) : en
+    /// rangée, pour que toutes s'ouvrent au même endroit.
+    slide: bool,
 }
 
 /// L'orientation du bandeau telle que le carré de contrôle la lit : dressé ou couché, et le côté
@@ -2719,7 +2802,11 @@ fn control_button(
     state: ControlButtonState,
     tip: ButtonTip,
 ) -> egui::Response {
-    let ButtonTip { anchor, side } = tip;
+    let ButtonTip {
+        anchor,
+        side,
+        slide,
+    } = tip;
     let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(CONTROL_BUTTON_SIZE));
     let mut bouton = design::icon_button(glyph)
         .context(IconContext::FirstPlan)
@@ -2739,6 +2826,9 @@ fn control_button(
     let mut infobulle = design::tooltip(&response).side(side);
     if let Some(anchor) = anchor {
         infobulle = infobulle.anchor(anchor);
+    }
+    if slide {
+        infobulle = infobulle.slide();
     }
     infobulle.text(tooltip);
     response

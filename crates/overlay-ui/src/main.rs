@@ -4829,6 +4829,7 @@ impl App {
                     vertical: self.watchlist_vertical,
                     moved: self.watchlist_position.is_some(),
                     side: watchlist_plan.map(|plan| plan.side).unwrap_or_default(),
+                    flipped: watchlist_plan.is_some_and(|plan| plan.flipped),
                 },
                 watchlist_base: watchlist_plan.and_then(|plan| plan.base),
                 click_through_tip,

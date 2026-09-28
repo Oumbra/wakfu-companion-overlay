@@ -1737,9 +1737,9 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
         (85.0, "details"),
         (115.0, "options"),
     ] {
-        // Pas de décalage de la poignée ici : en rangée, la pastille passe SOUS les boutons, le
-        // bandeau ne garde aucune colonne à leur gauche (`watchlist::chrome_left`).
-        harness.hover_at(egui::pos2(x, 25.0));
+        // En rangée, la pastille est gardée AU-DESSUS des boutons (`watchlist::chrome_top`) : la
+        // rangée descend d'autant, sans rien garder à sa gauche.
+        harness.hover_at(egui::pos2(x, 25.0 + POIGNEE));
         harness.run();
         harness.snapshot(format!("watchlist_vide_tooltip_{nom}_dessous"));
     }
@@ -1770,11 +1770,13 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
     let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
 
+    // Depuis le 2026-09-28, les deux rangées gardent la même largeur plancher : celle de la plus
+    // longue infobulle de la pastille (« Replacer à l'emplacement d'origine »), centrée sous les
+    // boutons comme toutes les autres. La RANGÉE se referme toujours, la fenêtre plus.
     let window_width = bandeau_largeur_suivi(0, false);
     assert!(
-        window_width < bandeau_largeur(0),
-        "Suivi coupé, la fenêtre doit rétrécir de deux boutons : {window_width} \
-         px contre {} px",
+        window_width <= bandeau_largeur(0),
+        "Suivi coupé, la fenêtre ne doit pas s'élargir : {window_width} px contre {} px",
         bandeau_largeur(0)
     );
 
@@ -1835,7 +1837,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
     // Les deux boutons qui restent, survolés là où « + » et « − » se tenaient : leur infobulle dit
     // « Détails » et « Options », et aucune ne dit « Ajouter » ni « Supprimer ».
     for (x, nom) in [(25.0, "details"), (55.0, "options")] {
-        harness.hover_at(egui::pos2(x, 25.0));
+        harness.hover_at(egui::pos2(x, 25.0 + POIGNEE));
         harness.run();
         harness.snapshot(format!("watchlist_suivi_coupe_tooltip_{nom}"));
     }

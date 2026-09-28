@@ -118,6 +118,7 @@ fn harnais(
         vertical,
         moved: position.is_some(),
         side: plan.side,
+        flipped: plan.flipped,
     };
     let mut textures = Textures {
         portraits: None,
@@ -264,31 +265,57 @@ fn infobulles_de_la_pastille_sous_le_carre() {
     }
 }
 
-/// Le centre du glyphe `index` de la pastille couchée SOUS la rangée de boutons du bandeau vide :
-/// la rangée fait 34 px de haut, la pastille commence 4 px sous elle, un glyphe de 14 px tous
-/// les 20 px après 4 px de rembourrage.
-fn glyphe_sous_la_rangee(index: usize) -> egui::Pos2 {
-    egui::pos2(
-        MARGE_HARNAIS + 4.0 + 7.0 + 20.0 * index as f32,
-        MARGE_HARNAIS + 34.0 + 4.0 + 4.0 + 7.0,
-    )
+/// Le centre du glyphe `index` de la pastille à trois glyphes couchée sur la rangée de boutons
+/// du bandeau vide : centrée sur la rangée (124 px de large, 34 de haut), 4 px au-dessus d'elle —
+/// ou 4 px dessous, `inverse`, quand le bandeau est collé au bas du jeu et que la rangée descend
+/// au pied de la fenêtre (120 px, moins les 6 de marge basse).
+fn glyphe_sur_la_rangee(index: usize, inverse: bool) -> egui::Pos2 {
+    let x = MARGE_HARNAIS + 62.0 - 31.0 + 4.0 + 7.0 + 20.0 * index as f32;
+    let y = if inverse {
+        MARGE_HARNAIS + (114.0 - 34.0 - 26.0) + 34.0 + 4.0 + 4.0 + 7.0
+    } else {
+        MARGE_HARNAIS + 4.0 + 7.0
+    };
+    egui::pos2(x, y)
 }
 
-/// Bandeau vide, boutons en rangée : la pastille se couche SOUS la rangée, ses glyphes en ligne,
-/// et chaque infobulle s'ouvre sous son glyphe (demande utilisateur 2026-09-28). Plus aucune
-/// colonne gardée à gauche des boutons.
+/// Bandeau vide, boutons en rangée : la pastille se couche AU-DESSUS de la rangée, centrée sur
+/// elle, et ses infobulles s'ouvrent exactement où s'ouvrent celles des quatre boutons — centrées
+/// sous la rangée (demande utilisateur 2026-09-28).
 #[test]
-fn bandeau_vide_pastille_couchee_sous_la_rangee() {
+fn bandeau_vide_pastille_couchee_au_dessus_de_la_rangee() {
     let mut harness = harnais(0, false, Some((300, 400)), false, Rc::default());
     for (index, nom) in [
         (0, "suivi_vide_infobulle_orientation"),
         (1, "suivi_vide_infobulle_poignee"),
         (2, "suivi_vide_infobulle_replacer"),
     ] {
-        harness.hover_at(glyphe_sous_la_rangee(index));
+        harness.hover_at(glyphe_sur_la_rangee(index, false));
         harness.run();
         harness.snapshot(nom);
     }
+}
+
+/// Collé au bas du jeu, l'ordre s'inverse : la rangée descend au pied de la fenêtre, la pastille
+/// passe dessous, et toutes les infobulles s'ouvrent au-dessus de la rangée.
+#[test]
+fn bandeau_vide_colle_en_bas_s_inverse() {
+    let mut harness = harnais(0, false, Some((300, 5000)), false, Rc::default());
+    for (index, nom) in [
+        (1, "suivi_vide_bas_infobulle_poignee"),
+        (2, "suivi_vide_bas_infobulle_replacer"),
+    ] {
+        harness.hover_at(glyphe_sur_la_rangee(index, true));
+        harness.run();
+        harness.snapshot(nom);
+    }
+    // Un bouton de la rangée : son infobulle s'ouvre au même endroit que celles de la pastille.
+    harness.hover_at(egui::pos2(
+        MARGE_HARNAIS + 4.0 + 13.0,
+        MARGE_HARNAIS + 54.0 + 4.0 + 13.0,
+    ));
+    harness.run();
+    harness.snapshot("suivi_vide_bas_infobulle_ajouter");
 }
 
 /// Sans pointeur, rien : la place de la pastille reste vide.
