@@ -460,6 +460,21 @@
 //!
 //! Les infobulles (« Alliés (F2) », « Dégâts infligés (F3) »…) sont les libellés des cases, portés
 //! par le composant ; `UiIcons` ne porte plus ces cinq textures.
+//!
+//! **Panneau réductible (2026-09-28)** — retour d'un joueur : le panneau est trop large. Décidé
+//! sur maquettes (quatre itérations en artefact) :
+//! - Au survol du panneau seulement, une flèche blanche (même famille que le cadenas, voir
+//!   [`paint_fold_button`]) se pose sur la ligne du fermoir du cadre — la décoration au milieu de
+//!   son flanc côté jeu. Déplié, elle se tient à l'EXTÉRIEUR du bloc qu'elle cache, juste après le
+//!   détail ; réduit, contre le fermoir. Elle pointe vers le bord de l'écran pour ranger, vers le
+//!   centre du jeu pour ouvrir.
+//! - Réduit, il ne reste que le switch de camp, le total de la grandeur affichée (icône de la
+//!   grandeur + chiffre détourés, SANS fond — le fond opaque a été jugé laid) entre le switch et
+//!   le cadre, et les portraits avec leurs pourcentages. Un clic sur ce total passe à la grandeur
+//!   suivante : les onglets de grandeur sont repliés avec le reste.
+//! - Animation en deux temps ([`FOLD_DURATION`]) : le détail se replie en volet vers le cadre,
+//!   puis le cadre descend et le total apparaît ; l'ouverture rejoue la même course à l'envers.
+//! - L'état est mémorisé dans la config (`config::OverlayConfig::combat_collapsed`).
 
 use overlay_engine::{CatalogIndex, FightSnapshot, FighterDamage, SessionSnapshot};
 
@@ -714,6 +729,7 @@ pub fn show(
     // de la pile, et le cadre des portraits, dont l'ornement la chevauche, garde ses clics. Elle
     // se PEINT en revanche à la fin, par-dessus tout (voir [`side_handle`]).
     let handle = side_handle(ui, chrome.locked);
+    let fold = Fold::of(ui.ctx(), chrome.collapsed);
     // Ordre STABLE (pas trié par dégâts, voir doc de module et `FightSnapshot::fighters`) — c'est
     // l'ordre des PORTRAITS, cadre et liste plate confondus. Calculé ICI, avant toute mise en page
     // (plutôt que dans un `match fight` qui pourrait s'arrêter avant), pour que la ligne leader
@@ -813,8 +829,24 @@ pub fn show(
                 // module) — peint inconditionnellement, avant tout test sur le contenu du cadre, pour
                 // qu'il reste atteignable sans combat comme dans un camp vide (c'était déjà la raison
                 // qui le gardait dans le bandeau leader, elle ne change pas de colonne avec lui).
-                show_side_row(ui, side, shortcuts);
+                let side_row_width = show_side_row(ui, side, shortcuts);
                 ui.add_space(SIDE_ROW_GAP - ui.spacing().item_spacing.y);
+                // Réduit : le total de la grandeur se glisse entre le switch et le cadre, qui
+                // descend d'autant — progressivement, au rythme de `Fold::total`.
+                if fold.total > 0.0 {
+                    let cycle = show_folded_total(
+                        ui,
+                        *metric,
+                        shortcuts,
+                        total_damage_raw,
+                        side_row_width,
+                        fold.total,
+                    );
+                    if cycle {
+                        *metric = metric.next();
+                    }
+                }
+                let frame_top = ui.cursor().min.y;
                 if !framed.is_empty() {
                     let marks = marks_in(framed, selection);
                     let clicked = frame.show(
@@ -884,13 +916,29 @@ pub fn show(
                 // Le gabarit ne termine la colonne que s'il est seul : une liste plate d'alliés
                 // excédentaires ou un cadre à défilement se poursuit sous lui, et c'est alors leur
                 // bas — sans rien à rogner — qui fait la décoration.
-                (!framed.is_empty() && enemy_scroll.is_empty() && flat_portraits.is_empty())
-                    .then_some(framed.len())
+                let slots =
+                    (!framed.is_empty() && enemy_scroll.is_empty() && flat_portraits.is_empty())
+                        .then_some(framed.len());
+                (slots, frame_top)
             });
-            let trim = left.inner.map_or(0.0, super::combat_frame::bottom_trim);
+            let (slots, frame_top) = left.inner;
+            let trim = slots.map_or(0.0, super::combat_frame::bottom_trim);
             let decoration_bottom = left.response.rect.max.y - 1.0 - trim;
+            let frame_right = left.response.rect.min.x + FRAME_WIDTH;
 
             ui.add_space(COLUMN_GAP);
+            let column_left = ui.cursor().min.x;
+            let geometry = FoldGeometry {
+                // Le fermoir tient au milieu du flanc du cadre (les six gabarits le posent à
+                // mi-hauteur de leur encre, mesuré sur les captures à 3 px près).
+                clasp_y: (frame_top + decoration_bottom) / 2.0,
+                folded_x: frame_right + FOLD_BUTTON_GAP,
+                open_x: column_left + BAR_MAX_WIDTH + LEADER_PANEL_OVERHANG + FOLD_BUTTON_GAP,
+            };
+            // Complètement réduit : la colonne n'existe plus du tout, rien à survoler ni à cliquer.
+            if fold.detail <= 0.0 {
+                return (decoration_bottom, geometry);
+            }
 
             // Colonne de droite : ligne leader (switch Alliés/Ennemis + total, voir `show_leader_row`)
             // — TOUJOURS peinte, y compris sans combat ou camp vide, pour que le switch reste
@@ -900,6 +948,22 @@ pub fn show(
             // dégâts décroissant — indépendante du rythme vertical de la colonne des portraits
             // (demande utilisateur explicite : « il ne faut pas que les groupes soient alignés au
             // portrait »).
+            // Le volet : la colonne se découvre depuis le cadre vers le jeu, en fondu. Le bord
+            // gauche du clip part d'un pixel AVANT le débord du bandeau leader : un clip qui
+            // tiendrait dans un bloc `mirror::upright_in` serait déplacé avec lui au lieu d'être
+            // réfléchi (voir `mirror::mirror_clip`), et le volet s'ouvrirait du mauvais côté.
+            if fold.detail < 1.0 {
+                let full = BAR_MAX_WIDTH + LEADER_PANEL_OVERHANG * 2.0;
+                let clip = egui::Rect::from_min_max(
+                    egui::pos2(column_left - LEADER_PANEL_OVERHANG - 1.0, f32::NEG_INFINITY),
+                    egui::pos2(
+                        column_left - LEADER_PANEL_OVERHANG + full * fold.detail,
+                        f32::INFINITY,
+                    ),
+                );
+                ui.set_clip_rect(ui.clip_rect().intersect(clip));
+                ui.multiply_opacity(fold.detail);
+            }
             ui.vertical(|ui| {
                 // Sans retrancher `item_spacing.y`, contrairement aux autres `add_space` de ce
                 // fichier : cet espace-ci OUVRE la colonne (rien avant lui dans le `vertical`), egui
@@ -940,9 +1004,10 @@ pub fn show(
                     combat_spell_block::show(ui, fight, sel, remote_icons, remote_icon_textures);
                 }
             });
-            decoration_bottom
+            (decoration_bottom, geometry)
         })
         .inner;
+    let (decoration_bottom, geometry) = decoration_bottom;
 
     // La lisière ne s'encre qu'ici, quand tout le panneau est peint : sous le cadre des portraits
     // elle serait invisible là où elle compte (voir [`paint_side_handle`]).
@@ -950,11 +1015,211 @@ pub fn show(
     // La rangée d'actions en dernier : au-dessus de tout le reste, et elle doit prendre le
     // pointeur à qui passerait dessous.
     let actions = paint_actions_row(ui, chrome, decoration_bottom);
+    let toggle_collapsed = paint_fold_button(ui, chrome.collapsed, &fold, geometry);
     CombatOutcome {
         toggle_lock: actions.toggle_lock,
         restore_requested: actions.restore_requested,
+        toggle_collapsed,
         drag: handle.drag,
     }
+}
+
+/// **Durée totale du repli ou du dépli** du panneau — les deux temps de l'animation compris (voir
+/// [`Fold`]). Validée sur maquette animée (2026-09-28) : assez longue pour qu'on voie le volet se
+/// ranger dans le cadre, assez courte pour ne pas faire attendre.
+pub const FOLD_DURATION: f32 = 0.5;
+/// Part de la course où le volet de détail se replie (du début, au repli) — le cadre ne commence à
+/// descendre qu'à [`FOLD_TOTAL_START`], les deux temps se chevauchent donc un peu.
+const FOLD_DETAIL_END: f32 = 0.55;
+const FOLD_TOTAL_START: f32 = 0.45;
+/// Hauteur de la ligne du total réduit, entre le switch de camp et le cadre : le corps du total
+/// (`TOTAL_FONT_SIZE`) et son contour, plus un peu d'air.
+const FOLDED_TOTAL_HEIGHT: f32 = 24.0;
+/// Écart entre l'icône de la grandeur et le chiffre, dans le total réduit.
+const FOLDED_TOTAL_ICON_GAP: f32 = 6.0;
+/// Côté de la zone cliquable de la flèche de repli, et côté du glyphe qu'elle peint — la zone est
+/// celle d'un glyphe de la rangée d'actions, pour la même main.
+const FOLD_BUTTON_SIZE: f32 = 20.0;
+/// Agrandissement du triangle (7 × 10 natif, voir `DsIcon::TriangleRight`) : à sa taille native il
+/// paraissait chétif à côté du cadenas (14 px) dont il partage la famille — 9 × 13 le met à son
+/// poids, comme sur la maquette validée.
+const FOLD_GLYPH_SCALE: f32 = 1.3;
+/// Air entre la flèche et ce qu'elle longe : le fermoir (réduit) ou le bord du détail (déplié).
+const FOLD_BUTTON_GAP: f32 = 4.0;
+
+/// **Où en est le repli du panneau**, en deux grandeurs de 0 à 1 déjà lissées — dérivées d'UNE
+/// seule course animée (`Context::animate_bool_with_time`, 0 déplié → 1 réduit) :
+/// - `detail` : ouverture du volet de détail (1 = entièrement visible). Il se replie sur le début
+///   de la course ;
+/// - `total` : apparition du total réduit (1 = en place, cadre descendu). Elle occupe la fin.
+///
+/// Au dépli la course se rejoue à l'envers, donc les temps aussi : le total s'efface et le cadre
+/// remonte d'abord, le volet se déploie ensuite — sans code à part pour l'ouverture.
+struct Fold {
+    detail: f32,
+    total: f32,
+}
+
+impl Fold {
+    fn of(ctx: &egui::Context, collapsed: bool) -> Self {
+        let t = ctx.animate_bool_with_time(egui::Id::new("combat-repli"), collapsed, FOLD_DURATION);
+        let phase = |from: f32, to: f32| ((t - from) / (to - from)).clamp(0.0, 1.0);
+        let smooth = |x: f32| x * x * (3.0 - 2.0 * x);
+        Self {
+            detail: 1.0 - smooth(phase(0.0, FOLD_DETAIL_END)),
+            total: smooth(phase(FOLD_TOTAL_START, 1.0)),
+        }
+    }
+}
+
+/// Les trois repères de la flèche de repli, relevés pendant la mise en page (repère gauche : le
+/// miroir les porte de l'autre côté avec le reste du décor).
+#[derive(Clone, Copy)]
+struct FoldGeometry {
+    /// Hauteur du fermoir — le centre vertical de la flèche, déplié comme réduit.
+    clasp_y: f32,
+    /// Bord gauche de la flèche une fois le panneau réduit : contre le fermoir.
+    folded_x: f32,
+    /// Bord gauche de la flèche panneau déplié : juste après le détail qu'elle cache.
+    open_x: f32,
+}
+
+/// **Le total du panneau réduit** : icône de la grandeur affichée puis chiffre, détourés comme le
+/// reste du texte flottant, centrés sur le bandeau du switch de camp (`width`), sans fond. Réserve
+/// sa place progressivement (`reveal`, voir [`Fold`]) pour que le cadre descende en douceur. Rend
+/// `true` la frame où il est cliqué : la grandeur passe à la suivante, puisque ses onglets sont
+/// repliés.
+fn show_folded_total(
+    ui: &mut egui::Ui,
+    metric: CombatMetric,
+    shortcuts: &ShortcutBindings,
+    total: i64,
+    width: f32,
+    reveal: f32,
+) -> bool {
+    let top = ui.cursor().min;
+    ui.add_space((FOLDED_TOTAL_HEIGHT + SIDE_ROW_GAP) * reveal);
+    let rect = egui::Rect::from_min_size(
+        // Le total glisse depuis le switch pendant qu'il apparaît.
+        top - egui::vec2(0.0, 6.0 * (1.0 - reveal)),
+        egui::vec2(width, FOLDED_TOTAL_HEIGHT),
+    );
+    let total_text = format_fr_thousands(total);
+    let digits = total_text.chars().filter(char::is_ascii_digit).count();
+    let font_size = if digits > TOTAL_FULL_SIZE_MAX_DIGITS {
+        TOTAL_FONT_SIZE_COMPACT
+    } else {
+        TOTAL_FONT_SIZE
+    };
+    let font = text::label_font(ui.ctx(), font_size);
+    let ds = design::DesignSystem::get(ui.ctx());
+    let icon = metric.icon();
+    let icon_size = ds.icon_native_size(icon);
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(total_text.clone(), font.clone(), TEXT_COLOR)
+        .size()
+        .x;
+    let content = icon_size.x + FOLDED_TOTAL_ICON_GAP + text_width;
+    let left = rect.center().x - content / 2.0;
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(left, rect.center().y - icon_size.y / 2.0),
+        icon_size,
+    );
+    let response = ui.interact(
+        rect,
+        ui.id().with("combat-total-reduit"),
+        egui::Sense::click(),
+    );
+    // Un chiffre se lit à l'endroit : le bloc change de côté avec le panneau, pas de sens.
+    crate::mirror::upright_in(ui, rect, |ui| {
+        let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        ui.multiply_opacity(reveal);
+        let painter = ui.painter().clone();
+        for offset in text::OUTLINE_FULL {
+            ds.paint_icon(
+                &painter,
+                icon_rect.translate(*offset),
+                icon,
+                egui::Color32::BLACK,
+            );
+        }
+        ds.paint_icon(&painter, icon_rect, icon, egui::Color32::WHITE);
+        text::paint_outlined_text(
+            &ui,
+            egui::pos2(icon_rect.max.x + FOLDED_TOTAL_ICON_GAP, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            &total_text,
+            font,
+            TEXT_COLOR,
+            text::OUTLINE_FULL,
+        );
+    });
+    if reveal < 1.0 {
+        return false;
+    }
+    let hotkey = shortcuts.label(ShortcutAction::CombatMetric);
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    design::tooltip(&response).text(format!(
+        "{} ({hotkey}) — cliquer pour passer à : {}",
+        metric.tooltip(),
+        metric.next().tooltip().to_lowercase()
+    ));
+    response.clicked()
+}
+
+/// **La flèche de repli** — glyphe blanc sans socle, comme le cadenas de la rangée d'actions (même
+/// teinte au repos, or au survol), et visible dans les mêmes conditions : pointeur posé sur le
+/// panneau (voir [`paint_actions_row`]).
+///
+/// Sur la ligne du fermoir, à l'extérieur du bloc qu'elle cache : après le détail quand il est
+/// déplié, contre le fermoir quand il est rangé — et entre les deux pendant l'animation, au
+/// rythme du volet. Peinte dans le repère gauche comme le décor : le miroir la porte de l'autre
+/// côté ET la retourne, si bien qu'elle pointe toujours vers le bord de l'écran pour ranger et
+/// vers le centre du jeu pour ouvrir. Rend `true` la frame où elle est cliquée.
+fn paint_fold_button(
+    ui: &mut egui::Ui,
+    collapsed: bool,
+    fold: &Fold,
+    geometry: FoldGeometry,
+) -> bool {
+    let panel = ui.max_rect();
+    let hovered = ui
+        .input(|i| i.pointer.latest_pos())
+        .is_some_and(|pos| panel.contains(pos));
+    if !hovered {
+        return false;
+    }
+    let x = geometry.folded_x + (geometry.open_x - geometry.folded_x) * fold.detail;
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(x, geometry.clasp_y - FOLD_BUTTON_SIZE / 2.0),
+        egui::Vec2::splat(FOLD_BUTTON_SIZE),
+    );
+    let response = ui.interact(
+        rect,
+        ui.id().with("combat-repli"),
+        egui::Sense::click_and_drag(),
+    );
+    let tint = if response.hovered() {
+        design::tokens::ICON_TINT_HOVER
+    } else {
+        TEXT_COLOR
+    };
+    let ds = design::DesignSystem::get(ui.ctx());
+    let icon = design::DsIcon::TriangleRight;
+    let icon_rect =
+        egui::Rect::from_center_size(rect.center(), ds.icon_native_size(icon) * FOLD_GLYPH_SCALE);
+    // Le triangle pointe nativement vers la GAUCHE (voir `DsIcon::TriangleRight`) : c'est le sens
+    // « ranger » d'un panneau posé à gauche. Au-delà de la moitié de la course, il se retourne.
+    let pointing_out = fold.detail >= 0.5;
+    ds.paint_icon_flipped(ui.painter(), icon_rect, icon, tint, !pointing_out);
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    design::tooltip(&response).text(if collapsed {
+        "Afficher le détail du combat"
+    } else {
+        "Réduire le panneau"
+    });
+    response.clicked()
 }
 
 /// **Ce que l'hôte sait de la fenêtre Combat et que le panneau ne peut pas savoir** (2026-09-17) :
@@ -984,6 +1249,9 @@ pub struct CombatChrome {
     /// c'est la seule condition d'affichage du glyphe de replacement — remettre au centre un
     /// panneau qui y est déjà n'aurait rien à faire.
     pub moved: bool,
+    /// **Le panneau est réduit** (2026-09-28) : seuls restent le switch de camp, le total de la
+    /// grandeur et le cadre des portraits. Voir `config::OverlayConfig::combat_collapsed`.
+    pub collapsed: bool,
 }
 
 /// Ce que [`show`] rend à l'hôte, au-delà de l'affichage : deux intentions et un geste, jamais une
@@ -996,6 +1264,9 @@ pub struct CombatOutcome {
     /// Le glyphe de replacement vient d'être cliqué : à l'hôte d'ouvrir la confirmation qui, sur
     /// un « Oui », rend son centrage vertical au panneau.
     pub restore_requested: bool,
+    /// La flèche de repli vient d'être cliquée : à l'hôte d'inverser [`CombatChrome::collapsed`] et
+    /// de l'écrire dans la config.
+    pub toggle_collapsed: bool,
     /// Le geste de déplacement vertical du panneau, s'il y en a un cette frame.
     pub drag: crate::panels::drag::PanelDrag,
 }
@@ -1314,7 +1585,8 @@ fn paint_action(
 /// : c'est la même exigence qu'avant le déplacement, le switch ne doit jamais devenir inatteignable.
 /// Reste aussi le TOUT PREMIER widget peint du panneau, ce dont dépend la marge supérieure réservée
 /// à son infobulle (voir `render_content::COMBAT_TOOLTIP_HEADROOM`).
-fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutBindings) {
+/// Rend la largeur du bandeau peint — celle sur laquelle se centre le total du panneau réduit.
+fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutBindings) -> f32 {
     let row_height = SWITCH_HEIGHT + LEADER_PANEL_PADDING * 2.0;
     let (row_rect, _) =
         ui.allocate_exact_size(egui::vec2(FRAME_WIDTH, row_height), egui::Sense::hover());
@@ -1348,6 +1620,7 @@ fn show_side_row(ui: &mut egui::Ui, side: &mut CombatSide, shortcuts: &ShortcutB
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(switch_rect));
         switch.show(&mut child);
     });
+    backdrop.width()
 }
 
 /// Ligne "leader" en tête de la colonne des barres, sur un fond opacifié (`LEADER_PANEL_FILL`, voir

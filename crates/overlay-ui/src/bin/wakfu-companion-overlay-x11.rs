@@ -306,6 +306,8 @@ mod linux_main {
         combat_position_y: Option<i32>,
         /// Voir `main.rs::App::combat_locked` — le cadenas du panneau Combat.
         combat_locked: bool,
+        /// Le panneau Combat est-il réduit ? — sa flèche de repli (`config::OverlayConfig::combat_collapsed`).
+        combat_collapsed: bool,
         /// Le glissement du panneau en cours, s'il y en a un — voir `CombatDragState`.
         combat_drag: Option<CombatDragState>,
         /// Prévenir par une notification du système qu'un personnage doit jouer ? — réglage LOCAL
@@ -596,6 +598,8 @@ mod linux_main {
         combat_position_y: Option<i32>,
         /// Voir `App::combat_locked` — relu de la config au démarrage.
         combat_locked: bool,
+        /// Le panneau Combat est-il réduit ? — sa flèche de repli (`config::OverlayConfig::combat_collapsed`).
+        combat_collapsed: bool,
         /// Voir `App::turn_notification` — même provenance.
         turn_notification: bool,
         /// Le son de la notification de tour coupé (`config::OverlayConfig::
@@ -662,6 +666,7 @@ mod linux_main {
                 combat_on_right,
                 combat_position_y,
                 combat_locked,
+                combat_collapsed,
                 turn_notification,
                 turn_notification_muted,
                 features,
@@ -732,6 +737,7 @@ mod linux_main {
                 combat_on_right,
                 combat_position_y,
                 combat_locked,
+                combat_collapsed,
                 turn_notification,
                 turn_notification_muted,
                 features,
@@ -2275,6 +2281,20 @@ mod linux_main {
             self.open_reset_confirm(event_loop, game_window, rect, ResetTarget::WatchlistCounter);
         }
 
+        /// Voir `main.rs::toggle_combat_collapsed`.
+        fn toggle_combat_collapsed(&mut self) {
+            self.combat_collapsed = !self.combat_collapsed;
+            self.persist_config();
+            tracing::info!(
+                "[combat] panneau {}.",
+                if self.combat_collapsed {
+                    "réduit"
+                } else {
+                    "déplié"
+                }
+            );
+        }
+
         /// Voir `main.rs::toggle_combat_lock`.
         fn toggle_combat_lock(&mut self) {
             self.combat_locked = !self.combat_locked;
@@ -2570,6 +2590,7 @@ mod linux_main {
             saved.recap_locked = self.recap_locked;
             saved.combat_position_y = self.combat_position_y;
             saved.combat_locked = self.combat_locked;
+            saved.combat_collapsed = self.combat_collapsed;
             saved.set_features(self.features);
             saved.set_alert_mutes(self.alert_mutes);
             config::save(&saved);
@@ -3007,6 +3028,8 @@ mod linux_main {
                 ToggleRecapLock,
                 /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
                 ToggleCombatLock,
+                /// La flèche de repli du panneau Combat vient d\'être cliquée (voir `toggle_combat_collapsed`).
+                ToggleCombatCollapsed,
                 /// Le bouton œil vient d'être cliqué (voir `toggle_interactive`).
                 ToggleInteractive,
                 /// Carte d'alerte de chat cliquée — voir `main.rs`.
@@ -3266,6 +3289,7 @@ mod linux_main {
                     let combat_chrome = panels::combat::CombatChrome {
                         locked: self.combat_locked,
                         moved: self.combat_position_y.is_some(),
+                        collapsed: self.combat_collapsed,
                     };
                     // **Les réglages du volet « Paramètres » de la Carte** — voir
                     // `main.rs::App::redraw` : pris à neuf à chaque frame, la Carte n'a pas de
@@ -3868,6 +3892,9 @@ mod linux_main {
                     if outcome.combat_toggle_lock {
                         post_redraw = PostRedraw::ToggleCombatLock;
                     }
+                    if outcome.combat_toggle_collapsed {
+                        post_redraw = PostRedraw::ToggleCombatCollapsed;
+                    }
                     // Le bouton œil (2026-09-28) — voir `main.rs`.
                     if outcome.toggle_interactive {
                         post_redraw = PostRedraw::ToggleInteractive;
@@ -3960,6 +3987,7 @@ mod linux_main {
                 }
                 PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
                 PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),
+                PostRedraw::ToggleCombatCollapsed => self.toggle_combat_collapsed(),
                 PostRedraw::ToggleInteractive => self.toggle_interactive(),
                 PostRedraw::Whisper(author) => self.whisper_from_toast(&author),
                 PostRedraw::BrowseOptions => self.start_file_dialog(),
@@ -4481,6 +4509,7 @@ mod linux_main {
             combat_on_right: saved_config.combat_on_right,
             combat_position_y: saved_config.combat_position_y,
             combat_locked: saved_config.combat_locked,
+            combat_collapsed: saved_config.combat_collapsed,
             turn_notification: saved_config.turn_notification,
             turn_notification_muted: saved_config.turn_notification_muted,
             features: saved_config.features(),

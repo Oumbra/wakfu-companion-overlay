@@ -106,6 +106,12 @@ pub struct OverlayConfig {
     /// **Locale et non au compte**, comme la hauteur qu'elle protège.
     #[serde(default)]
     pub combat_locked: bool,
+    /// **Le panneau Combat est-il réduit ?** (2026-09-28) — sa flèche de repli
+    /// (`panels::combat::CombatChrome::collapsed`). Réduit, il ne garde que le switch de camp, le
+    /// total de la grandeur affichée et le cadre des portraits. Déplié par défaut ; **locale**,
+    /// comme le verrou et la hauteur du panneau.
+    #[serde(default)]
+    pub combat_collapsed: bool,
     /// Durée d'affichage de la carte d'alerte de **chat**, en secondes (onglet « Chat », voir
     /// `panels::chat_tab::ChatToastSettings`). **Ici et non au compte**, par exception au principe
     /// de la doc de module : ce réglage n'a pas d'équivalent web, et le serveur n'accepte que des
@@ -454,6 +460,7 @@ impl Default for OverlayConfig {
             combat_on_right: false,
             combat_position_y: None,
             combat_locked: false,
+            combat_collapsed: false,
             chat_alert_duration_seconds: None,
             chat_alert_manual_close: false,
             countdown_alert_duration_seconds: None,
