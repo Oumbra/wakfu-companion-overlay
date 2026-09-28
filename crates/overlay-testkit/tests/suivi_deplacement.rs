@@ -249,6 +249,21 @@ fn bandeau_couche_deplace_offre_son_replacement() {
     harness.snapshot("suivi_poignee_couche_deplace");
 }
 
+/// Les infobulles de la pastille s'ouvrent **là où s'ouvrent celles des quatre boutons** — sous
+/// le carré de contrôle, pas sur le glyphe voisin (demande utilisateur 2026-09-28).
+#[test]
+fn infobulles_de_la_pastille_sous_le_carre() {
+    let mut harness = harnais(3, false, Some((300, 400)), false, Rc::default());
+    for (index, nom) in [
+        (0, "suivi_infobulle_orientation"),
+        (2, "suivi_infobulle_replacer"),
+    ] {
+        harness.hover_at(glyphe_couche(index, 3));
+        harness.run();
+        harness.snapshot(nom);
+    }
+}
+
 /// Sans pointeur, rien : la place de la pastille reste vide.
 #[test]
 fn bandeau_sans_pointeur_ne_montre_pas_sa_poignee() {

@@ -1252,6 +1252,9 @@ pub fn show(
     // `ScrollArea` : défiler la bande le faisait sortir de l'écran avec les tuiles, et les quatre
     // actions du bandeau devenaient inatteignables tant qu'on ne revenait pas au début.
     let mut strip_rect = egui::Rect::NOTHING;
+    // Le bloc des boutons de contrôle tel que peint : la pastille y accroche ses infobulles (voir
+    // [`chrome_pill`]).
+    let mut control_rect = egui::Rect::NOTHING;
     // Où la pastille de la poignée se pose (voir [`chrome_pill`]) : la colonne gardée à gauche du
     // bandeau couché, la rangée gardée au-dessus du bandeau dressé.
     let pill_origin;
@@ -1267,6 +1270,7 @@ pub fn show(
         open_options = clicks.options;
         open_web_app = clicks.details;
         bascule_mode = clicks.remove;
+        control_rect = clicks.rect;
         if !entries.is_empty() {
             ui.add_space(TILE_GAP);
             // La pile occupe la largeur de la colonne, barre de défilement comprise, et la
@@ -1329,6 +1333,7 @@ pub fn show(
             open_options = clicks.options;
             open_web_app = clicks.details;
             bascule_mode = clicks.remove;
+            control_rect = clicks.rect;
             ui.add_space(TILE_GAP);
 
             let strip = strip_scroll_area().show_output(ui, |ui| {
@@ -1424,7 +1429,7 @@ pub fn show(
     // La pastille de la poignée, une fois tout le reste déclaré : elle ne recouvre rien (sa place
     // est gardée), et sa zone de survol est le bandeau entier tel qu'il vient d'être peint.
     let band = ui.min_rect();
-    let pill = chrome_pill(ui, pill_origin, band, chrome);
+    let pill = chrome_pill(ui, pill_origin, band, chrome, control_rect);
 
     ui.add_space(6.0);
 
@@ -1607,6 +1612,7 @@ fn chrome_pill(
     origin: egui::Pos2,
     band: egui::Rect,
     chrome: WatchlistChrome,
+    controls: egui::Rect,
 ) -> PillOutcome {
     let glyphs = 2 + usize::from(chrome.moved);
     let span =
@@ -1646,9 +1652,20 @@ fn chrome_pill(
             egui::Vec2::splat(CHROME_ICON_SIZE),
         )
     };
-    // En colonne, les infobulles s'ouvrent sous la pastille, dans la réserve que la fenêtre garde
-    // sous le bandeau ; en rangée, vers le centre du jeu, comme le reste du bandeau dressé.
+    // **Les infobulles s'ouvrent là où s'ouvrent celles des quatre boutons de contrôle**
+    // (demande utilisateur 2026-09-28 : accrochées à son glyphe, celle de la pastille couchée
+    // tombait sur le glyphe suivant et sur la tuile, « extrêmement dure à lire ») : accrochées au
+    // bloc des boutons, du même côté — sous lui à l'horizontale, vers le centre du jeu à la
+    // verticale. Le survol reste celui du glyphe (voir `design::Tooltip::anchor`).
     let side = chrome.tooltip_side();
+    let tip = |response: &egui::Response, text: &str| {
+        let infobulle = design::tooltip(response).side(side);
+        if controls.is_positive() {
+            infobulle.anchor(controls).text(text);
+        } else {
+            infobulle.text(text);
+        }
+    };
 
     let (orientation_tip, rotated) = if chrome.vertical {
         ("Passer à l'horizontale", true)
@@ -1669,9 +1686,7 @@ fn chrome_pill(
         orientation.hovered(),
     );
     let orientation = orientation.on_hover_cursor(egui::CursorIcon::PointingHand);
-    design::tooltip(&orientation)
-        .side(side)
-        .text(orientation_tip);
+    tip(&orientation, orientation_tip);
 
     let grip = ui.interact(slot(1), grip_id, egui::Sense::drag());
     let drag = match crate::panels::drag::from_response(ui, &grip) {
@@ -1696,7 +1711,7 @@ fn chrome_pill(
         grip.hovered() || grip.dragged(),
     );
     if !grip.dragged() {
-        design::tooltip(&grip).side(side).text("Déplacer le suivi");
+        tip(&grip, "Déplacer le suivi");
     }
 
     let restore_requested = chrome.moved && {
@@ -1707,9 +1722,7 @@ fn chrome_pill(
         );
         paint_pill_glyph(ui, &ds, slot(2), DsIcon::Undo, false, restore.hovered());
         let restore = restore.on_hover_cursor(egui::CursorIcon::PointingHand);
-        design::tooltip(&restore)
-            .side(side)
-            .text("Replacer à l'emplacement d'origine");
+        tip(&restore, "Replacer à l'emplacement d'origine");
         restore.clicked()
     };
 
@@ -2576,6 +2589,7 @@ fn control_button_row(
         },
     );
     ControlRowClicks {
+        rect: row_rect,
         add,
         remove: remove_response.is_some_and(|r| r.clicked()),
         options: options_response.clicked(),
@@ -2603,8 +2617,10 @@ struct ControlOrientation {
     side: design::TooltipSide,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct ControlRowClicks {
+    /// Le bloc des boutons tel que peint — là où les infobulles de la pastille s'accrochent.
+    rect: egui::Rect,
     /// Le bouton "+" vient d'être cliqué — l'hôte ouvre la modale Options sur l'onglet « Suivi ».
     add: bool,
     /// Le bouton "−" vient d'être cliqué — le panneau bascule sa sélection multiple. Le seul des
