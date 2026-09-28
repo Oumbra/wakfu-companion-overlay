@@ -314,6 +314,24 @@ pub struct OverlayConfig {
     /// Ordonnée du bouton œil — voir [`Self::click_through_position_x`].
     #[serde(default)]
     pub click_through_position_y: Option<i32>,
+    /// **Où l'utilisateur a posé le bandeau Suivi** (2026-09-28, demande utilisateur : « que
+    /// l'utilisateur puisse déplacer le suivi comme il l'entend, n'importe où sur l'écran, et que
+    /// ce soit enregistré comme le récap ») — abscisse du coin haut-gauche de sa fenêtre, en pixels
+    /// physiques depuis le coin haut-gauche de la zone cliente du jeu. `None` : jamais déplacé, il
+    /// reste centré en haut du jeu (`watchlist_placement`).
+    ///
+    /// Mêmes règles que [`Self::recap_position_x`] : relative au jeu, ici et non au compte, deux
+    /// clés plates.
+    #[serde(default)]
+    pub watchlist_position_x: Option<i32>,
+    /// Ordonnée du bandeau Suivi — voir [`Self::watchlist_position_x`].
+    #[serde(default)]
+    pub watchlist_position_y: Option<i32>,
+    /// **Le bandeau Suivi est-il vertical ?** (2026-09-28) — l'icône d'orientation de sa
+    /// poignée. Horizontal par défaut, comme il l'a toujours été ; vertical, les tuiles
+    /// s'empilent sous le carré de contrôle, pour coller le bandeau à un bord latéral du jeu.
+    #[serde(default)]
+    pub watchlist_vertical: bool,
     /// **La bande Récap est-elle verrouillée ?** (2026-09-17) — le cadenas de sa rangée
     /// d'actions (`panels::recap::RecapChrome::locked`). Verrouillée, elle ne se saisit plus à la
     /// souris et le curseur redevient celui du système au-dessus d'elle.
@@ -459,6 +477,9 @@ impl Default for OverlayConfig {
             recap_position_y: None,
             click_through_position_x: None,
             click_through_position_y: None,
+            watchlist_position_x: None,
+            watchlist_position_y: None,
+            watchlist_vertical: false,
             recap_locked: actif(),
             suivi_alert_muted: false,
             chat_alert_muted: false,
@@ -590,6 +611,22 @@ impl OverlayConfig {
     /// d'origine). Appelée au relâchement du bouton de la souris, jamais à chaque frame.
     pub fn set_click_through_position(&mut self, position: Option<(i32, i32)>) {
         (self.click_through_position_x, self.click_through_position_y) = match position {
+            Some((x, y)) => (Some(x), Some(y)),
+            None => (None, None),
+        };
+    }
+
+    /// Position du bandeau Suivi, ou `None` s'il n'a jamais été déplacé — voir
+    /// [`Self::watchlist_position_x`]. Même politique que [`Self::recap_position`].
+    pub fn watchlist_position(&self) -> Option<(i32, i32)> {
+        self.watchlist_position_x.zip(self.watchlist_position_y)
+    }
+
+    /// Reporte la position du bandeau Suivi — `None` efface les deux clés (retour à l'ancrage
+    /// d'origine). Appelée au relâchement ou à la confirmation du replacement, jamais à chaque
+    /// frame.
+    pub fn set_watchlist_position(&mut self, position: Option<(i32, i32)>) {
+        (self.watchlist_position_x, self.watchlist_position_y) = match position {
             Some((x, y)) => (Some(x), Some(y)),
             None => (None, None),
         };
@@ -1246,5 +1283,38 @@ mod tests {
         config.set_click_through_position(None);
         assert_eq!(config.click_through_position_x, None);
         assert_eq!(config.click_through_position_y, None);
+    }
+
+    /// La position et l'orientation du bandeau Suivi font l'aller-retour, avant `[shortcuts]`,
+    /// et une config écrite avant elles se relit bandeau horizontal, centré en haut du jeu.
+    #[test]
+    fn aller_retour_de_la_position_et_de_l_orientation_du_suivi() {
+        let mut config = OverlayConfig {
+            log_path: Some(PathBuf::from("/config/wakfu.log")),
+            ..Default::default()
+        };
+        assert_eq!(config.watchlist_position(), None);
+        assert!(!config.watchlist_vertical);
+        config.set_watchlist_position(Some((12, 300)));
+        config.watchlist_vertical = true;
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let position = raw.find("watchlist_position_x").expect("clé écrite");
+        let orientation = raw.find("watchlist_vertical").expect("clé écrite");
+        let table = raw.find("[shortcuts]").expect("table écrite");
+        assert!(
+            position < table && orientation < table,
+            "clés avalées :\n{raw}"
+        );
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert_eq!(relu.watchlist_position(), Some((12, 300)));
+        assert!(relu.watchlist_vertical);
+
+        let ancienne: OverlayConfig = toml::from_str("").expect("config vide lisible");
+        assert_eq!(ancienne.watchlist_position(), None);
+        assert!(!ancienne.watchlist_vertical);
+
+        config.set_watchlist_position(None);
+        assert_eq!(config.watchlist_position_x, None);
+        assert_eq!(config.watchlist_position_y, None);
     }
 }

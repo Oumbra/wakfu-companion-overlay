@@ -2,14 +2,18 @@
 //! la souris, posée en haut à gauche de la fenêtre de jeu (`OverlayKind::ClickThrough`,
 //! `panels::click_through`).
 //!
-//! **Ce que ces planches doivent montrer** : le glyphe dit le mode (œil ouvert en interactif, œil
-//! barré en clic-traversant), et le bouton garde **sa pleine opacité dans les deux modes** — c'est
-//! le seul élément encore cliquable quand le reste de l'overlay passe à
+//! **Ce que ces planches doivent montrer** : le glyphe dit ce que le clic FERA (œil barré en
+//! interactif, « Masquer l'overlay » ; œil ouvert en clic-traversant, « Afficher l'overlay » —
+//! inversés le 2026-09-28 à la demande de l'utilisateur), le bouton porte le fond de section du
+//! jeu (`DsTexture::ButtonIconFirstPlanSection`), et il garde **sa pleine opacité dans les deux
+//! modes** — c'est le seul élément encore cliquable quand le reste de l'overlay passe à
 //! `render_content::CLICK_THROUGH_OPACITY`. Une régression qui l'estomperait avec les autres se
-//! verrait sur la planche « œil barré ».
+//! verrait sur la planche « œil ouvert ».
 //!
-//! La fenêtre du harnais est celle du bouton (`panels::click_through::BUTTON_SIZE`), plus les 8 px
-//! de marge du harnais de chaque côté : le bouton remplit sa fenêtre OS en production.
+//! La fenêtre du harnais est celle du bouton (`panels::click_through::SECTION_SIZE`), plus les
+//! 8 px de marge du harnais de chaque côté : le bouton remplit sa fenêtre OS en production. Les
+//! planches d'infobulle prennent la fenêtre étendue que l'hôte donne au survol
+//! (`panels::click_through::TIP_RESERVE`).
 //!
 //! **Driver logiciel requis** : même prérequis que `tests/panels.rs` — `mesa-vulkan-drivers` sous
 //! Linux.
@@ -19,7 +23,7 @@ use std::rc::Rc;
 
 use egui_kittest::Harness;
 use overlay_engine::CatalogIndex;
-use overlay_ui::panels::click_through::BUTTON_SIZE;
+use overlay_ui::panels::click_through::{ClickThroughTip, SECTION_SIZE, TIP_RESERVE};
 use overlay_ui::panels::combat::{CombatMetric, CombatSide};
 use overlay_ui::panels::combat_frame::CombatFrame;
 use overlay_ui::panels::drag::PanelDrag;
@@ -60,11 +64,36 @@ fn harness_for(interactive: bool, clics: Rc<Cell<u32>>) -> Harness<'static> {
     harness_with_gestes(interactive, clics, Rc::default())
 }
 
+/// La fenêtre étendue pour l'infobulle, telle que l'hôte la donne au survol d'un bouton posé sous
+/// les boutons du jeu : la réserve à droite et en dessous, le bouton au coin.
+fn harness_infobulle(interactive: bool) -> Harness<'static> {
+    harness_complet(
+        interactive,
+        Rc::default(),
+        Rc::default(),
+        egui::vec2(
+            TIP_RESERVE.x.max(SECTION_SIZE.x),
+            SECTION_SIZE.y + TIP_RESERVE.y,
+        ),
+    )
+}
+
 /// Idem, en relevant aussi chaque geste de déplacement remonté (hors `PanelDrag::None`).
 fn harness_with_gestes(
     interactive: bool,
     clics: Rc<Cell<u32>>,
     gestes: Rc<RefCell<Vec<PanelDrag>>>,
+) -> Harness<'static> {
+    harness_complet(interactive, clics, gestes, SECTION_SIZE)
+}
+
+/// Le harnais, pour une fenêtre de `fenetre` points — celle du bouton au repos, ou la fenêtre
+/// étendue au survol.
+fn harness_complet(
+    interactive: bool,
+    clics: Rc<Cell<u32>>,
+    gestes: Rc<RefCell<Vec<PanelDrag>>>,
+    fenetre: egui::Vec2,
 ) -> Harness<'static> {
     let mut textures = Textures {
         portraits: None,
@@ -81,7 +110,7 @@ fn harness_with_gestes(
     let shortcuts = ShortcutBindings::default();
     let now = std::time::Instant::now();
     Harness::builder()
-        .with_size(egui::Vec2::splat(BUTTON_SIZE + 2.0 * MARGE_HARNAIS))
+        .with_size(fenetre + egui::Vec2::splat(2.0 * MARGE_HARNAIS))
         .build_ui(move |ui| {
             let ctx = ui.ctx().clone();
             let (portraits, combat_frame, icons) = textures.get_or_load(&ctx);
@@ -117,6 +146,9 @@ fn harness_with_gestes(
                     recap: &Default::default(),
                     recap_cells: Default::default(),
                     recap_chrome: Default::default(),
+                    watchlist_chrome: Default::default(),
+                    watchlist_base: None,
+                    click_through_tip: ClickThroughTip::default(),
                     combat_chrome: Default::default(),
                     options: None,
                     veiled: false,
@@ -133,36 +165,45 @@ fn harness_with_gestes(
         })
 }
 
-/// Le centre du bouton, dans le repère du harnais.
+/// Le centre du socle, dans le repère du harnais.
 fn centre() -> egui::Pos2 {
-    let c = MARGE_HARNAIS + BUTTON_SIZE / 2.0;
-    egui::pos2(c, c)
+    egui::pos2(MARGE_HARNAIS, MARGE_HARNAIS) + egui::Vec2::splat(2.0 + 18.0)
 }
 
-/// Mode interactif : l'œil ouvert, au repos.
+/// Mode interactif : l'œil **barré** au repos — le clic masquera l'overlay.
 #[test]
-fn oeil_ouvert_en_mode_interactif() {
+fn oeil_barre_en_mode_interactif() {
     let mut harness = harness_for(true, Rc::default());
-    harness.run();
-    harness.snapshot("clic_traversant_oeil_ouvert");
-}
-
-/// Mode clic-traversant : l'œil barré, **à pleine opacité** — le reste de l'overlay est estompé,
-/// pas ce bouton.
-#[test]
-fn oeil_barre_en_clic_traversant_sans_estompe() {
-    let mut harness = harness_for(false, Rc::default());
     harness.run();
     harness.snapshot("clic_traversant_oeil_barre");
 }
 
-/// Survolé : le socle s'éclaircit et le glyphe passe à l'or, comme tout bouton de premier plan.
+/// Mode clic-traversant : l'œil **ouvert**, **à pleine opacité** — le reste de l'overlay est
+/// estompé, pas ce bouton, et le clic le fera réapparaître.
 #[test]
-fn survol_du_bouton() {
-    let mut harness = harness_for(true, Rc::default());
+fn oeil_ouvert_en_clic_traversant_sans_estompe() {
+    let mut harness = harness_for(false, Rc::default());
+    harness.run();
+    harness.snapshot("clic_traversant_oeil_ouvert");
+}
+
+/// Survolé en mode interactif, dans la fenêtre étendue : « Masquer l'overlay » et le raccourci,
+/// sous le bouton (2026-09-28).
+#[test]
+fn infobulle_masquer_l_overlay() {
+    let mut harness = harness_infobulle(true);
     harness.hover_at(centre());
     harness.run();
-    harness.snapshot("clic_traversant_survol");
+    harness.snapshot("clic_traversant_infobulle_masquer");
+}
+
+/// Survolé en clic-traversant : « Afficher l'overlay » et le raccourci.
+#[test]
+fn infobulle_afficher_l_overlay() {
+    let mut harness = harness_infobulle(false);
+    harness.hover_at(centre());
+    harness.run();
+    harness.snapshot("clic_traversant_infobulle_afficher");
 }
 
 /// Un clic remonte UNE intention de bascule — c'est l'hôte qui bascule, jamais le panneau.

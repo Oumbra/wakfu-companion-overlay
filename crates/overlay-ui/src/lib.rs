@@ -91,6 +91,7 @@ pub mod startup;
 pub mod style;
 pub mod turn_watch;
 pub mod ui_icons;
+pub mod watchlist_placement;
 
 /// Le mécanisme de mise à jour automatique vit dans `overlay-sync` (réseau) ; réexporté ici pour
 /// que le harnais de rendu (`overlay-testkit`, qui ne dépend que de cette crate) construise les

@@ -75,6 +75,12 @@ pub const COMBAT_TOP_MARGIN: f32 = 44.0;
 /// d'interface du jeu) plus les 6 px de marge interne — 34 px au lieu de 62.
 pub const WATCHLIST_TOOLTIP_RESERVE: f32 = 28.0;
 
+/// Marges droite et basse du bandeau Suivi dans sa fenêtre — voir le bras `Watchlist` de
+/// `paint_content`, qui dit pourquoi la gauche et le haut sont nuls. Nommées depuis le
+/// 2026-09-28 : le bandeau vertical étendu au survol les reporte sur sa fenêtre de base.
+pub const WATCHLIST_MARGIN_RIGHT: f32 = 6.0;
+pub const WATCHLIST_MARGIN_BOTTOM: f32 = 6.0;
+
 /// Espace réservé **au-dessus** du bloc Récap (`OverlayKind::Recap`) pour ses cinq infobulles,
 /// qui s'ouvrent au-dessus de la case survolée (`TooltipSide::Above`, voir
 /// `panels::recap::paint_cell`) — le même principe que [`COMBAT_TOP_MARGIN`] : sans place là-haut,
@@ -174,8 +180,8 @@ pub enum OverlayKind {
     /// interactive.
     ///
     /// **Elle porte sa cible depuis le 2026-09-17 au soir** ([`ResetTarget`]) : la même fenêtre,
-    /// le même voile et le même composant servent aussi à confirmer le retour de la bande à son
-    /// ancrage d'origine (glyphe `Undo` de la rangée d'actions). Deux variantes d'`OverlayKind`
+    /// le même voile et le même composant servent aussi à confirmer le retour d'un panneau à son
+    /// ancrage d'origine (glyphe `Undo` de sa pastille d'actions). Deux variantes d'`OverlayKind`
     /// auraient dédoublé, dans les deux hôtes, tout le cycle « ouvrir / centrer / voiler / fermer »
     /// pour ne changer qu'une phrase.
     ResetConfirm(ResetTarget),
@@ -207,10 +213,15 @@ pub enum ResetTarget {
     /// Les **compteurs** de la session : XP, kamas, combats, challenges, chrono. Le glyphe `Undo`
     /// au bout de la dernière ligne du bloc (`panels::recap::paint_reset_button`).
     RecapSession,
-    /// La **position de la bande Récap** : elle retourne sous les boutons du jeu et la config
-    /// oublie ses deux clés. Le glyphe `Undo` de la rangée d'actions
-    /// (`panels::recap::paint_actions_row`), affiché seulement si la bande a été déplacée.
-    RecapPosition,
+    /// La **position du bandeau Suivi** (2026-09-28) : il retourne centré en haut du jeu et la
+    /// config oublie ses deux clés — son orientation, elle, reste. Le glyphe `Undo` de la
+    /// pastille de sa poignée (`panels::watchlist::chrome_pill`), affiché seulement si le bandeau
+    /// a été déplacé.
+    ///
+    /// Cette place fut celle de la **position de la bande Récap** jusqu'au même jour : son glyphe
+    /// de replacement a été retiré (« ça n'a pas vraiment d'utilité »), l'aimantation au
+    /// relâchement suffit à la reposer.
+    WatchlistPosition,
     /// La **hauteur du panneau Combat** (2026-09-17, soir) : il retrouve son centrage vertical et
     /// la config oublie sa clé. Le glyphe `Undo` de sa rangée d'actions
     /// (`panels::combat::paint_actions_row`), affiché seulement si le panneau a été déplacé.
@@ -447,6 +458,18 @@ pub struct RenderContent<'a> {
     /// verrou, bande déplacée, côté de la rangée d'actions — voir `panels::recap::RecapChrome`.
     /// Sans objet pour les autres zones, qui laissent son défaut.
     pub recap_chrome: panels::recap::RecapChrome,
+    /// Ce que l'hôte sait du bandeau Suivi et que le panneau ne peut pas savoir (`kind ==
+    /// Watchlist`, 2026-09-28) : orientation, déplacement, côté des infobulles — voir
+    /// `panels::watchlist::WatchlistChrome`. Sans objet pour les autres zones.
+    pub watchlist_chrome: panels::watchlist::WatchlistChrome,
+    /// **Où est la fenêtre de base du bandeau Suivi dans sa fenêtre OS** (`kind == Watchlist`,
+    /// 2026-09-28), en points — `None` quand les deux se confondent, c'est-à-dire toujours sauf
+    /// pour le bandeau vertical étendu au survol (`watchlist_placement::Expansion`), où la
+    /// fenêtre gagne une réserve sur le côté et le bandeau se peint à côté d'elle.
+    pub watchlist_base: Option<egui::Rect>,
+    /// Où est le bouton œil dans sa fenêtre, et de quel côté son infobulle s'ouvre (`kind ==
+    /// ClickThrough`, 2026-09-28) — voir `panels::click_through::ClickThroughTip`.
+    pub click_through_tip: panels::click_through::ClickThroughTip,
     /// État de la fenêtre de connexion (2026-09-14) — `Some` UNIQUEMENT pour
     /// `kind == OverlayKind::Login`, même règle que `options` ; `&mut` pour la même raison
     /// (l'horloge de l'anneau animé et le survol vivent d'une frame à l'autre).
@@ -550,9 +573,17 @@ pub struct RenderOutcome {
     /// le verrou et l'écrit dans la config (`config::OverlayConfig::recap_locked`). Voir
     /// `panels::recap::RecapChrome`.
     pub recap_toggle_lock: bool,
-    /// Le glyphe de replacement de la bande vient d'être cliqué (`kind == Recap`, 2026-09-17) :
-    /// l'hôte ouvre la confirmation `OverlayKind::ResetConfirm(ResetTarget::RecapPosition)`.
-    pub recap_restore_requested: bool,
+    /// La poignée du bandeau Suivi est tenue (`kind == Watchlist`, 2026-09-28) : l'hôte pose la
+    /// fenêtre sous le curseur et persiste la position au relâchement — voir
+    /// `watchlist_placement`. `Started` porte le point de saisie depuis le coin de la fenêtre de
+    /// BASE du bandeau, extension de survol exclue.
+    pub watchlist_drag: panels::drag::PanelDrag,
+    /// L'icône d'orientation du bandeau Suivi vient d'être cliquée (`kind == Watchlist`) : l'hôte
+    /// le couche ou le dresse et l'écrit dans la config.
+    pub watchlist_toggle_orientation: bool,
+    /// Le glyphe de replacement du bandeau Suivi vient d'être cliqué (`kind == Watchlist`) :
+    /// l'hôte ouvre la confirmation `OverlayKind::ResetConfirm(ResetTarget::WatchlistPosition)`.
+    pub watchlist_restore_requested: bool,
     /// La bande Récap est saisie à la souris (`kind == Recap`, 2026-09-17) : l'hôte déplace la
     /// fenêtre OS, la borne à la fenêtre de jeu et persiste la position au relâchement. Voir
     /// `panels::recap::RecapDrag`, qui dit pourquoi ce sont des POSITIONS et non des écarts.
@@ -687,6 +718,9 @@ pub fn build_ui(
                 options: content.options.as_deref_mut(),
                 veiled: content.veiled,
                 recap_chrome: content.recap_chrome,
+                watchlist_chrome: content.watchlist_chrome,
+                watchlist_base: content.watchlist_base,
+                click_through_tip: content.click_through_tip,
                 combat_chrome: content.combat_chrome,
                 login: content.login.as_deref_mut(),
                 card_settings: content.card_settings.as_deref_mut(),
@@ -738,6 +772,9 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         options,
         veiled,
         recap_chrome,
+        watchlist_chrome,
+        watchlist_base,
+        click_through_tip,
         login,
         card_settings,
     } = content;
@@ -785,11 +822,14 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         // au-dessus de la barre de scroll seulement ». Ces deux pixels-là appartiennent à la
         // bande (`panels::watchlist::STRIP_SCROLLBAR_OUTER_MARGIN`), pas au panneau : quand la
         // bande tient entière, il n'y a pas de barre, donc rien à dégager.
+        // **Étendu au survol** (bandeau vertical, 2026-09-28), la fenêtre n'a plus de marge : le
+        // bandeau se peint dans sa fenêtre de base, qui porte les siennes (voir le rendu plus bas).
+        OverlayKind::Watchlist if watchlist_base.is_some() => egui::Margin::ZERO,
         OverlayKind::Watchlist => egui::Margin {
             left: 0,
-            right: 6,
+            right: WATCHLIST_MARGIN_RIGHT as i8,
             top: 0,
-            bottom: 6,
+            bottom: WATCHLIST_MARGIN_BOTTOM as i8,
         },
         OverlayKind::Options => egui::Margin::ZERO,
         // La confirmation couvre sa fenêtre entière : le voile va bord à bord.
@@ -890,8 +930,26 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // tuiles d'entrées, elles, restent absentes tant que `watchlist` est vide — c'est
                 // `panels::watchlist::show` elle-même qui fait cette distinction en interne.
                 OverlayKind::Watchlist => {
+                    // **Étendu au survol, le bandeau vertical se peint dans sa fenêtre de base**
+                    // (2026-09-28) : la réserve de côté ne sert qu'aux infobulles et au toast,
+                    // qui s'y ouvrent d'eux-mêmes (voir `watchlist_placement::Expansion`). Les
+                    // marges sont celles du bandeau, reportées sur sa fenêtre de base.
+                    let mut base_ui = watchlist_base.map(|base| {
+                        // Relative au coin du panneau : c'est celui de la fenêtre en production
+                        // (marge nulle), celui de la marge dans le harnais de captures.
+                        let base = base.translate(ui.max_rect().min.to_vec2());
+                        let rect = egui::Rect::from_min_max(
+                            base.min,
+                            base.max - egui::vec2(WATCHLIST_MARGIN_RIGHT, WATCHLIST_MARGIN_BOTTOM),
+                        );
+                        ui.new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(rect)
+                                .layout(egui::Layout::top_down(egui::Align::Min)),
+                        )
+                    });
                     let watchlist_outcome = panels::watchlist::show(
-                        ui,
+                        base_ui.as_mut().unwrap_or(ui),
                         WatchlistAssets {
                             shortcuts,
                             icons,
@@ -904,10 +962,14 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                         panels::watchlist::WatchlistPanelState {
                             selection: watchlist_selection,
                             completions: watchlist_completions,
+                            chrome: watchlist_chrome,
                         },
                         watchlist_toast,
                         now,
                     );
+                    outcome.watchlist_drag = watchlist_outcome.drag;
+                    outcome.watchlist_toggle_orientation = watchlist_outcome.toggle_orientation;
+                    outcome.watchlist_restore_requested = watchlist_outcome.restore_requested;
                     outcome.close_toast = watchlist_outcome.close_toast;
                     outcome.whisper_to = watchlist_outcome.whisper_to;
                     outcome.open_watchlist = watchlist_outcome.open_watchlist;
@@ -966,13 +1028,13 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     outcome.recap_height = Some(recap_outcome.height);
                     outcome.recap_reset_requested = recap_outcome.reset_requested;
                     outcome.recap_toggle_lock = recap_outcome.toggle_lock;
-                    outcome.recap_restore_requested = recap_outcome.restore_requested;
                     outcome.recap_drag = recap_outcome.drag;
                 }
                 // Le bouton œil (2026-09-28) — voir `panels::click_through`. `interactive` est
                 // ici le mode GLOBAL, que l'hôte transmet tel quel pour cette fenêtre.
                 OverlayKind::ClickThrough => {
-                    let bouton = panels::click_through::show(ui, interactive);
+                    let bouton =
+                        panels::click_through::show(ui, interactive, shortcuts, click_through_tip);
                     outcome.toggle_interactive = bouton.toggle;
                     outcome.click_through_drag = bouton.drag;
                 }
@@ -984,9 +1046,9 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                             "Remettre le récap de session à zéro ?".to_string(),
                             "recap.remise-a-zero",
                         ),
-                        ResetTarget::RecapPosition => (
-                            "Replacer le récap à son emplacement d'origine ?".to_string(),
-                            "recap.replacement",
+                        ResetTarget::WatchlistPosition => (
+                            "Replacer le suivi à son emplacement d'origine ?".to_string(),
+                            "suivi.replacement",
                         ),
                         // « Sa zone initiale » ne parle que de HAUTEUR : le côté reste celui que
                         // la case des Options a choisi, et la phrase ne doit pas laisser croire

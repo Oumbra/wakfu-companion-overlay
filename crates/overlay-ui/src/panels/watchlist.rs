@@ -237,6 +237,32 @@
 //! boutons, d'où le `tracking_enabled` qui descend jusqu'ici depuis
 //! `render_content::RenderContent`. Capture de non-régression :
 //! `overlay-testkit/tests/panels.rs::panneau_suivi_coupe_sans_boutons_plus_et_moins`.
+//!
+//! ## Une poignée pour le déplacer, une icône pour le coucher (2026-09-28)
+//!
+//! Demande utilisateur : « sur l'overlay de suivi, quand l'utilisateur passe sa souris dessus,
+//! une petite poignée [...] la croix de drag and drop [...] qu'il puisse déplacer le suivi
+//! n'importe où sur l'écran et que ce soit enregistré, comme le récap », puis « lui permettre de
+//! changer l'orientation [...] s'il veut le coller sur un des deux côtés, qu'il puisse le mettre
+//! de manière verticale », et « un petit icône pour reset le déplacement [...] avec la confirm
+//! box, comme pour l'overlay de combat ».
+//!
+//! D'où une **pastille à trois glyphes** ([`chrome_pill`]), toujours au même endroit — la colonne
+//! de gauche du bandeau horizontal, la rangée du haut du bandeau vertical — et **seulement au
+//! survol**, comme celles du Récap et du Combat : l'icône d'orientation en tête, la poignée
+//! (curseur en croix fléchée) au milieu, et le replacement en dernier, **une fois le bandeau
+//! déplacé** seulement. La place de la pastille est gardée en permanence ([`CHROME_RESERVE`]) :
+//! une fenêtre qui s'élargirait au survol déplacerait le bandeau sous la souris.
+//!
+//! Le panneau ne bouge rien lui-même : le geste, la bascule et la demande de replacement
+//! remontent à l'hôte ([`WatchlistOutcome::drag`], [`WatchlistOutcome::toggle_orientation`],
+//! [`WatchlistOutcome::restore_requested`]), qui pose la fenêtre (`watchlist_placement`), écrit
+//! la config et ouvre la confirmation (`ResetTarget::WatchlistPosition`).
+//!
+//! **Vertical**, le carré de contrôle reste en tête et les tuiles s'empilent dessous, dans une
+//! zone qui défile de haut en bas. Les infobulles et le toast s'ouvrent alors sur le CÔTÉ, vers
+//! le centre du jeu ([`WatchlistChrome::side`]) — dans une réserve que l'hôte n'ajoute à la
+//! fenêtre que le temps du survol ou du toast (`watchlist_placement::Expansion`).
 
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
@@ -668,8 +694,63 @@ pub fn content_width(entry_count: usize, tracking_enabled: bool) -> f32 {
         entry_count as f32 * TILE_SIZE + (entry_count as f32 - 1.0) * TILE_GAP
     };
     let right_of_control = (TILE_GAP + entries_width).max(layout.tooltip_reserve());
-    control_row_width(layout) + right_of_control
+    CHROME_RESERVE + control_row_width(layout) + right_of_control
 }
+
+/// **Taille du contenu du bandeau VERTICAL** (2026-09-28), SANS la marge de fenêtre — le pendant
+/// de [`content_width`] pour la colonne : la rangée de la poignée ([`CHROME_RESERVE`]), le bloc
+/// de contrôle, puis les tuiles empilées, et la bande du bouton de suppression groupée pendant la
+/// sélection multiple.
+///
+/// `max_tiles_height` plafonne la pile de tuiles (l'hôte le tire de la hauteur du jeu) : au-delà,
+/// elle défile. La largeur garde toujours la place de la barre de défilement
+/// (`design::ScrollArea::reserve`) — une colonne qui s'élargirait quand la barre apparaît
+/// changerait de taille avec son propre contenu.
+pub fn vertical_content_size(
+    entry_count: usize,
+    tracking_enabled: bool,
+    select_open: bool,
+    max_tiles_height: f32,
+) -> egui::Vec2 {
+    let layout = ControlLayout::for_state(entry_count, tracking_enabled);
+    let control = control_block_size(layout, true);
+    let tiles = if entry_count == 0 {
+        0.0
+    } else {
+        let full = entry_count as f32 * TILE_SIZE + (entry_count as f32 - 1.0) * TILE_GAP;
+        TILE_GAP + full.min(max_tiles_height.max(TILE_SIZE))
+    };
+    let column = (TILE_SIZE + strip_scroll_area().reserve()).max(control.x);
+    let width = if select_open {
+        column.max(BULK_BUTTON_MIN_WIDTH)
+    } else {
+        column
+    };
+    let height = CHROME_RESERVE
+        + control.y
+        + tiles
+        + if select_open {
+            SELECTION_BAR_HEIGHT
+        } else {
+            0.0
+        };
+    egui::vec2(width, height)
+}
+
+/// Largeur de la colonne réservée à la pastille de la poignée, à GAUCHE du bandeau horizontal —
+/// ou hauteur de sa rangée, au-dessus du bandeau vertical (voir [`chrome_pill`]) : l'épaisseur de
+/// la pastille plus l'air qui la sépare du carré de contrôle.
+pub const CHROME_RESERVE: f32 = CHROME_THICKNESS + CHROME_MARGIN;
+
+/// Épaisseur de la pastille de la poignée : un glyphe et son rembourrage — les cotes de la
+/// pastille du Récap (`panels::recap::paint_actions_row`) : mêmes commandes, même matière.
+const CHROME_THICKNESS: f32 = CHROME_ICON_SIZE + 2.0 * CHROME_PADDING;
+const CHROME_ICON_SIZE: f32 = 14.0;
+const CHROME_PADDING: f32 = 4.0;
+/// Écart entre deux glyphes de la pastille.
+const CHROME_GAP: f32 = 6.0;
+/// Air entre la pastille et le carré de contrôle.
+const CHROME_MARGIN: f32 = 4.0;
 
 /// Largeur du fond translucide derrière le carré de contrôle (voir `control_button_row`) — DEUX
 /// boutons de large depuis la refonte 2026-09-08 (carré 2×2 : "+"/"−" en haut, "Options"/"Détails"
@@ -679,13 +760,26 @@ pub fn content_width(entry_count: usize, tracking_enabled: bool) -> f32 {
 /// que constante : combine deux `const f32`, une multiplication de `f32` en contexte `const`
 /// restant plus fragile à faire évoluer ici qu'un simple appel.
 fn control_row_width(layout: ControlLayout) -> f32 {
-    CONTROL_BUTTON_GAP * (layout.columns() + 1.0) + CONTROL_BUTTON_SIZE * layout.columns()
+    control_block_size(layout, false).x
+}
+
+/// Taille du fond translucide du carré de contrôle, dans l'orientation du bandeau : **vertical,
+/// les rangées se dressent en colonnes** (quatre boutons l'un sous l'autre au bandeau vide, deux
+/// quand le Suivi est coupé) ; le carré 2×2 reste un carré.
+fn control_block_size(layout: ControlLayout, vertical: bool) -> egui::Vec2 {
+    let (columns, rows) = if vertical {
+        (layout.rows(), layout.columns())
+    } else {
+        (layout.columns(), layout.rows())
+    };
+    let span = |count: f32| CONTROL_BUTTON_GAP * (count + 1.0) + CONTROL_BUTTON_SIZE * count;
+    egui::vec2(span(columns), span(rows))
 }
 
 /// Hauteur du même fond translucide — les lignes de boutons empilées (voir `control_row_width`)
 /// plus une marge symétrique en haut/bas et l'écart entre les lignes.
 fn control_row_height(layout: ControlLayout) -> f32 {
-    CONTROL_BUTTON_GAP * (layout.rows() + 1.0) + CONTROL_BUTTON_SIZE * layout.rows()
+    control_block_size(layout, false).y
 }
 
 /// De combien le carré de contrôle descend pour que son centre tombe sur celui des tuiles.
@@ -1033,6 +1127,39 @@ pub struct WatchlistAssets<'a> {
 pub struct WatchlistPanelState<'a> {
     pub selection: &'a mut WatchlistSelection,
     pub completions: &'a WatchlistCompletions,
+    /// Orientation, déplacement et côté des infobulles (2026-09-28) — voir [`WatchlistChrome`].
+    pub chrome: WatchlistChrome,
+}
+
+/// **Ce que l'hôte sait du bandeau et que le panneau ne peut pas savoir** (2026-09-28) : couché
+/// ou dressé, déjà déplacé ou non, et de quel côté il s'ouvre. Même principe que
+/// `panels::recap::RecapChrome` : le panneau ne garde aucun état et ne connaît pas sa position à
+/// l'écran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WatchlistChrome {
+    /// **Bandeau vertical** (`config::OverlayConfig::watchlist_vertical`) : les tuiles
+    /// s'empilent sous le carré de contrôle au lieu de s'aligner à sa droite.
+    pub vertical: bool,
+    /// **Le bandeau a une position à lui** (`config::OverlayConfig::watchlist_position`
+    /// renseignée) : seule condition d'affichage du glyphe de replacement — replacer un bandeau
+    /// qui est déjà à son ancrage d'origine n'aurait rien à faire.
+    pub moved: bool,
+    /// **Côté des infobulles et du toast du bandeau vertical** — vers le centre du jeu, calculé
+    /// par l'hôte (`watchlist_placement::side`). Sans objet à l'horizontale, où tout s'ouvre en
+    /// dessous.
+    pub side: crate::watchlist_placement::Side,
+}
+
+impl WatchlistChrome {
+    /// Le côté d'infobulle de tout ce que le bandeau porte : en dessous à l'horizontale (voir la
+    /// doc de module, refonte du 2026-09-13), vers le centre du jeu à la verticale.
+    fn tooltip_side(self) -> design::TooltipSide {
+        match (self.vertical, self.side) {
+            (false, _) => design::TooltipSide::Below,
+            (true, crate::watchlist_placement::Side::Left) => design::TooltipSide::Left,
+            (true, crate::watchlist_placement::Side::Right) => design::TooltipSide::Right,
+        }
+    }
 }
 
 /// Renvoie `true` quand l'utilisateur vient de fermer le toast affiché (clic sur la carte ou sur
@@ -1067,6 +1194,7 @@ pub fn show(
     let WatchlistPanelState {
         selection,
         completions,
+        chrome,
     } = etat;
     let WatchlistAssets {
         icons,
@@ -1098,20 +1226,22 @@ pub fn show(
     if entries.is_empty() {
         selection.close();
     }
-    // Coché cette frame, appliqué après la `ScrollArea` : `selection` est emprunté par la
-    // fermeture de rendu tant qu'elle peint.
-    let mut bascule_tuile: Option<String> = None;
-    // Idem pour le glisser-déposer : le rang pris et le rang visé, lus à la frame du dépôt.
-    let mut deplacement: Option<(usize, usize)> = None;
-    // Idem pour le bouton de réinitialisation d'une tuile — l'entrée, pour l'hôte.
-    let mut reset_counter: Option<WatchlistEntry> = None;
-    // Union des tuiles peintes — le bouton de suppression se centre dessus, pas sur la fenêtre
-    // (voir `bulk_button_row`).
-    let mut tiles_rect: Option<egui::Rect> = None;
-    // Les gerbes de confettis des tuiles qui célèbrent — peintes après la `ScrollArea` (voir plus
-    // bas) : `(centre de la tuile, secondes écoulées)`.
-    let mut gerbes: Vec<(egui::Pos2, f32)> = Vec::new();
+    // Ce que les tuiles récoltent pendant qu'elles se peignent, appliqué après la `ScrollArea` :
+    // `selection` est emprunté par la fermeture de rendu tant qu'elle peint.
+    let mut harvest = TileHarvest::default();
     let mut bascule_mode = false;
+    let side = chrome.tooltip_side();
+    let layout = ControlLayout::for_state(entries.len(), tracking_enabled);
+    let orientation = ControlOrientation {
+        vertical: chrome.vertical,
+        side,
+    };
+    let mut deps = TileDeps {
+        icons,
+        catalog,
+        remote_icons,
+        remote_icon_textures,
+    };
 
     // **Les boutons ne défilent pas, les tuiles si.** Le carré de contrôle est peint DEHORS, dans
     // la rangée qui porte la zone défilante — retour utilisateur explicite 2026-09-13, capture à
@@ -1122,76 +1252,118 @@ pub fn show(
     // `ScrollArea` : défiler la bande le faisait sortir de l'écran avec les tuiles, et les quatre
     // actions du bandeau devenaient inatteignables tant qu'on ne revenait pas au début.
     let mut strip_rect = egui::Rect::NOTHING;
-    ui.horizontal_top(|ui| {
-        let layout = ControlLayout::for_state(entries.len(), tracking_enabled);
-        // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08), descendu de
-        // deux hauteurs qui s'additionnent :
-        //
-        // - la barre de défilement, quand la bande déborde : elle occupe la tête de la zone
-        //   (`design::ScrollArea::bar_before`), et le carré doit rester à hauteur des TUILES, pas
-        //   de la barre. Zéro quand la bande tient entière — la barre ne prend alors aucune place ;
-        // - le CENTRAGE sur la tuile ([`control_row_centering`]).
-        let clicks = ui
-            .vertical(|ui| {
-                ui.add_space(strip_scroll_area().space_before(ui) + control_row_centering(layout));
-                control_button_row(ui, shortcuts, layout, selection.is_open())
-            })
-            .inner;
+    // Où la pastille de la poignée se pose (voir [`chrome_pill`]) : la colonne gardée à gauche du
+    // bandeau couché, la rangée gardée au-dessus du bandeau dressé.
+    let pill_origin;
+    if chrome.vertical {
+        // L'espacement automatique d'egui, VERTICAL cette fois (voir `style_strip`, qui ne retire
+        // que l'horizontal) : sans ça, chaque écart explicite gagne 4 px cachés et la pile déborde
+        // de la hauteur que `vertical_content_size` a donnée à la fenêtre.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        pill_origin = ui.cursor().min;
+        ui.add_space(CHROME_RESERVE);
+        let clicks = control_button_row(ui, shortcuts, layout, selection.is_open(), orientation);
         open_watchlist = clicks.add;
         open_options = clicks.options;
         open_web_app = clicks.details;
         bascule_mode = clicks.remove;
-        ui.add_space(TILE_GAP);
-
-        let strip = strip_scroll_area().show_output(ui, |ui| {
-            ui.horizontal(|ui| {
-                for (i, entry) in entries.iter().enumerate() {
-                    if i > 0 {
-                        ui.add_space(TILE_GAP);
-                    }
-                    let cle = crate::panels::suivi_tab::entry_key(entry);
-                    let celebration = completions.elapsed(&cle, now);
-                    let tuile = entry_tile(
-                        ui,
-                        icons,
-                        catalog,
-                        remote_icons,
-                        remote_icon_textures,
-                        entry,
-                        TileState {
-                            index: i,
-                            selection: selection.is_open().then(|| selection.contains(&cle)),
-                            completion: celebration,
-                        },
-                    );
-                    tiles_rect = Some(match tiles_rect {
-                        Some(deja) => deja.union(tuile.response.rect),
-                        None => tuile.response.rect,
+        if !entries.is_empty() {
+            ui.add_space(TILE_GAP);
+            // La pile occupe la largeur de la colonne, barre de défilement comprise, et la
+            // hauteur que l'hôte a donnée à la fenêtre — il l'a taillée sur
+            // `vertical_content_size`, qui plafonne la pile.
+            let height = ui.available_height()
+                - if selection.is_open() {
+                    SELECTION_BAR_HEIGHT
+                } else {
+                    0.0
+                };
+            let width = TILE_SIZE + strip_scroll_area().reserve();
+            let (column, _) =
+                ui.allocate_exact_size(egui::vec2(width, height.max(0.0)), egui::Sense::hover());
+            let mut column_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(column)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            let strip = design::scroll_area("watchlist-strip-vertical")
+                .axis(design::ScrollAxis::Vertical)
+                .outer_margin(STRIP_SCROLLBAR_OUTER_MARGIN)
+                .show_output(&mut column_ui, |ui| {
+                    ui.vertical(|ui| {
+                        paint_entry_tiles(
+                            ui,
+                            &mut deps,
+                            entries,
+                            selection,
+                            completions,
+                            now,
+                            side,
+                            &mut harvest,
+                        );
                     });
-                    // **La gerbe se peint plus tard, hors de la zone défilante** : ses confettis
-                    // partent jusqu'à une tuile et demie autour du centre, et seraient tranchés
-                    // net par le clip de la bande. On ne retient ici que d'où elle part et depuis
-                    // quand.
-                    if let Some(elapsed) = celebration {
-                        gerbes.push((tuile.response.rect.center(), elapsed));
-                    }
-                    // **Le clic coche, il ne supprime pas.** Hors sélection, le geste de la tuile
-                    // est de se déplacer (voir `entry_tile`) ; elle ne gagne le clic que le temps
-                    // du mode.
-                    if selection.is_open() && tuile.response.clicked() {
-                        bascule_tuile = Some(cle);
-                    }
-                    if let Some(depuis) = tuile.reorder.dropped {
-                        deplacement = Some((depuis, i));
-                    }
-                    if tuile.reset_requested {
-                        reset_counter = Some(entry.clone());
-                    }
-                }
+                });
+            strip_rect = strip.inner_rect;
+        }
+    } else {
+        ui.horizontal_top(|ui| {
+            // La colonne de la pastille, gardée en permanence (voir [`CHROME_RESERVE`]).
+            ui.add_space(CHROME_RESERVE);
+            // Carré "+"/"−"/"Options"/"Détails" (voir doc de module, refonte 2026-09-08), descendu
+            // de deux hauteurs qui s'additionnent :
+            //
+            // - la barre de défilement, quand la bande déborde : elle occupe la tête de la zone
+            //   (`design::ScrollArea::bar_before`), et le carré doit rester à hauteur des TUILES,
+            //   pas de la barre. Zéro quand la bande tient entière — la barre ne prend alors
+            //   aucune place ;
+            // - le CENTRAGE sur la tuile ([`control_row_centering`]).
+            let clicks = ui
+                .vertical(|ui| {
+                    ui.add_space(
+                        strip_scroll_area().space_before(ui) + control_row_centering(layout),
+                    );
+                    control_button_row(ui, shortcuts, layout, selection.is_open(), orientation)
+                })
+                .inner;
+            open_watchlist = clicks.add;
+            open_options = clicks.options;
+            open_web_app = clicks.details;
+            bascule_mode = clicks.remove;
+            ui.add_space(TILE_GAP);
+
+            let strip = strip_scroll_area().show_output(ui, |ui| {
+                ui.horizontal(|ui| {
+                    paint_entry_tiles(
+                        ui,
+                        &mut deps,
+                        entries,
+                        selection,
+                        completions,
+                        now,
+                        side,
+                        &mut harvest,
+                    );
+                });
             });
+            strip_rect = strip.inner_rect;
         });
-        strip_rect = strip.inner_rect;
-    });
+        // La pastille se centre sur la rangée des tuiles, sous la barre de défilement quand elle
+        // est là — au même niveau que le carré de contrôle.
+        pill_origin = ui.max_rect().min + egui::vec2(0.0, strip_scroll_area().space_before(ui));
+    }
+    let TileHarvest {
+        tiles_rect,
+        gerbes,
+        bascule_tuile,
+        deplacement,
+        reset_counter,
+    } = harvest;
+    let TileDeps {
+        icons,
+        catalog,
+        remote_icons,
+        remote_icon_textures,
+    } = deps;
 
     // **Les deux gestes du mode, appliqués une fois la bande peinte.**
     if let Some(cle) = bascule_tuile {
@@ -1249,24 +1421,60 @@ pub fn show(
         completion_burst(ui, centre, elapsed);
     }
 
+    // La pastille de la poignée, une fois tout le reste déclaré : elle ne recouvre rien (sa place
+    // est gardée), et sa zone de survol est le bandeau entier tel qu'il vient d'être peint.
+    let band = ui.min_rect();
+    let pill = chrome_pill(ui, pill_origin, band, chrome);
+
     ui.add_space(6.0);
 
-    let (close_toast, whisper_to) =
-        match toast.filter(|t| t.hide_at.is_none_or(|hide_at| hide_at > now)) {
-            Some(toast) => {
-                let click = toast_card(
-                    ui,
-                    icons,
-                    catalog,
-                    remote_icons,
-                    remote_icon_textures,
-                    toast,
-                    now,
-                );
-                (click.close, click.whisper_to)
-            }
-            None => (false, None),
-        };
+    let toast = toast.filter(|t| t.hide_at.is_none_or(|hide_at| hide_at > now));
+    let (close_toast, whisper_to) = match toast {
+        // **Vertical, le toast s'ouvre sur le côté** (2026-09-28), dans la réserve que l'hôte
+        // ajoute à la fenêtre le temps qu'il s'affiche (`watchlist_placement::Expansion`) : sous
+        // une colonne de 80 px, la carte n'aurait pas la place d'être lue. Le toast se peint donc
+        // dans ce qui reste de la fenêtre à côté de la colonne, depuis son haut.
+        Some(toast) if chrome.vertical => {
+            let screen = ui.ctx().content_rect();
+            let area = match chrome.side {
+                crate::watchlist_placement::Side::Right => {
+                    egui::Rect::from_min_max(egui::pos2(band.max.x, screen.min.y), screen.max)
+                }
+                crate::watchlist_placement::Side::Left => {
+                    egui::Rect::from_min_max(screen.min, egui::pos2(band.min.x, screen.max.y))
+                }
+            };
+            let mut side_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(area)
+                    .layout(egui::Layout::top_down(egui::Align::Center)),
+            );
+            side_ui.set_clip_rect(area);
+            let click = toast_card(
+                &mut side_ui,
+                icons,
+                catalog,
+                remote_icons,
+                remote_icon_textures,
+                toast,
+                now,
+            );
+            (click.close, click.whisper_to)
+        }
+        Some(toast) => {
+            let click = toast_card(
+                ui,
+                icons,
+                catalog,
+                remote_icons,
+                remote_icon_textures,
+                toast,
+                now,
+            );
+            (click.close, click.whisper_to)
+        }
+        None => (false, None),
+    };
 
     WatchlistOutcome {
         close_toast,
@@ -1276,6 +1484,286 @@ pub fn show(
         open_web_app,
         edit,
         reset_counter,
+        drag: pill.drag,
+        toggle_orientation: pill.toggle_orientation,
+        restore_requested: pill.restore_requested,
+    }
+}
+
+/// Les dépendances de rendu d'une tuile — [`WatchlistAssets`] sans les raccourcis, prêtées à
+/// [`paint_entry_tiles`] par les deux orientations.
+struct TileDeps<'a> {
+    icons: &'a UiIcons,
+    catalog: &'a CatalogIndex,
+    remote_icons: &'a RemoteIconStore,
+    remote_icon_textures: &'a mut RemoteIconTextures,
+}
+
+/// Ce que les tuiles récoltent pendant qu'elles se peignent, appliqué une fois la bande peinte
+/// (voir [`show`]).
+#[derive(Default)]
+struct TileHarvest {
+    /// Union des tuiles peintes — le bouton de suppression se centre dessus, pas sur la fenêtre
+    /// (voir `bulk_button_row`).
+    tiles_rect: Option<egui::Rect>,
+    /// Les gerbes de confettis des tuiles qui célèbrent — peintes après la `ScrollArea` :
+    /// `(centre de la tuile, secondes écoulées)`.
+    gerbes: Vec<(egui::Pos2, f32)>,
+    /// La tuile cochée ou décochée cette frame.
+    bascule_tuile: Option<String>,
+    /// Le glisser-déposer : le rang pris et le rang visé, lus à la frame du dépôt.
+    deplacement: Option<(usize, usize)>,
+    /// Le bouton de réinitialisation d'une tuile — l'entrée, pour l'hôte.
+    reset_counter: Option<WatchlistEntry>,
+}
+
+/// Les tuiles du bandeau, l'une après l'autre dans le sens du `Ui` reçu — de gauche à droite
+/// couché, de haut en bas dressé : `add_space` suit la direction de la mise en page, le même
+/// écart [`TILE_GAP`] sépare deux tuiles dans les deux cas.
+#[allow(clippy::too_many_arguments)]
+fn paint_entry_tiles(
+    ui: &mut egui::Ui,
+    deps: &mut TileDeps<'_>,
+    entries: &[WatchlistEntry],
+    selection: &WatchlistSelection,
+    completions: &WatchlistCompletions,
+    now: std::time::Instant,
+    side: design::TooltipSide,
+    harvest: &mut TileHarvest,
+) {
+    for (i, entry) in entries.iter().enumerate() {
+        if i > 0 {
+            ui.add_space(TILE_GAP);
+        }
+        let cle = crate::panels::suivi_tab::entry_key(entry);
+        let celebration = completions.elapsed(&cle, now);
+        let tuile = entry_tile(
+            ui,
+            deps.icons,
+            deps.catalog,
+            deps.remote_icons,
+            deps.remote_icon_textures,
+            entry,
+            TileState {
+                side,
+                index: i,
+                selection: selection.is_open().then(|| selection.contains(&cle)),
+                completion: celebration,
+            },
+        );
+        harvest.tiles_rect = Some(match harvest.tiles_rect {
+            Some(deja) => deja.union(tuile.response.rect),
+            None => tuile.response.rect,
+        });
+        // **La gerbe se peint plus tard, hors de la zone défilante** : ses confettis partent
+        // jusqu'à une tuile et demie autour du centre, et seraient tranchés net par le clip de la
+        // bande. On ne retient ici que d'où elle part et depuis quand.
+        if let Some(elapsed) = celebration {
+            harvest.gerbes.push((tuile.response.rect.center(), elapsed));
+        }
+        // **Le clic coche, il ne supprime pas.** Hors sélection, le geste de la tuile est de se
+        // déplacer (voir `entry_tile`) ; elle ne gagne le clic que le temps du mode.
+        if selection.is_open() && tuile.response.clicked() {
+            harvest.bascule_tuile = Some(cle);
+        }
+        if let Some(depuis) = tuile.reorder.dropped {
+            harvest.deplacement = Some((depuis, i));
+        }
+        if tuile.reset_requested {
+            harvest.reset_counter = Some(entry.clone());
+        }
+    }
+}
+
+/// Ce que la pastille de la poignée a récolté cette frame — remonté tel quel par
+/// [`WatchlistOutcome`].
+#[derive(Debug, Clone, Copy, Default)]
+struct PillOutcome {
+    drag: crate::panels::drag::PanelDrag,
+    toggle_orientation: bool,
+    restore_requested: bool,
+}
+
+/// **La pastille de la poignée du bandeau** (2026-09-28, demande utilisateur, voir la doc de
+/// module) : l'icône d'orientation, la poignée, et le replacement une fois le bandeau déplacé —
+/// en colonne à gauche du bandeau couché, en rangée au-dessus du bandeau dressé, « toujours au
+/// même endroit ».
+///
+/// ## Seulement au survol
+///
+/// Comme les pastilles du Récap et du Combat : pointeur posé sur le bandeau ou sur elle —
+/// **ou poignée tenue**, sans quoi la pastille disparaîtrait sous la main le temps d'une frame
+/// où la fenêtre n'a pas encore rattrapé le curseur. En clic-traversant, la fenêtre ne reçoit
+/// aucun pointeur : la pastille n'y apparaît jamais, et on ne pourrait pas la cliquer non plus.
+///
+/// ## La poignée, et elle seule, déplace le bandeau
+///
+/// Les tuiles se prennent déjà à la souris pour se réordonner (`panels::tile_reorder`) : le fond
+/// du bandeau ne peut pas aussi le déplacer, comme celui du Récap. La poignée est le glyphe
+/// `Grid` — la grille de points du « ça se prend » — et le curseur y devient la croix fléchée,
+/// « la croix de drag and drop » demandée, au survol comme pendant le geste.
+fn chrome_pill(
+    ui: &mut egui::Ui,
+    origin: egui::Pos2,
+    band: egui::Rect,
+    chrome: WatchlistChrome,
+) -> PillOutcome {
+    let glyphs = 2 + usize::from(chrome.moved);
+    let span =
+        glyphs as f32 * CHROME_ICON_SIZE + (glyphs - 1) as f32 * CHROME_GAP + 2.0 * CHROME_PADDING;
+    let pill = if chrome.vertical {
+        egui::Rect::from_min_size(origin, egui::vec2(span, CHROME_THICKNESS))
+    } else {
+        // Centrée sur la rangée des tuiles, de la hauteur d'une case.
+        egui::Rect::from_min_size(
+            origin + egui::vec2(0.0, ((TILE_SIZE - span) / 2.0).max(0.0)),
+            egui::vec2(CHROME_THICKNESS, span),
+        )
+    };
+    let grip_id = ui.id().with("suivi-poignee");
+    // `latest_pos` et non `hover_pos` : la position brute du pointeur tant qu'il est dans la
+    // fenêtre, sans la notion de couche — une infobulle ouverte au-dessus d'un glyphe ne doit pas
+    // faire disparaître la pastille (même choix que `panels::recap::paint_actions_row`).
+    let hovered = ui
+        .input(|i| i.pointer.latest_pos())
+        .is_some_and(|pos| band.union(pill).contains(pos))
+        || ui.ctx().is_being_dragged(grip_id);
+    if !hovered {
+        return PillOutcome::default();
+    }
+    let ds = design::DesignSystem::get(ui.ctx());
+    ui.painter()
+        .rect_filled(pill, PANEL_BACKDROP_ROUNDING, PANEL_BACKDROP_FILL);
+    let slot = |index: usize| {
+        let offset = index as f32 * (CHROME_ICON_SIZE + CHROME_GAP);
+        let (dx, dy) = if chrome.vertical {
+            (offset, 0.0)
+        } else {
+            (0.0, offset)
+        };
+        egui::Rect::from_min_size(
+            pill.min + egui::vec2(CHROME_PADDING + dx, CHROME_PADDING + dy),
+            egui::Vec2::splat(CHROME_ICON_SIZE),
+        )
+    };
+    // En colonne, les infobulles s'ouvrent sous la pastille, dans la réserve que la fenêtre garde
+    // sous le bandeau ; en rangée, vers le centre du jeu, comme le reste du bandeau dressé.
+    let side = chrome.tooltip_side();
+
+    let (orientation_tip, rotated) = if chrome.vertical {
+        ("Passer à l'horizontale", true)
+    } else {
+        ("Passer à la verticale", false)
+    };
+    let orientation = ui.interact(
+        slot(0),
+        ui.id().with("suivi-orientation"),
+        egui::Sense::click(),
+    );
+    paint_pill_glyph(
+        ui,
+        &ds,
+        slot(0),
+        DsIcon::Sort,
+        rotated,
+        orientation.hovered(),
+    );
+    let orientation = orientation.on_hover_cursor(egui::CursorIcon::PointingHand);
+    design::tooltip(&orientation)
+        .side(side)
+        .text(orientation_tip);
+
+    let grip = ui.interact(slot(1), grip_id, egui::Sense::drag());
+    let drag = match crate::panels::drag::from_response(ui, &grip) {
+        // Le point de saisie depuis le coin du CONTENU : c'est lui que l'hôte place, la fenêtre
+        // de base du bandeau (voir [`WatchlistOutcome::drag`]).
+        crate::panels::drag::PanelDrag::Started(pos) => {
+            crate::panels::drag::PanelDrag::Started((pos - ui.max_rect().min).to_pos2())
+        }
+        other => other,
+    };
+    // La croix fléchée plutôt que la main de `panels::drag::from_response` : c'est le curseur
+    // demandé, et celui des tuiles qui se déplacent (`panels::tile_reorder`).
+    if grip.hovered() || grip.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+    }
+    paint_pill_glyph(
+        ui,
+        &ds,
+        slot(1),
+        DsIcon::Grid,
+        false,
+        grip.hovered() || grip.dragged(),
+    );
+    if !grip.dragged() {
+        design::tooltip(&grip).side(side).text("Déplacer le suivi");
+    }
+
+    let restore_requested = chrome.moved && {
+        let restore = ui.interact(
+            slot(2),
+            ui.id().with("suivi-replacer"),
+            egui::Sense::click(),
+        );
+        paint_pill_glyph(ui, &ds, slot(2), DsIcon::Undo, false, restore.hovered());
+        let restore = restore.on_hover_cursor(egui::CursorIcon::PointingHand);
+        design::tooltip(&restore)
+            .side(side)
+            .text("Replacer à l'emplacement d'origine");
+        restore.clicked()
+    };
+
+    PillOutcome {
+        drag,
+        toggle_orientation: orientation.clicked(),
+        restore_requested,
+    }
+}
+
+/// Un glyphe de la pastille : blanc au repos, or au survol — les teintes des glyphes-commandes
+/// du Récap. `rotated` couche le glyphe d'un quart de tour : l'icône d'orientation montre les
+/// flèches dans le sens où le bandeau PASSERA (↕ couché, ↔ dressé).
+fn paint_pill_glyph(
+    ui: &egui::Ui,
+    ds: &design::DesignSystem,
+    slot: egui::Rect,
+    icon: DsIcon,
+    rotated: bool,
+    hovered: bool,
+) {
+    let tint = if hovered {
+        design::tokens::ICON_TINT_HOVER
+    } else {
+        TEXT_BRIGHT
+    };
+    let native = ds.icon_native_size(icon);
+    let fitted = crate::design::components::icon_button::glyph_fit(
+        if rotated {
+            egui::vec2(native.y, native.x)
+        } else {
+            native
+        },
+        CHROME_ICON_SIZE,
+    );
+    let rect = egui::Rect::from_center_size(slot.center(), fitted);
+    if rotated {
+        // Le glyphe est peint debout dans un rectangle aux côtés intervertis, puis tourné d'un
+        // quart de tour autour de son centre : il remplit alors `rect`.
+        let upright =
+            egui::Rect::from_center_size(rect.center(), egui::vec2(rect.height(), rect.width()));
+        let mut mesh = egui::Mesh::with_texture(ds.icon(icon).id());
+        mesh.add_rect_with_uv(
+            upright,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            tint,
+        );
+        mesh.rotate(
+            egui::emath::Rot2::from_angle(std::f32::consts::FRAC_PI_2),
+            rect.center(),
+        );
+        ui.painter().add(egui::Shape::mesh(mesh));
+    } else {
+        ds.paint_icon(ui.painter(), rect, icon, tint);
     }
 }
 
@@ -1346,6 +1834,17 @@ pub struct WatchlistOutcome {
     /// `EngineCommand::ResetWatchlistCounter`. L'entrée entière plutôt qu'une clé : la question
     /// posée nomme l'objet, et le moteur veut son nom et son genre.
     pub reset_counter: Option<WatchlistEntry>,
+    /// **Le geste de la poignée** (2026-09-28) — `PanelDrag::Started` porte le point de saisie
+    /// depuis le coin haut-gauche du CONTENU du bandeau, c'est-à-dire de sa fenêtre de base :
+    /// l'hôte pose la fenêtre sous le curseur et persiste la position au relâchement
+    /// (`watchlist_placement`).
+    pub drag: crate::panels::drag::PanelDrag,
+    /// L'icône d'orientation vient d'être cliquée : l'hôte couche ou dresse le bandeau et l'écrit
+    /// dans la config (`config::OverlayConfig::watchlist_vertical`).
+    pub toggle_orientation: bool,
+    /// Le glyphe de replacement vient d'être cliqué : l'hôte ouvre la confirmation
+    /// `OverlayKind::ResetConfirm(ResetTarget::WatchlistPosition)`.
+    pub restore_requested: bool,
 }
 
 /// Une écriture demandée par le bandeau, et le geste qui l'a produite.
@@ -1931,13 +2430,12 @@ fn control_button_row(
     shortcuts: &ShortcutBindings,
     layout: ControlLayout,
     select_open: bool,
+    orientation: ControlOrientation,
 ) -> ControlRowClicks {
     let watchlist_empty = layout != ControlLayout::Square;
+    let vertical = orientation.vertical;
     let row_rect = ui
-        .allocate_exact_size(
-            egui::vec2(control_row_width(layout), control_row_height(layout)),
-            egui::Sense::hover(),
-        )
+        .allocate_exact_size(control_block_size(layout, vertical), egui::Sense::hover())
         .0;
     ui.painter()
         .rect_filled(row_rect, PANEL_BACKDROP_ROUNDING, PANEL_BACKDROP_FILL);
@@ -1946,8 +2444,15 @@ fn control_button_row(
     // ligne du carré est la suite de la rangée. Le côté d'infobulle suit la LIGNE : celle du haut
     // ouvre au-dessus, celle du bas (ou la rangée entière) en dessous.
     let step = CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP;
+    // **Vertical, la rangée se dresse** (2026-09-28) : le pas d'un bouton au suivant descend au
+    // lieu d'avancer. Le carré 2×2, lui, ne change pas.
+    let along = if vertical && layout != ControlLayout::Square {
+        egui::vec2(0.0, step)
+    } else {
+        egui::vec2(step, 0.0)
+    };
     let add_top_left = row_rect.min + egui::vec2(CONTROL_BUTTON_GAP, CONTROL_BUTTON_GAP);
-    let remove_top_left = add_top_left + egui::vec2(step, 0.0);
+    let remove_top_left = add_top_left + along;
     let (details_top_left, options_top_left, anchor) = match layout {
         // En carré, les quatre infobulles s'accrochent au CARRÉ, pas à leur bouton : « en dessous
         // de + », c'est « par-dessus Détails ». Ancrées sur le groupe, elles s'ouvrent toutes sous
@@ -1959,11 +2464,7 @@ fn control_button_row(
         ),
         // En rangée, rien n'est jamais recouvert en dessous : chaque infobulle reste centrée sur
         // SON bouton, ce qui dit lequel elle décrit.
-        ControlLayout::Row => (
-            remove_top_left + egui::vec2(step, 0.0),
-            remove_top_left + egui::vec2(step * 2.0, 0.0),
-            None,
-        ),
+        ControlLayout::Row => (remove_top_left + along, remove_top_left + along * 2.0, None),
         // Suivi coupé : "+"/"−" ne sont pas peints, "Détails" prend la première place de la rangée
         // (voir la doc ci-dessus). Même règle d'infobulle que la rangée complète.
         ControlLayout::RowTrackingOff => (add_top_left, remove_top_left, None),
@@ -1985,7 +2486,10 @@ fn control_button_row(
                 shortcuts.label(ShortcutAction::WatchlistAdd)
             ),
             ControlButtonState::Enabled,
-            anchor,
+            ButtonTip {
+                anchor,
+                side: orientation.side,
+            },
         )
     });
     // Le clic est REMONTÉ, comme "Détails"/"Options" — voir doc de module (2026-09-13) : ce
@@ -2023,7 +2527,10 @@ fn control_button_row(
                 (false, true) => ControlButtonState::Active,
                 (false, false) => ControlButtonState::Enabled,
             },
-            anchor,
+            ButtonTip {
+                anchor,
+                side: orientation.side,
+            },
         )
     });
 
@@ -2037,7 +2544,10 @@ fn control_button_row(
         "watchlist-details",
         &format!("Détails ({})", shortcuts.label(ShortcutAction::Details)),
         ControlButtonState::Enabled,
-        anchor,
+        ButtonTip {
+            anchor,
+            side: orientation.side,
+        },
     );
     // Le clic est seulement REMONTÉ, jamais exécuté ici. Ce bouton appelait
     // `open::that(base_url())` directement, et c'était un vrai défaut : un panneau qui produit un
@@ -2060,7 +2570,10 @@ fn control_button_row(
         "watchlist-options",
         &format!("Options ({})", shortcuts.label(ShortcutAction::Options)),
         ControlButtonState::Enabled,
-        anchor,
+        ButtonTip {
+            anchor,
+            side: orientation.side,
+        },
     );
     ControlRowClicks {
         add,
@@ -2073,6 +2586,23 @@ fn control_button_row(
 /// Ce que la rangée de contrôles a produit CETTE frame. Trois booléens plutôt qu'un, depuis que
 /// "Détails" et "+" remontent eux aussi leur clic au lieu d'agir directement (navigateur pour
 /// l'un, rien du tout pour l'autre jusqu'au 2026-09-13).
+/// Où s'ouvre l'infobulle d'un bouton du carré : accrochée au carré entier (`anchor`) ou à son
+/// bouton, et de quel côté.
+#[derive(Debug, Clone, Copy)]
+struct ButtonTip {
+    anchor: Option<egui::Rect>,
+    side: design::TooltipSide,
+}
+
+/// L'orientation du bandeau telle que le carré de contrôle la lit : dressé ou couché, et le côté
+/// où ses infobulles s'ouvrent — en dessous à l'horizontale, vers le centre du jeu à la
+/// verticale (voir [`WatchlistChrome::side`]).
+#[derive(Debug, Clone, Copy)]
+struct ControlOrientation {
+    vertical: bool,
+    side: design::TooltipSide,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct ControlRowClicks {
     /// Le bouton "+" vient d'être cliqué — l'hôte ouvre la modale Options sur l'onglet « Suivi ».
@@ -2145,8 +2675,9 @@ fn control_button(
     log_name: &str,
     tooltip: &str,
     state: ControlButtonState,
-    anchor: Option<egui::Rect>,
+    tip: ButtonTip,
 ) -> egui::Response {
+    let ButtonTip { anchor, side } = tip;
     let rect = egui::Rect::from_min_size(top_left, egui::Vec2::splat(CONTROL_BUTTON_SIZE));
     let mut bouton = design::icon_button(glyph)
         .context(IconContext::FirstPlan)
@@ -2163,7 +2694,7 @@ fn control_button(
     // TOUJOURS en dessous (voir [`control_button_row`]), et en dessous de ce que `anchor` désigne :
     // le carré entier quand il y en a un, sans quoi l'infobulle d'un bouton du HAUT se poserait
     // par-dessus celui du bas.
-    let mut infobulle = design::tooltip(&response).side(design::TooltipSide::Below);
+    let mut infobulle = design::tooltip(&response).side(side);
     if let Some(anchor) = anchor {
         infobulle = infobulle.anchor(anchor);
     }
@@ -2199,6 +2730,9 @@ struct Tile {
 /// même geste) et tiennent `entry_tile` sous la limite de clippy, comme [`WatchlistAssets`] le fait
 /// pour `show` : un `#[allow(clippy::too_many_arguments)]` n'aurait fait que taire le compte.
 struct TileState {
+    /// Côté des infobulles de la tuile et de son bouton de réinitialisation — en dessous à
+    /// l'horizontale, vers le centre du jeu à la verticale (2026-09-28).
+    side: design::TooltipSide,
     /// Rang dans la bande — ce que le glisser-déposer déplace.
     index: usize,
     /// `None` hors du mode sélection, `Some(cochée)` dedans.
@@ -2218,6 +2752,7 @@ fn entry_tile(
     etat: TileState,
 ) -> Tile {
     let TileState {
+        side,
         index,
         selection,
         completion,
@@ -2314,7 +2849,7 @@ fn entry_tile(
     // **Le bouton de réinitialisation, au centre, révélé au survol** (2026-09-18) — voir
     // [`reset_button`] pour ce qu'il est et quand il ne se montre pas.
     let reset = (selection.is_none() && completion.is_none() && !reorder.in_flight())
-        .then(|| reset_button(ui, &response, rect, index))
+        .then(|| reset_button(ui, &response, rect, index, side))
         .flatten();
     let reset_requested = reset.as_ref().is_some_and(|bouton| bouton.clicked());
     // **Le nom ne s'ouvre que si le bouton n'est pas visé** : deux infobulles à la fois se
@@ -2327,7 +2862,7 @@ fn entry_tile(
             .is_some_and(|bouton| bouton.contains_pointer())
     {
         design::tooltip(&response)
-            .side(design::TooltipSide::Below)
+            .side(side)
             .text(tile_tooltip(entry));
     }
     Tile {
@@ -2366,6 +2901,7 @@ fn reset_button(
     tuile: &egui::Response,
     rect: egui::Rect,
     index: usize,
+    side: design::TooltipSide,
 ) -> Option<egui::Response> {
     if !tuile.contains_pointer() {
         return None;
@@ -2379,7 +2915,7 @@ fn reset_button(
     // En dessous, comme le nom de la tuile — c'est la règle du bandeau (voir `entry_tile`).
     design::tooltip(&bouton)
         .anchor(rect)
-        .side(design::TooltipSide::Below)
+        .side(side)
         .text("Réinitialiser le compteur");
     Some(bouton)
 }
