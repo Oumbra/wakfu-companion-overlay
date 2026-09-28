@@ -1737,7 +1737,9 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
         (85.0, "details"),
         (115.0, "options"),
     ] {
-        harness.hover_at(egui::pos2(x, 25.0));
+        // Décalés de la colonne de la poignée depuis le 2026-09-28 (voir [`POIGNEE`]) : sans ça,
+        // « ajouter » montrait l'infobulle de la pastille.
+        harness.hover_at(egui::pos2(x + POIGNEE, 25.0));
         harness.run();
         harness.snapshot(format!("watchlist_vide_tooltip_{nom}_dessous"));
     }
@@ -1833,7 +1835,7 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
     // Les deux boutons qui restent, survolés là où « + » et « − » se tenaient : leur infobulle dit
     // « Détails » et « Options », et aucune ne dit « Ajouter » ni « Supprimer ».
     for (x, nom) in [(25.0, "details"), (55.0, "options")] {
-        harness.hover_at(egui::pos2(x, 25.0));
+        harness.hover_at(egui::pos2(x + POIGNEE, 25.0));
         harness.run();
         harness.snapshot(format!("watchlist_suivi_coupe_tooltip_{nom}"));
     }
