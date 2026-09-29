@@ -3,6 +3,48 @@
   var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
+  // src/combat-mechanics/combat-mechanic.model.ts
+  function normalizeMechanicName(name) {
+    return name.trim().toLowerCase();
+  }
+
+  // src/combat-mechanics/ignemikhal.mechanic.ts
+  var IGNEMIKHAL = "ignemikhal";
+  var PROTECTION_POURPRE = "protection pourpre";
+  var IGNEMIKHAL_PROTECTION_POURPRE = {
+    id: "ignemikhal-protection-pourpre",
+    triggerFighterNames: ["Ignemikhal"],
+    resolveDamage({ target, effectTag, lastCast }) {
+      if (!effectTag || normalizeMechanicName(effectTag) !== PROTECTION_POURPRE) return null;
+      if (normalizeMechanicName(target) !== IGNEMIKHAL) return null;
+      if (!lastCast || normalizeMechanicName(lastCast.caster) === IGNEMIKHAL) return null;
+      return { attacker: lastCast.caster, spell: effectTag };
+    }
+  };
+
+  // src/combat-mechanics/combat-mechanics.ts
+  var COMBAT_MECHANICS = [IGNEMIKHAL_PROTECTION_POURPRE];
+  var MECHANICS_BY_TRIGGER = /* @__PURE__ */ new Map();
+  for (const mechanic of COMBAT_MECHANICS) {
+    for (const name of mechanic.triggerFighterNames) {
+      const key = normalizeMechanicName(name);
+      const list = MECHANICS_BY_TRIGGER.get(key) ?? [];
+      list.push(mechanic);
+      MECHANICS_BY_TRIGGER.set(key, list);
+    }
+  }
+  var NO_MECHANICS = [];
+  function mechanicsTriggeredBy(name) {
+    return MECHANICS_BY_TRIGGER.get(normalizeMechanicName(name)) ?? NO_MECHANICS;
+  }
+  function resolveMechanicDamage(active, context) {
+    for (const mechanic of active) {
+      const attribution = mechanic.resolveDamage?.(context);
+      if (attribution) return attribution;
+    }
+    return null;
+  }
+
   // src/log-parser.ts
   function resolveChatChannel(category) {
     if (category === "Proximit\xE9") return { key: "proximite", label: "Proximit\xE9" };
@@ -94,7 +136,8 @@
       summonOwners: /* @__PURE__ */ new Map(),
       pendingSummonCasters: [],
       seenFighterIds: /* @__PURE__ */ new Set(),
-      lastActionMs: -1
+      lastActionMs: -1,
+      activeMechanics: []
     };
   }
   var LogParser = class {
@@ -298,6 +341,9 @@
       const state = this.getFightState(fightId);
       const isNewFighter = !state.seenFighterIds.has(fighterId);
       state.seenFighterIds.add(fighterId);
+      for (const mechanic of mechanicsTriggeredBy(name)) {
+        if (!state.activeMechanics.includes(mechanic)) state.activeMechanics.push(mechanic);
+      }
       const joinTimeMs = this.timeToMs(time);
       while (state.pendingSummonCasters.length > 0 && joinTimeMs - state.pendingSummonCasters[0].timeMs > SUMMON_JOIN_WINDOW_MS) {
         state.pendingSummonCasters.shift();
@@ -621,7 +667,8 @@
           if (hasSelfInflictedDamageTag(tail)) return null;
           const { attacker: attacker2, spell: spell2, element: element2 } = this.resolveEffectTail(target, tail, state, {
             selfFallback: false,
-            riposteFallback: true
+            riposteFallback: true,
+            combatMechanics: true
           });
           state.lastDamage = { attacker: attacker2, target };
           return { kind: "damage", time, target, attacker: attacker2, spell: spell2, element: element2, amount, fightId };
@@ -669,6 +716,10 @@
      *   adversaire pour le passif défensif propre de sa cible (ex. armure gagnée par la cible d'une
      *   attaque, taguée du nom du sort qui vient de la toucher — cas réel constaté, voir tests).
      *
+     * - `combatMechanics: true` (dégâts uniquement) : une règle propre à une mécanique de combat
+     *   active dans ce combat (voir `combat-mechanics/`, `FightParseState.activeMechanics`) peut
+     *   imposer l'attribution avant toute règle générique ci-dessus.
+     *
      * Dernière étape, commune à tous les appelants : si l'`attacker` résolu ci-dessus est le nom d'une
      * invocation connue de ce combat (voir FightParseState.summonOwners), l'action est réattribuée à
      * son invocateur avec le nom de l'invocation comme libellé de "sort" — ex. le Sadida "Fayto"
@@ -689,7 +740,15 @@
       }
       let attacker = state.lastCast?.caster ?? (options.selfFallback ? target : "Inconnu");
       let spell = state.lastCast?.spell ?? "Autre";
-      if (effectTag) {
+      const mechanicAttribution = options.combatMechanics && state.activeMechanics.length > 0 ? resolveMechanicDamage(state.activeMechanics, {
+        target,
+        effectTag,
+        lastCast: state.lastCast
+      }) : null;
+      if (mechanicAttribution) {
+        attacker = mechanicAttribution.attacker;
+        spell = mechanicAttribution.spell;
+      } else if (effectTag) {
         const owner = state.effectOwners.get(effectTag.toLowerCase());
         if (owner) {
           attacker = owner.carrier === target ? owner.applier : owner.carrier;

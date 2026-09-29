@@ -513,4 +513,65 @@ mod tests {
             .collect();
         assert_eq!(anchors, vec![2026]);
     }
+
+    /// Combat à deux alliés porteurs de « Protection pourpre » (Cra puis Iop), avec `boss` et un
+    /// second monstre ; le Cra frappe l'autre monstre, le dégât est répercuté sur `boss`.
+    fn lignes_protection_pourpre(boss: &str) -> Vec<String> {
+        [
+            " INFO 20:00:00,000 [T] (a:1) - [_FL_] fightId=42 Anonyme-Cra1 breed : 9 [1] isControlledByAI=false obstacleId : -1 join the fight at {P}".to_string(),
+            " INFO 20:00:00,001 [T] (a:1) - [_FL_] fightId=42 Anonyme-Iop2 breed : 8 [2] isControlledByAI=false obstacleId : -1 join the fight at {P}".to_string(),
+            format!(" INFO 20:00:00,002 [T] (a:1) - [_FL_] fightId=42 {boss} breed : 100 [-1] isControlledByAI=true obstacleId : -1 join the fight at {{P}}"),
+            " INFO 20:00:00,003 [T] (a:1) - [_FL_] fightId=42 Flamiche breed : 101 [-2] isControlledByAI=true obstacleId : -1 join the fight at {P}".to_string(),
+            " INFO 20:00:01,000 [T] (a:1) - [Information (combat)] Anonyme-Cra1: Protection pourpre (Niv. 1)".to_string(),
+            " INFO 20:00:01,001 [T] (a:1) - [Information (combat)] Anonyme-Iop2: Protection pourpre (Niv. 1)".to_string(),
+            " INFO 20:00:05,000 [T] (a:1) - [Information (combat)] Anonyme-Cra1 lance le sort Flèche ardente".to_string(),
+            " INFO 20:00:05,100 [T] (a:1) - [Information (combat)] Flamiche: -300 PV (Feu)".to_string(),
+            format!(" INFO 20:00:05,101 [T] (a:1) - [Information (combat)] {boss}: -150 PV (Feu) (Protection pourpre)"),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    fn degats_sur(entries: &[LogEntry], cible: &str) -> Vec<(String, String)> {
+        entries
+            .iter()
+            .filter_map(|e| match e {
+                LogEntry::Damage {
+                    target,
+                    attacker,
+                    spell,
+                    ..
+                } if target == cible => Some((attacker.clone(), spell.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Règle de mécanique de combat vendue (`engine-js/src/combat-mechanics/`) : contre
+    /// Ignemikhal, le dégât répercuté par « Protection pourpre » est crédité au lanceur du sort
+    /// précédent, pas au dernier allié à avoir reçu le passif.
+    #[test]
+    fn protection_pourpre_est_creditee_au_lanceur_contre_ignemikhal() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let entries = engine
+            .parse_lines(&lignes_protection_pourpre("Ignemikhal"))
+            .expect("parsing");
+        assert_eq!(
+            degats_sur(&entries, "Ignemikhal"),
+            vec![("Anonyme-Cra1".to_string(), "Protection pourpre".to_string())]
+        );
+    }
+
+    /// Sans Ignemikhal dans le combat, la règle reste inactive : résolution générique inchangée.
+    #[test]
+    fn protection_pourpre_reste_generique_sans_ignemikhal() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let entries = engine
+            .parse_lines(&lignes_protection_pourpre("Autre Boss"))
+            .expect("parsing");
+        assert_eq!(
+            degats_sur(&entries, "Autre Boss"),
+            vec![("Anonyme-Iop2".to_string(), "Protection pourpre".to_string())]
+        );
+    }
 }
