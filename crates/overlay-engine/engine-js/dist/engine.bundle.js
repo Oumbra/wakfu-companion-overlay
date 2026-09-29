@@ -104,11 +104,12 @@
   var STATUS_REMOVE_RE = /^(.+?): n'est plus sous l'emprise de '(.+?)'\.?$/;
   var IGNORED_TAG = "Parade !";
   var SELF_INFLICTED_DAMAGE_TAGS = /* @__PURE__ */ new Set(["retour de flamme"]);
-  function hasSelfInflictedDamageTag(tail) {
+  function selfInflictedDamageTag(tail) {
     for (const tagMatch of tail.matchAll(TAG_RE)) {
-      if (SELF_INFLICTED_DAMAGE_TAGS.has(tagMatch[1].trim().toLowerCase())) return true;
+      const tag = tagMatch[1].trim();
+      if (SELF_INFLICTED_DAMAGE_TAGS.has(tag.toLowerCase())) return tag;
     }
-    return false;
+    return null;
   }
   var TRADE_DONNE_RE = /le joueur (.+?) donne\s*:\s*(\d+)\s*K\s*;\s*(.*?)(?=le joueur .+? donne\s*:|$)/g;
   var TRADE_REFID_RE = /\(refId=-?\d+\)/g;
@@ -664,7 +665,23 @@
         const state = this.getFightState(fightId);
         state.lastActionMs = this.timeToMs(time);
         if (sign === "-") {
-          if (hasSelfInflictedDamageTag(tail)) return null;
+          const selfTag = selfInflictedDamageTag(tail);
+          if (selfTag) {
+            const { element: element3 } = this.resolveEffectTail(target, tail, state, {
+              selfFallback: true,
+              riposteFallback: false
+            });
+            return {
+              kind: "heal",
+              time,
+              target,
+              attacker: target,
+              spell: selfTag,
+              element: element3,
+              amount: -amount,
+              fightId
+            };
+          }
           const { attacker: attacker2, spell: spell2, element: element2 } = this.resolveEffectTail(target, tail, state, {
             selfFallback: false,
             riposteFallback: true,

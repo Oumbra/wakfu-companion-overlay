@@ -426,10 +426,11 @@ mod tests {
         );
     }
 
-    /// Passif Sacrieur « Retour de flamme » : PV que le Sacrieur s'inflige lui-même, jamais un dégât
-    /// infligé — même juste après un sort de ce Sacrieur (dernier lanceur, crédité sans ce filtre).
+    /// Passif Sacrieur « Retour de flamme » : PV que le Sacrieur s'inflige lui-même — jamais un dégât
+    /// infligé (même juste après un sort de ce Sacrieur, dernier lanceur), mais un soin NÉGATIF
+    /// crédité au Sacrieur, libellé du nom du passif.
     #[test]
-    fn le_retour_de_flamme_du_sacrieur_nest_jamais_un_degat_inflige() {
+    fn le_retour_de_flamme_du_sacrieur_est_un_soin_negatif() {
         let engine = LogParserEngine::new().expect("moteur QuickJS");
         let lignes: Vec<String> = [
             " INFO 10:00:00,000 [T] (a:1) - [_FL_] fightId=1 Oumbra breed : 11 [1] isControlledByAI=false obstacleId : -1 join the fight at {P}",
@@ -457,6 +458,28 @@ mod tests {
         assert_eq!(
             damages,
             vec![("Oumbra".to_string(), "Grokoko".to_string(), 188)]
+        );
+        let heals: Vec<(String, String, String, i64)> = entries
+            .iter()
+            .filter_map(|e| match e {
+                LogEntry::Heal {
+                    attacker,
+                    target,
+                    spell,
+                    amount,
+                    ..
+                } => Some((attacker.clone(), target.clone(), spell.clone(), *amount)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            heals,
+            vec![(
+                "Oumbra".to_string(),
+                "Oumbra".to_string(),
+                "Retour de flamme".to_string(),
+                -94
+            )]
         );
     }
 

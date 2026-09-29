@@ -27,8 +27,9 @@ parseur diverge donc normalement du dépôt d'origine (décision utilisateur, 20
   canal de chat redatait l'historique), `TRADE_ITEM_RE` découpée sur `(refId=N)` (regex cubique),
   tampon multi-lignes borné (200 lignes, 32 Kio). Ces trois points ne sont PAS des divergences :
   ils disparaissent de cette liste une fois le web resynchronisé.
-- 2026-09-29 log-parser.ts : `SELF_INFLICTED_DAMAGE_TAGS` (passif Sacrieur « Retour de flamme »
-  ignoré comme dégât infligé), porté À L'IDENTIQUE du commit web 3eefa8d (branche `claude/dev`).
+- 2026-09-29 log-parser.ts + log-entry.model.ts : `SELF_INFLICTED_DAMAGE_TAGS` (passif Sacrieur
+  « Retour de flamme » émis en soin négatif, jamais en dégât infligé), porté À L'IDENTIQUE des
+  commits web 3eefa8d puis 3630ddd (branche `claude/dev`).
   Pas une divergence : disparaît de cette liste une fois le web resynchronisé.
 
 `src/combat-mechanics/` (hors `*.spec.ts`, testés côté Rust dans `quickjs_engine.rs`) est vendu
