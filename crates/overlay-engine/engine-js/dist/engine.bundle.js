@@ -61,6 +61,13 @@
   var STATUS_EFFECT_RE = new RegExp(`^(.+?): (.+?) \\((?:Niv\\. ${NUM}|\\+${NUM} Niv\\.)\\)$`);
   var STATUS_REMOVE_RE = /^(.+?): n'est plus sous l'emprise de '(.+?)'\.?$/;
   var IGNORED_TAG = "Parade !";
+  var SELF_INFLICTED_DAMAGE_TAGS = /* @__PURE__ */ new Set(["retour de flamme"]);
+  function hasSelfInflictedDamageTag(tail) {
+    for (const tagMatch of tail.matchAll(TAG_RE)) {
+      if (SELF_INFLICTED_DAMAGE_TAGS.has(tagMatch[1].trim().toLowerCase())) return true;
+    }
+    return false;
+  }
   var TRADE_DONNE_RE = /le joueur (.+?) donne\s*:\s*(\d+)\s*K\s*;\s*(.*?)(?=le joueur .+? donne\s*:|$)/g;
   var TRADE_REFID_RE = /\(refId=-?\d+\)/g;
   var TRADE_ITEM_RE = /(\d+)\s*x\s*([\s\S]+)$/;
@@ -611,6 +618,7 @@
         const state = this.getFightState(fightId);
         state.lastActionMs = this.timeToMs(time);
         if (sign === "-") {
+          if (hasSelfInflictedDamageTag(tail)) return null;
           const { attacker: attacker2, spell: spell2, element: element2 } = this.resolveEffectTail(target, tail, state, {
             selfFallback: false,
             riposteFallback: true

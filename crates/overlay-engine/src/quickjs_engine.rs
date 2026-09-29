@@ -426,6 +426,40 @@ mod tests {
         );
     }
 
+    /// Passif Sacrieur « Retour de flamme » : PV que le Sacrieur s'inflige lui-même, jamais un dégât
+    /// infligé — même juste après un sort de ce Sacrieur (dernier lanceur, crédité sans ce filtre).
+    #[test]
+    fn le_retour_de_flamme_du_sacrieur_nest_jamais_un_degat_inflige() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let lignes: Vec<String> = [
+            " INFO 10:00:00,000 [T] (a:1) - [_FL_] fightId=1 Oumbra breed : 11 [1] isControlledByAI=false obstacleId : -1 join the fight at {P}",
+            " INFO 10:00:00,001 [T] (a:1) - [_FL_] fightId=1 Grokoko breed : 10 [-1] isControlledByAI=true obstacleId : -1 join the fight at {P}",
+            " INFO 10:00:01,000 [T] (a:1) - [Information (combat)] Oumbra lance le sort Assaut",
+            " INFO 10:00:01,100 [T] (a:1) - [Information (combat)] Grokoko: -188 PV (Feu)",
+            " INFO 10:00:01,200 [T] (a:1) - [Information (combat)] Oumbra: -94 PV (Feu) (Retour de flamme)",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+        let entries = engine.parse_lines(&lignes).expect("parsing");
+        let damages: Vec<(String, String, i64)> = entries
+            .iter()
+            .filter_map(|e| match e {
+                LogEntry::Damage {
+                    attacker,
+                    target,
+                    amount,
+                    ..
+                } => Some((attacker.clone(), target.clone(), *amount)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            damages,
+            vec![("Oumbra".to_string(), "Grokoko".to_string(), 188)]
+        );
+    }
+
     #[test]
     fn sans_catalogue_le_repli_dinvocation_avale_nimporte_quel_nouveau_venu() {
         let engine = LogParserEngine::new().expect("moteur QuickJS");
