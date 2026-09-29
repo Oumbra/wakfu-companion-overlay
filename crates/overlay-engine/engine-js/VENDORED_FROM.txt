@@ -31,6 +31,13 @@ parseur diverge donc normalement du dépôt d'origine (décision utilisateur, 20
   ignoré comme dégât infligé), porté À L'IDENTIQUE du commit web 3eefa8d (branche `claude/dev`).
   Pas une divergence : disparaît de cette liste une fois le web resynchronisé.
 
+`src/combat-mechanics/` (hors `*.spec.ts`, testés côté Rust dans `quickjs_engine.rs`) est vendu
+À L'IDENTIQUE depuis `src/app/core/services/combat-mechanics/` du dépôt web (2026-09-29, commit
+f9bb8ca de `claude/dev`) : règles propres à une mécanique de combat (1ʳᵉ règle : « Protection
+pourpre » du boss d'intervention Ignemikhal), branchées dans `log-parser.ts` par
+`FightParseState.activeMechanics` et `resolveEffectTail` (`combatMechanics: true`) — même
+branchement que côté web. Toute nouvelle règle s'ajoute dans les deux dépôts.
+
 `src/entry.ts` n'est pas vendu : c'est la façade QuickJS propre à l'overlay. Toute méthode
 publique de `LogParser` qu'elle expose (`parseLine`, `flush`, `reset`, `closeFight`) doit y être
 republiée sur `globalThis.wakfuEngine`, sans quoi l'hôte Rust ne peut pas l'appeler.
