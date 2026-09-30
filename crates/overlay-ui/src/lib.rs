@@ -93,6 +93,8 @@ pub mod style;
 pub mod turn_watch;
 pub mod ui_icons;
 pub mod watchlist_placement;
+#[cfg(target_os = "windows")]
+pub mod window_style_guard;
 
 /// Le mécanisme de mise à jour automatique vit dans `overlay-sync` (réseau) ; réexporté ici pour
 /// que le harnais de rendu (`overlay-testkit`, qui ne dépend que de cette crate) construise les

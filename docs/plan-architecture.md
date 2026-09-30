@@ -414,6 +414,15 @@ confirmé par le spike :
    `with_no_redirection_bitmap(true)`.
 2. Styles étendus complémentaires, posés à la main sur le HWND (non exposés par `winit`) :
    `WS_EX_NOACTIVATE` (ne vole jamais le focus au jeu), `WS_EX_TOOLWINDOW`.
+   **Ils doivent être verrouillés, pas seulement posés** (2026-09-30, retour utilisateur :
+   Alt+Échap depuis le jeu activait un bandeau au lieu de la fenêtre suivante). `winit` 0.30
+   réécrit tout le style étendu à chaque changement de ses drapeaux (`apply_diff`, déclenché par
+   `set_cursor_hittest`, `set_visible`…) et les effaçait en posant `WS_EX_APPWINDOW` : les bandeaux
+   redevenaient activables, présents dans Alt+Tab, et topmost donc premiers dans l'ordre Z que suit
+   Alt+Échap. Le verrou (`overlay_ui::window_style_guard`) sous-classe la fenêtre : il corrige
+   `STYLESTRUCT::styleNew` dans `WM_STYLECHANGING` et répond `MA_NOACTIVATE` à `WM_MOUSEACTIVATE`.
+   Les bandeaux sont aussi créés `with_active(false)`, sans quoi chaque `apply_diff` rappelle
+   `ShowWindow(SW_SHOW)`, qui active la fenêtre.
 3. Composition **DirectComposition**, pilotée entièrement par `wgpu-hal` : backend forcé DX12,
    `Dx12BackendOptions { presentation_system: Dx12SwapchainKind::DxgiFromVisual, .. }` à la création
    de l'instance `wgpu`. `wgpu-hal` crée et gère lui-même `IDCompositionDevice`/`Target`/`Visual` en
