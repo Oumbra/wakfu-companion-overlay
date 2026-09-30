@@ -38,6 +38,11 @@ f9bb8ca de `claude/dev`) : règles propres à une mécanique de combat (1ʳᵉ r
 pourpre » du boss d'intervention Ignemikhal), branchées dans `log-parser.ts` par
 `FightParseState.activeMechanics` et `resolveEffectTail` (`combatMechanics: true`) — même
 branchement que côté web. Toute nouvelle règle s'ajoute dans les deux dépôts.
+Resynchronisé le 2026-09-30 (commit 65b8ab8 de `claude/dev`) après calibrage sur un vrai combat :
+le passif est porté par les monstres ; `FightParseState.monsterNames` (exposé en `isMonster`) et
+`lastDamage` sont passés aux règles. Fixture partagée avec le web :
+`crates/overlay-engine/tests/ignemikhal_protection_pourpre.log` =
+`tests/logs/fr/fight_single-account_ignemikhal_protection-pourpre.log`.
 
 `src/entry.ts` n'est pas vendu : c'est la façade QuickJS propre à l'overlay. Toute méthode
 publique de `LogParser` qu'elle expose (`parseLine`, `flush`, `reset`, `closeFight`) doit y être
