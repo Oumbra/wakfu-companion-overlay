@@ -26,20 +26,25 @@
 //! Windows) — ils fonctionnent sans focus sur une fenêtre overlay (celles-ci portent
 //! `WS_EX_NOACTIVATE` et ne reçoivent qu'exceptionnellement un événement clavier : un clic en mode
 //! interactif peut malgré tout leur donner le premier plan, ce qui a coûté le filet « Échap » de
-//! `main.rs::window_event`, retiré le 2026-09-17), donc **volés au jeu et à toute autre
-//! application** : d'où le
-//! garde-fou [`Shortcut::is_valid`] — une lettre nue ne peut pas être bindée, elle serait prise à
-//! Wakfu lui-même dès la première ligne de chat écrite.
+//! `main.rs::window_event`, retiré le 2026-09-17), donc **volés à l'application au premier
+//! plan** : d'où le garde-fou [`Shortcut::is_valid`] — une lettre nue ne peut pas être bindée,
+//! elle serait prise à Wakfu lui-même dès la première ligne de chat écrite.
+//!
+//! **Depuis le 2026-09-30, ils ne sont réservés que pendant qu'une fenêtre de jeu (ou de
+//! l'overlay) est au premier plan** (demande utilisateur : F1, F2, `Ctrl+Shift+S` volés au
+//! navigateur et aux autres logiciels). Chaque binaire sonde la fenêtre active à chaque tick et
+//! appelle [`ShortcutRegistry::set_game_focused`] ; hors du jeu, les combinaisons sont rendues au
+//! système — voir [`FocusGate`].
 //!
 //! **Exception : les touches de fonction nues** (F1-F12), autorisées depuis le 2026-09-13 avec les
 //! raccourcis multicompte ([`ShortcutAction::InvitePartner`]/[`ShortcutAction::FollowPartner`], F1
 //! et F2 par défaut — combinaisons demandées telles quelles par l'utilisateur). Elles ne
 //! s'écrivent pas, donc ne gênent aucune saisie ; et « voler la touche au jeu » est ICI l'effet
-//! recherché — c'est l'overlay, pas Wakfu, qui doit réagir à F1. Le revers reste entier et vaut
-//! pour toute personnalisation de ce genre : la touche est confisquée à TOUTES les applications
-//! tant que l'overlay tourne (F1 n'ouvre plus l'aide du navigateur). Une action multicompte ne
-//! fait rien quand le premier plan n'est pas le jeu (`chat_command::PartnerError::NoGameFocused`),
-//! mais la frappe est perdue pour l'application qui avait le focus.
+//! recherché — c'est l'overlay, pas Wakfu, qui doit réagir à F1. Jusqu'au 2026-09-30, le revers
+//! était que la touche restait confisquée à TOUTES les applications tant que l'overlay tournait
+//! (F1 n'ouvrait plus l'aide du navigateur) ; le garde de premier plan ([`FocusGate`]) l'a levé.
+//! `chat_command::PartnerError::NoGameFocused` reste le filet des ~50 ms entre un changement de
+//! fenêtre et le sondage suivant.
 //!
 //! **Les raccourcis multicompte se désactivent d'un bloc depuis le 2026-09-25** (demande
 //! utilisateur : « permets de les désactiver dans une section multi-compte avec une seule option
@@ -83,12 +88,11 @@ pub enum ShortcutAction {
     /// (2026-09-02) pour récupérer un overlay bloqué (mauvaise taille, plus au premier plan, Suivi
     /// resté vide) sans relancer le processus.
     ///
-    /// **Ctrl+Shift+R plutôt que F5** (suggestion initiale de l'utilisateur, 2026-09-02) : ces
-    /// raccourcis sont GLOBAUX, jamais limités à la fenêtre de jeu malgré la demande « quand on est
-    /// focus sur une fenêtre de jeu » — voler F5 à Wakfu (sorts/actions fréquents sur les touches de
-    /// fonction) ou à l'application au premier plan serait activement nuisible. Vaut toujours comme
-    /// mise en garde pour une personnalisation : une touche de fonction nue est un mauvais choix
-    /// ici, même si le champ l'accepte avec un modificateur.
+    /// **Ctrl+Shift+R plutôt que F5** (suggestion initiale de l'utilisateur, 2026-09-02) : voler
+    /// F5 à Wakfu (sorts/actions fréquents sur les touches de fonction) serait activement nuisible.
+    /// À l'époque, ces raccourcis étaient aussi volés à toute autre application ; depuis le
+    /// 2026-09-30 ils ne sont réservés que quand le jeu est au premier plan ([`FocusGate`]), mais
+    /// l'argument « ne pas prendre F5 au jeu » tient toujours.
     Refresh,
     // **Il y avait ici `Quit`** (fermeture de l'overlay, `Ctrl+Shift+Q`, `event_loop.exit()`),
     // retiré le 2026-09-17 à la demande de l'utilisateur — voir la doc de module. Il avait été
@@ -533,6 +537,11 @@ impl ShortcutBindings {
 /// la modale Options est ouverte ([`Self::suspend`]) sans quoi l'OS avalerait la frappe que
 /// l'utilisateur essaie justement d'assigner.
 ///
+/// **Deuxième raison de tout rendre au système depuis le 2026-09-30 : le jeu n'est pas au premier
+/// plan** ([`Self::set_game_focused`], voir [`FocusGate`]). Les combinaisons ne sont réservées que
+/// si les deux conditions tiennent — modale Options fermée ET fenêtre de jeu (ou de l'overlay)
+/// active.
+///
 /// **Aucun `expect` sur l'enregistrement** (contrairement au code d'origine, qui paniquait) : une
 /// combinaison peut être refusée par l'OS parce qu'une AUTRE application l'a déjà prise — cas
 /// désormais atteignable en tapant simplement une combinaison malheureuse dans la modale, sans
@@ -548,7 +557,41 @@ pub struct ShortcutRegistry {
     /// [`Self::suspend`]) — à désenregistrer avant tout nouvel enregistrement.
     active: Vec<HotKey>,
     ids: HashMap<u32, ShortcutAction>,
+    gate: FocusGate,
+}
+
+/// Quand les raccourcis doivent-ils être réservés auprès de l'OS ? Logique pure de
+/// [`ShortcutRegistry`], isolée pour être testée sans `GlobalHotKeyManager` (qui exige un serveur
+/// X ou une file de messages Windows).
+///
+/// **Pourquoi les raccourcis suivent le premier plan (demande utilisateur, 2026-09-30)** : F1, F2,
+/// `Ctrl+Shift+S`… étaient confisqués à TOUTES les applications tant que l'overlay tournait —
+/// F1 n'ouvrait plus l'aide du navigateur, `Ctrl+Shift+S` n'y faisait plus de capture. Ignorer
+/// l'événement à la réception ne suffit pas : `RegisterHotKey`/XGrabKey ont déjà avalé la frappe,
+/// l'application active ne la reçoit jamais. Il faut donc retirer la réservation elle-même dès que
+/// le jeu perd le premier plan, et la reposer dès qu'il le retrouve.
+///
+/// **Une fenêtre de l'overlay au premier plan compte comme le jeu** (validé par l'utilisateur le
+/// même jour) : un clic en mode interactif peut lui donner le focus malgré `WS_EX_NOACTIVATE`
+/// (voir doc de module), et le raccourci Bascule doit rester disponible pour repasser en
+/// clic-traversant sans recliquer d'abord dans Wakfu.
+///
+/// **Désarmé au démarrage** (`game_focused = false`) : rien n'est réservé tant que le premier
+/// sondage n'a pas vu le jeu — lancer l'overlay depuis un terminal ne confisque rien, même un
+/// instant.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FocusGate {
+    /// Modale Options ouverte ([`ShortcutRegistry::suspend`]).
     suspended: bool,
+    /// Fenêtre de jeu ou de l'overlay au premier plan ([`ShortcutRegistry::set_game_focused`]).
+    game_focused: bool,
+}
+
+impl FocusGate {
+    /// Les combinaisons doivent-elles être réservées dans cet état ?
+    pub fn armed(self) -> bool {
+        !self.suspended && self.game_focused
+    }
 }
 
 impl ShortcutRegistry {
@@ -560,9 +603,12 @@ impl ShortcutRegistry {
             bindings,
             active: Vec::new(),
             ids: HashMap::new(),
-            suspended: false,
+            gate: FocusGate::default(),
         };
-        registry.register_active();
+        // Désarmé au démarrage (voir `FocusGate`) : le premier `set_game_focused(true)` enregistre.
+        if registry.gate.armed() {
+            registry.register_active();
+        }
         registry
     }
 
@@ -582,10 +628,11 @@ impl ShortcutRegistry {
     /// l'enregistrement a été refusé par l'OS, pour que l'appelant le signale à sa façon. Rien
     /// n'est enregistré tant que la suspension est active : le nouveau jeu prendra effet au
     /// [`Self::resume`] qui suit (c'est exactement l'ordre que suit la fermeture de la modale).
+    /// Idem tant que le jeu n'est pas au premier plan ([`Self::set_game_focused`]).
     pub fn apply(&mut self, bindings: ShortcutBindings) -> Vec<ShortcutAction> {
         self.unregister_active();
         self.bindings = bindings;
-        if self.suspended {
+        if !self.gate.armed() {
             return Vec::new();
         }
         self.register_active()
@@ -595,21 +642,53 @@ impl ShortcutRegistry {
     /// ça, `Ctrl+Shift+O` (ou toute autre combinaison déjà prise par l'overlay) serait interceptée
     /// par l'OS et n'arriverait jamais jusqu'à la case en écoute.
     pub fn suspend(&mut self) {
-        if self.suspended {
+        if self.gate.suspended {
             return;
         }
         self.unregister_active();
-        self.suspended = true;
+        self.gate.suspended = true;
     }
 
     /// Ré-enregistre les combinaisons courantes (fermeture de la modale) — renvoie comme
     /// [`Self::apply`] les actions refusées par l'OS.
     pub fn resume(&mut self) -> Vec<ShortcutAction> {
-        if !self.suspended {
+        if !self.gate.suspended {
             return Vec::new();
         }
-        self.suspended = false;
+        self.gate.suspended = false;
+        if !self.gate.armed() {
+            // Jeu pas au premier plan : le prochain `set_game_focused(true)` enregistrera.
+            return Vec::new();
+        }
         self.register_active()
+    }
+
+    /// Signale si une fenêtre de jeu (ou de l'overlay) est au premier plan — appelé à chaque tick
+    /// par la boucle d'événements de chaque binaire, voir [`FocusGate`]. Ne touche à l'OS que sur
+    /// un CHANGEMENT d'état : réserve les combinaisons quand le jeu revient au premier plan, les
+    /// rend au système quand il le perd. Renvoie comme [`Self::apply`] les actions refusées par
+    /// l'OS au réarmement.
+    pub fn set_game_focused(&mut self, focused: bool) -> Vec<ShortcutAction> {
+        if self.gate.game_focused == focused {
+            return Vec::new();
+        }
+        let was_armed = self.gate.armed();
+        self.gate.game_focused = focused;
+        match (was_armed, self.gate.armed()) {
+            (false, true) => {
+                tracing::info!("[raccourcis] jeu au premier plan — raccourcis armés.");
+                self.register_active()
+            }
+            (true, false) => {
+                self.unregister_active();
+                tracing::info!(
+                    "[raccourcis] jeu plus au premier plan — raccourcis rendus aux autres applications."
+                );
+                Vec::new()
+            }
+            // Modale Options ouverte : rien n'est réservé de toute façon, `resume` tranchera.
+            _ => Vec::new(),
+        }
     }
 
     fn register_active(&mut self) -> Vec<ShortcutAction> {
@@ -889,6 +968,22 @@ fn code_from_egui(key: egui::Key) -> Option<Code> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn raccourcis_armes_seulement_jeu_actif_et_options_fermees() {
+        let gate = |suspended, game_focused| FocusGate {
+            suspended,
+            game_focused,
+        };
+        assert!(gate(false, true).armed());
+        assert!(!gate(false, false).armed(), "navigateur au premier plan");
+        assert!(!gate(true, true).armed(), "modale Options ouverte");
+        assert!(!gate(true, false).armed());
+        assert!(
+            !FocusGate::default().armed(),
+            "rien n'est réservé avant le premier sondage du premier plan"
+        );
+    }
+
     use super::*;
 
     /// Les combinaisons par défaut restent celles qui étaient en dur avant ce module (voir la doc

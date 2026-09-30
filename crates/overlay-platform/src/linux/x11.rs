@@ -75,6 +75,7 @@ pub struct GameWindowTracker {
     net_wm_name: u32,
     net_frame_extents: u32,
     net_active_window: u32,
+    net_wm_pid: u32,
     utf8_string: u32,
     wm_name: u32,
 }
@@ -98,6 +99,7 @@ impl GameWindowTracker {
             net_wm_name: atom("_NET_WM_NAME"),
             net_frame_extents: atom("_NET_FRAME_EXTENTS"),
             net_active_window: atom("_NET_ACTIVE_WINDOW"),
+            net_wm_pid: atom("_NET_WM_PID"),
             utf8_string: atom("UTF8_STRING"),
             wm_name: AtomEnum::WM_NAME.into(),
             conn,
@@ -126,6 +128,27 @@ impl GameWindowTracker {
             .ok()?;
         let value = reply.value32()?.next()?;
         (value != 0).then_some(value)
+    }
+
+    /// `window` est-elle une fenêtre du client Wakfu ? Même critère de titre que [`Self::scan`],
+    /// pour une seule fenêtre — sert au garde de premier plan des raccourcis
+    /// (`overlay_ui::shortcuts::FocusGate`), appelé à chaque tick sur la fenêtre active.
+    pub fn is_game_window(&self, window: Window) -> bool {
+        self.window_title(window)
+            .is_some_and(|title| title.ends_with(TITLE_SUFFIX))
+    }
+
+    /// `_NET_WM_PID` de `window` — le processus propriétaire, tel que le client l'a déclaré
+    /// (winit le pose sur toutes ses fenêtres). `None` si la propriété est absente.
+    pub fn window_pid(&self, window: Window) -> Option<u32> {
+        let reply = self
+            .conn
+            .get_property(false, window, self.net_wm_pid, AtomEnum::CARDINAL, 0, 1)
+            .ok()?
+            .reply()
+            .ok()?;
+        let pid = reply.value32()?.next();
+        pid
     }
 
     /// Le curseur **en coordonnées d'écran** (relatives à la racine), en pixels — pendant X11 de

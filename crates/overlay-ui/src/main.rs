@@ -120,8 +120,9 @@ use tray_icon::{TrayIcon, TrayIconBuilder};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
-    SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GW_HWNDPREV, HWND_NOTOPMOST, HWND_TOPMOST,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    GetWindowThreadProcessId, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GW_HWNDPREV,
+    HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -2436,6 +2437,20 @@ impl App {
             let written = GetWindowTextW(hwnd, &mut buf);
             String::from_utf16_lossy(&buf[..written as usize])
         }
+    }
+
+    /// Une fenêtre de jeu, ou n'importe quelle fenêtre de CE processus (overlays, modale Options,
+    /// connexion…), est-elle au premier plan ? Décide si les raccourcis globaux sont réservés —
+    /// voir `shortcuts::FocusGate`. Le critère « même processus » plutôt qu'une liste de `HWND`
+    /// couvre d'office toute fenêtre que l'overlay ouvrira un jour.
+    fn game_or_overlay_focused() -> bool {
+        let foreground = unsafe { GetForegroundWindow() };
+        if foreground.0.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(foreground, Some(&mut pid)) };
+        pid == std::process::id() || game_window::is_game_window(foreground.0 as isize)
     }
 
     /// Reconfigure la surface wgpu sur la taille physique donnée — factorisé pour être appelable
@@ -5803,6 +5818,13 @@ impl ApplicationHandler<UserEvent> for App {
         // `Pressed` uniquement : le code précédent réagissait aux deux, togglant deux fois de
         // suite pour un seul appui (bug réel, symptôme observé 2026-09-02 : plusieurs lignes
         // ">>> Bascule" consécutives dans les logs pour un nombre d'appuis bien moindre).
+        //
+        // Avant de lire la file : raccourcis réservés seulement si le jeu (ou l'overlay) est au
+        // premier plan, rendus au système sinon (demande utilisateur 2026-09-30, voir
+        // `shortcuts::FocusGate`). Les refus éventuels sont déjà journalisés par la registry.
+        let _ = self
+            .hotkeys
+            .set_game_focused(Self::game_or_overlay_focused());
         while let Ok(event) = self.hotkey_events.try_recv() {
             if event.state != global_hotkey::HotKeyState::Pressed {
                 continue;
