@@ -126,6 +126,25 @@ pub enum EngineCommand {
         name: String,
         kind: WatchlistKind,
     },
+    /// **Bascule sur un autre groupe d'éléments suivis** (2026-09-30) — la validation de l'onglet
+    /// Suivi quand le groupe affiché change, ou la case « Activer les groupes » décochée (retour au
+    /// groupe par défaut). Les compteurs du groupe quitté sont gelés, ceux du groupe rejoint
+    /// reprennent où ils en étaient ; le compte reçoit la nouvelle liste. Voir
+    /// `WatchlistState::switch_group`.
+    SwitchWatchlistGroup {
+        group: String,
+        definitions: Vec<WatchlistEntry>,
+    },
+    /// **Nouvelles définitions d'un groupe INACTIF** (2026-09-30) — ses compteurs gelés sont
+    /// recalés comme ceux du groupe vivant le seraient (voir `WatchlistState::redefine_group`).
+    RedefineWatchlistGroup {
+        group: String,
+        before: Vec<WatchlistEntry>,
+        after: Vec<WatchlistEntry>,
+        retirees: Vec<WatchlistEntry>,
+    },
+    /// **Un groupe supprimé** (2026-09-30) — ses compteurs gelés sont effacés du disque.
+    ForgetWatchlistGroup(String),
     /// Recherches de chat validées depuis l'onglet « Chat » (2026-09-13) — même principe que
     /// `SetAlertProfile` : appliquées tout de suite, l'écriture au compte (`chatFilters`) part en
     /// parallèle côté hôte.
@@ -390,6 +409,17 @@ pub struct WatchlistCompleted {
     pub name: String,
 }
 
+/// **Les définitions vivantes du Suivi viennent de changer** (2026-09-30) — liste du compte reçue,
+/// validation de l'onglet Suivi, geste du bandeau, retrait d'un élément complété, changement de
+/// groupe. L'hôte recopie `entries` dans le groupe `group` de sa configuration locale : c'est ce
+/// qui garde les groupes d'éléments suivis (`config::WatchlistGroupsConfig`) d'accord avec ce qui
+/// est affiché, quel que soit le chemin par lequel la liste a bougé.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WatchlistDefinitions {
+    pub group: String,
+    pub entries: Vec<WatchlistEntry>,
+}
+
 pub struct EngineHandles {
     pub snapshot: Arc<ArcSwap<SessionSnapshot>>,
     pub watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
@@ -398,6 +428,13 @@ pub struct EngineHandles {
     /// correspondant est sondé à chaque tick de la boucle d'événements, pas au rendu : une fenêtre
     /// masquée doit retirer ses entrées comme une fenêtre visible.
     pub completions: mpsc::Sender<WatchlistCompleted>,
+    /// Par où les définitions vivantes du Suivi remontent à l'hôte — voir
+    /// [`WatchlistDefinitions`].
+    pub watchlist_definitions: mpsc::Sender<WatchlistDefinitions>,
+    /// Le groupe d'éléments suivis actif au démarrage (`config::OverlayConfig::active_watchlist_group`)
+    /// — posé sur le moteur avant que la liste du compte ne descende, pour qu'elle retrouve les
+    /// compteurs de CE groupe.
+    pub watchlist_group: String,
     pub catalog: Arc<ArcSwap<CatalogIndex>>,
     /// Référentiel des donjons (L5, §7.1 du plan) — voir le thread Catalogue. Contrairement au
     /// catalogue, aucun panneau ne le consomme directement : seul l'Engine s'en sert, pour la
@@ -434,6 +471,8 @@ pub fn spawn_engine_thread(
         watchlist,
         watchlist_toast,
         completions,
+        watchlist_definitions,
+        watchlist_group,
         alert_profile: alert_profile_out,
         catalog,
         dungeons,
@@ -451,6 +490,7 @@ pub fn spawn_engine_thread(
                     return;
                 }
             };
+            engine.set_watchlist_group(watchlist_group);
             // Dernier catalogue/référentiel de donjons déjà transmis à l'Engine (voir
             // `Engine::set_catalog`/`set_dungeons`) — comparés par pointeur à chaque tick pour ne
             // relayer qu'un VRAI changement. Pour le catalogue, protège
@@ -605,7 +645,10 @@ pub fn spawn_engine_thread(
                             roster_out.store(Arc::new(None));
                             roster_draft_out.store(Arc::new(None));
                             engine.set_roster(None);
-                            engine.set_watchlist_entries(Vec::new());
+                            // `clear`, pas une liste vide : la déconnexion ne doit pas se lire
+                            // comme « le groupe actif est désormais vide » (voir
+                            // `WatchlistDefinitions`).
+                            engine.clear_watchlist();
                             engine.set_sound_items(Vec::new());
                             alert_profile = overlay_engine::AlertProfile::default();
                             // Plus de compte : l'onglet « Alertes » doit repasser à « aucun compte
@@ -702,6 +745,31 @@ pub fn spawn_engine_thread(
                             // la doc de la commande.
                             engine.set_watchlist_definitions(definitions, &retirees);
                         }
+                        EngineCommand::SwitchWatchlistGroup { group, definitions } => {
+                            tracing::info!(
+                                group = %group,
+                                entry_count = definitions.len(),
+                                "[suivi] changement de groupe d'éléments suivis"
+                            );
+                            engine.switch_watchlist_group(group, definitions);
+                        }
+                        EngineCommand::RedefineWatchlistGroup {
+                            group,
+                            before,
+                            after,
+                            retirees,
+                        } => {
+                            tracing::info!(
+                                group = %group,
+                                entry_count = after.len(),
+                                "[suivi] groupe inactif redéfini"
+                            );
+                            engine.redefine_watchlist_group(&group, &before, &after, &retirees);
+                        }
+                        EngineCommand::ForgetWatchlistGroup(group) => {
+                            tracing::info!(group = %group, "[suivi] groupe supprimé, compteurs oubliés");
+                            engine.forget_watchlist_group(&group);
+                        }
                         EngineCommand::ResetWatchlistCounter { name, kind } => {
                             if engine.reset_watchlist_counter(&name, kind) {
                                 tracing::info!(name = %name, ?kind, "[suivi] compteur réinitialisé");
@@ -764,6 +832,9 @@ pub fn spawn_engine_thread(
                         }
                     }
                     watchlist.store(Arc::new(engine.watchlist_entries().to_vec()));
+                    if let Some((group, entries)) = engine.drain_watchlist_definitions() {
+                        let _ = watchlist_definitions.send(WatchlistDefinitions { group, entries });
+                    }
                     // Rattrapage éventuel (voir `WatchlistState::merge_config`) : un compte qui
                     // répond avec un `count` en retard sur le local doit être resynchronisé —
                     // jamais après `Disconnect` (watchlist vidée, rien à rattraper), voir

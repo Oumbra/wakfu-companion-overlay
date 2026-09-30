@@ -614,6 +614,20 @@ pub const SELECT_ROW_HEIGHT: f32 = 28.0;
 /// Deux pixels de plus que sur le socle, et c'est bien ce que la capture montre.
 pub const SELECT_ROW_PADDING_X: f32 = 12.0;
 
+/// Hauteur de la rangée du champ de recherche en tête d'une liste dépliée (2026-09-30, voir
+/// `design::components::select`, « La recherche dans la liste ») — le champ au gabarit
+/// [`INPUT_SEARCH_HEIGHT`] (28), avec [`SELECT_SEARCH_INSET`] au-dessus et au-dessous.
+pub const SELECT_SEARCH_ROW_HEIGHT: f32 = 36.0;
+
+/// Retrait du champ de recherche dans sa rangée — 6 px sur les côtés, 4 en haut et en bas.
+pub const SELECT_SEARCH_INSET: egui::Vec2 = egui::vec2(6.0, 4.0);
+
+/// Nombre d'entrées visibles au-delà duquel une liste à recherche défile.
+pub const SELECT_SEARCH_MAX_ROWS: usize = 8;
+
+/// Texte de la ligne « Aucun résultat » — le texte des entrées, éteint : ce n'est pas une entrée.
+pub const SELECT_EMPTY_TEXT: Color32 = Color32::from_rgb(0xD8, 0xCC, 0xAE);
+
 /// Fond de la liste dépliée — uniforme, aucun dégradé (contrairement au socle).
 pub const SELECT_LIST_FILL: Color32 = Color32::from_rgb(0x67, 0x5D, 0x46);
 
@@ -819,6 +833,10 @@ pub const SCROLLBAR_OUTER_MARGIN: f32 = 14.0;
 /// `button-icon-first-plan.png`, leurs `-hover` et `button-icon-disabled.png`, toutes 36 × 36).
 /// C'est aussi la taille à laquelle le jeu pose son bouton de réinitialisation.
 pub const ICON_BUTTON_SIZE: f32 = 36.0;
+
+/// Glyphe d'un bouton icône destructif (`IconButton::danger`, 2026-09-30) — blanc, comme le
+/// libellé du bouton texte `Danger` posé sur le même rouge.
+pub const ICON_TINT_DANGER: Color32 = Color32::WHITE;
 
 /// Teinte d'une icône au repos — `#c5cbcc`, mesurée sur `menu-button-icon-first-plan.png`, pas
 /// devinée. Les icônes du design system étant blanc pur avec alpha, une simple teinte suffit à les
@@ -1396,6 +1414,26 @@ pub const SLIDER_TICK_OVERHANG: f32 = 2.0;
 /// continu plutôt que comme deux repères. C'est le défaut qu'a rattrapé la comparaison au jeu, la
 /// seconde fois sur ce composant.
 pub const SLIDER_TICK_BITE: f32 = 1.0;
+
+/// De combien une graduation **majeure** dépasse la rainure — 4 px, le double d'une graduation
+/// ordinaire ([`SLIDER_TICK_OVERHANG`]).
+///
+/// **Pas de référence dans le jeu** : aucun curseur relevé ne porte deux tailles de repère. Posé
+/// pour le volume des notifications (demande utilisateur du 2026-09-30 : « des un peu plus grands
+/// crans » tous les 20 %, « des un peu plus petits » sur les 10 restants). 4 est le plus grand
+/// débord qui tienne dans la hauteur que la poignée impose — 8 de rainure + 2 × 5 visibles = 18 —
+/// en gardant le pixel de morsure.
+pub const SLIDER_MAJOR_TICK_OVERHANG: f32 = 4.0;
+
+/// Remplissage de la **portion parcourue** de la rainure, quand l'appelant le demande
+/// (`Slider::filled`) — `#c6b187`, la teinte du cœur de la poignée (`slider-handle.png`, 93 px
+/// sur 250, la teinte dominante).
+///
+/// Le jeu n'en montre pas (ses deux curseurs de volume sont au minimum, voir `design::slider`) :
+/// c'est une demande utilisateur du 2026-09-30, pour qu'un volume se lise comme une quantité
+/// — « du début jusqu'à la pastille, c'est rempli » — et non comme un cran. La teinte de la
+/// poignée plutôt qu'un or inventé : la barre et le disque se lisent comme une seule pièce.
+pub const SLIDER_FILL: Color32 = Color32::from_rgb(0xC6, 0xB1, 0x87);
 
 // ---------------------------------------------------------------------------------------------
 // Infobulle — `design::tooltip`

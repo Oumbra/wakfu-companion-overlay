@@ -3,6 +3,53 @@
   var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
+  // src/combat-mechanics/combat-mechanic.model.ts
+  function normalizeMechanicName(name) {
+    return name.trim().toLowerCase();
+  }
+
+  // src/combat-mechanics/ignemikhal.mechanic.ts
+  var IGNEMIKHAL = "ignemikhal";
+  var PROTECTION_POURPRE = "protection pourpre";
+  var IGNEMIKHAL_PROTECTION_POURPRE = {
+    id: "ignemikhal-protection-pourpre",
+    triggerFighterNames: ["Ignemikhal"],
+    resolveDamage({ target, effectTag, lastCast, lastDamage, isMonster }) {
+      if (!effectTag || normalizeMechanicName(effectTag) !== PROTECTION_POURPRE) return null;
+      if (normalizeMechanicName(target) !== IGNEMIKHAL) return null;
+      if (lastCast && !isMonster(lastCast.caster)) {
+        return { attacker: lastCast.caster, spell: effectTag };
+      }
+      if (lastDamage && isMonster(lastDamage.attacker) && !isMonster(lastDamage.target)) {
+        return { attacker: lastDamage.target, spell: effectTag };
+      }
+      return null;
+    }
+  };
+
+  // src/combat-mechanics/combat-mechanics.ts
+  var COMBAT_MECHANICS = [IGNEMIKHAL_PROTECTION_POURPRE];
+  var MECHANICS_BY_TRIGGER = /* @__PURE__ */ new Map();
+  for (const mechanic of COMBAT_MECHANICS) {
+    for (const name of mechanic.triggerFighterNames) {
+      const key = normalizeMechanicName(name);
+      const list = MECHANICS_BY_TRIGGER.get(key) ?? [];
+      list.push(mechanic);
+      MECHANICS_BY_TRIGGER.set(key, list);
+    }
+  }
+  var NO_MECHANICS = [];
+  function mechanicsTriggeredBy(name) {
+    return MECHANICS_BY_TRIGGER.get(normalizeMechanicName(name)) ?? NO_MECHANICS;
+  }
+  function resolveMechanicDamage(active, context) {
+    for (const mechanic of active) {
+      const attribution = mechanic.resolveDamage?.(context);
+      if (attribution) return attribution;
+    }
+    return null;
+  }
+
   // src/log-parser.ts
   function resolveChatChannel(category) {
     if (category === "Proximit\xE9") return { key: "proximite", label: "Proximit\xE9" };
@@ -61,6 +108,14 @@
   var STATUS_EFFECT_RE = new RegExp(`^(.+?): (.+?) \\((?:Niv\\. ${NUM}|\\+${NUM} Niv\\.)\\)$`);
   var STATUS_REMOVE_RE = /^(.+?): n'est plus sous l'emprise de '(.+?)'\.?$/;
   var IGNORED_TAG = "Parade !";
+  var SELF_INFLICTED_DAMAGE_TAGS = /* @__PURE__ */ new Set(["retour de flamme"]);
+  function selfInflictedDamageTag(tail) {
+    for (const tagMatch of tail.matchAll(TAG_RE)) {
+      const tag = tagMatch[1].trim();
+      if (SELF_INFLICTED_DAMAGE_TAGS.has(tag.toLowerCase())) return tag;
+    }
+    return null;
+  }
   var TRADE_DONNE_RE = /le joueur (.+?) donne\s*:\s*(\d+)\s*K\s*;\s*(.*?)(?=le joueur .+? donne\s*:|$)/g;
   var TRADE_REFID_RE = /\(refId=-?\d+\)/g;
   var TRADE_ITEM_RE = /(\d+)\s*x\s*([\s\S]+)$/;
@@ -87,7 +142,9 @@
       summonOwners: /* @__PURE__ */ new Map(),
       pendingSummonCasters: [],
       seenFighterIds: /* @__PURE__ */ new Set(),
-      lastActionMs: -1
+      lastActionMs: -1,
+      activeMechanics: [],
+      monsterNames: /* @__PURE__ */ new Set()
     };
   }
   var LogParser = class {
@@ -291,6 +348,9 @@
       const state = this.getFightState(fightId);
       const isNewFighter = !state.seenFighterIds.has(fighterId);
       state.seenFighterIds.add(fighterId);
+      for (const mechanic of mechanicsTriggeredBy(name)) {
+        if (!state.activeMechanics.includes(mechanic)) state.activeMechanics.push(mechanic);
+      }
       const joinTimeMs = this.timeToMs(time);
       while (state.pendingSummonCasters.length > 0 && joinTimeMs - state.pendingSummonCasters[0].timeMs > SUMMON_JOIN_WINDOW_MS) {
         state.pendingSummonCasters.shift();
@@ -309,6 +369,7 @@
           }
         }
       }
+      if (isControlledByAI && !summonedBy) state.monsterNames.add(name);
       let fightIds = this.nameToFightIds.get(name);
       if (!fightIds) {
         fightIds = /* @__PURE__ */ new Set();
@@ -576,7 +637,13 @@
       if (statusRemoval) {
         const carrier = statusRemoval[1].trim();
         const fightId = this.resolveFightIdForName(carrier);
-        this.getFightState(fightId).effectOwners.delete(statusRemoval[2].trim().toLowerCase());
+        const effectOwners = this.getFightState(fightId).effectOwners;
+        const effectKey = statusRemoval[2].trim().toLowerCase();
+        const carriers = effectOwners.get(effectKey);
+        if (carriers) {
+          carriers.delete(carrier);
+          if (carriers.size === 0) effectOwners.delete(effectKey);
+        }
         return null;
       }
       const statusEffect = STATUS_EFFECT_RE.exec(content);
@@ -584,10 +651,14 @@
         const carrier = statusEffect[1].trim();
         const effectName = statusEffect[2].trim();
         const state = this.getFightState(this.resolveFightIdForName(carrier));
-        state.effectOwners.set(effectName.toLowerCase(), {
-          carrier,
-          applier: state.lastCast?.caster ?? carrier
-        });
+        const effectKey = effectName.toLowerCase();
+        let carriers = state.effectOwners.get(effectKey);
+        if (!carriers) {
+          carriers = /* @__PURE__ */ new Map();
+          state.effectOwners.set(effectKey, carriers);
+        }
+        carriers.delete(carrier);
+        carriers.set(carrier, state.lastCast?.caster ?? carrier);
         return null;
       }
       const xp = XP_RE.exec(content);
@@ -611,9 +682,27 @@
         const state = this.getFightState(fightId);
         state.lastActionMs = this.timeToMs(time);
         if (sign === "-") {
+          const selfTag = selfInflictedDamageTag(tail);
+          if (selfTag) {
+            const { element: element3 } = this.resolveEffectTail(target, tail, state, {
+              selfFallback: true,
+              riposteFallback: false
+            });
+            return {
+              kind: "heal",
+              time,
+              target,
+              attacker: target,
+              spell: selfTag,
+              element: element3,
+              amount: -amount,
+              fightId
+            };
+          }
           const { attacker: attacker2, spell: spell2, element: element2 } = this.resolveEffectTail(target, tail, state, {
             selfFallback: false,
-            riposteFallback: true
+            riposteFallback: true,
+            combatMechanics: true
           });
           state.lastDamage = { attacker: attacker2, target };
           return { kind: "damage", time, target, attacker: attacker2, spell: spell2, element: element2, amount, fightId };
@@ -661,6 +750,10 @@
      *   adversaire pour le passif défensif propre de sa cible (ex. armure gagnée par la cible d'une
      *   attaque, taguée du nom du sort qui vient de la toucher — cas réel constaté, voir tests).
      *
+     * - `combatMechanics: true` (dégâts uniquement) : une règle propre à une mécanique de combat
+     *   active dans ce combat (voir `combat-mechanics/`, `FightParseState.activeMechanics`) peut
+     *   imposer l'attribution avant toute règle générique ci-dessus.
+     *
      * Dernière étape, commune à tous les appelants : si l'`attacker` résolu ci-dessus est le nom d'une
      * invocation connue de ce combat (voir FightParseState.summonOwners), l'action est réattribuée à
      * son invocateur avec le nom de l'invocation comme libellé de "sort" — ex. le Sadida "Fayto"
@@ -681,10 +774,22 @@
       }
       let attacker = state.lastCast?.caster ?? (options.selfFallback ? target : "Inconnu");
       let spell = state.lastCast?.spell ?? "Autre";
-      if (effectTag) {
-        const owner = state.effectOwners.get(effectTag.toLowerCase());
+      const mechanicAttribution = options.combatMechanics && state.activeMechanics.length > 0 ? resolveMechanicDamage(state.activeMechanics, {
+        target,
+        effectTag,
+        lastCast: state.lastCast,
+        lastDamage: state.lastDamage,
+        isMonster: (name) => state.monsterNames.has(name)
+      }) : null;
+      if (mechanicAttribution) {
+        attacker = mechanicAttribution.attacker;
+        spell = mechanicAttribution.spell;
+      } else if (effectTag) {
+        const owner = this.resolveEffectOwner(state, effectTag.toLowerCase(), target, {
+          creditCarrier: options.riposteFallback
+        });
         if (owner) {
-          attacker = owner.carrier === target ? owner.applier : owner.carrier;
+          attacker = owner;
         } else if (options.riposteFallback) {
           const caster = state.spellCasters.get(effectTag.toLowerCase());
           if (caster) {
@@ -703,6 +808,37 @@
         attacker = rootOwner;
       }
       return { attacker, spell, element };
+    }
+    /**
+     * Qui créditer pour un effet suivi (voir EffectCarriers) qui touche `target` — `null` si
+     * personne ne porte cet effet dans ce combat.
+     * - Porté par la cible elle-même (ex. Hachure, Marque eting) : celui qui le lui a appliqué.
+     * - Soin/armure (`creditCarrier: false`) porté par un tiers : celui qui a posé l'effet (ex.
+     *   « Marque unt » de l'Eniripsa, posée sur un allié, qui soigne ses voisins — le porteur n'y est
+     *   pour rien). Un effet que le porteur s'est appliqué lui-même revient au même.
+     * - Dégât (`creditCarrier: true`) porté par un tiers (ex. Enflammé) : ce porteur (le plus récent
+     *   s'ils sont plusieurs), qui inflige les dégâts à quelqu'un d'autre — SAUF si porteur et cible sont deux monstres et que
+     *   l'applicateur n'en est pas un : c'est alors un statut posé par un joueur sur un monstre qui
+     *   se propage à un autre monstre (ex. « Bombe collante » du Roublard, « Hémorragie » du Sram),
+     *   crédité au joueur. Bug réel corrigé le 2026-09-30 (combat Ignemikhal, 12 dégâts crédités à
+     *   un monstre sur `tests/logs/fr/fight_single-account_ignemikhal_protection-pourpre.log`).
+     */
+    resolveEffectOwner(state, effectKey, target, options) {
+      const carriers = state.effectOwners.get(effectKey);
+      if (!carriers) return null;
+      const onTarget = carriers.get(target);
+      if (onTarget !== void 0) return onTarget;
+      let carrier = null;
+      let applier = "";
+      for (const [name, appliedBy] of carriers) {
+        carrier = name;
+        applier = appliedBy;
+      }
+      if (carrier === null) return null;
+      if (!options.creditCarrier) return applier;
+      const monsters = state.monsterNames;
+      if (monsters.has(carrier) && monsters.has(target) && !monsters.has(applier)) return applier;
+      return carrier;
     }
     /**
      * Remonte la chaîne `summonOwners` jusqu'à son sommet (un nom qui n'est lui-même l'invocation de

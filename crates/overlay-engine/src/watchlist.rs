@@ -122,14 +122,50 @@ pub fn default_store_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("watchlist-counts.json"))
 }
 
-/// Compteur persisté pour une entrée (`name` + `kind`, voir `increment` — deux entrées peuvent
-/// partager un nom si l'une est `enemy` et l'autre `item`, cas limite mais géré). Fichier séparé
-/// des entrées elles-mêmes (`Vec<WatchlistEntry>` vient du compte, voir doc de module) : seul le
-/// `count` doit survivre localement à un redémarrage.
+/// Identifiant du **groupe par défaut** — celui que tout overlay a, sans libellé, et le seul que
+/// connaît un utilisateur qui n'a pas activé les groupes (2026-09-30). Avant les groupes, la liste
+/// suivie était unique : c'est elle qui est devenue ce groupe.
+pub const DEFAULT_GROUP_ID: &str = "default";
+
+/// Compteurs persistés, **rangés par groupe** (format v2, 2026-09-30).
+///
+/// Chaque groupe d'éléments suivis a ses propres compteurs : un même objet présent dans deux
+/// groupes, avec deux modes différents, ne partage pas sa valeur (clé `name` + `kind`, voir
+/// `counter_key`). Fichier séparé des entrées elles-mêmes (`Vec<WatchlistEntry>` vient du compte,
+/// voir doc de module) : seul le `count` doit survivre localement à un redémarrage.
+///
+/// **`by_key` reste écrit, et porte le groupe ACTIF** : c'était tout le fichier en v1. Un binaire
+/// antérieur aux groupes (retour arrière, ou deux versions côte à côte) y lit donc toujours les
+/// compteurs de la liste qu'il affiche. À la lecture, un fichier sans `by_group` est un v1 : son
+/// `by_key` devient le groupe par défaut.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PersistedCounts {
     #[serde(default)]
+    version: u32,
+    #[serde(default)]
     by_key: HashMap<String, i64>,
+    #[serde(default)]
+    by_group: HashMap<String, HashMap<String, i64>>,
+}
+
+impl PersistedCounts {
+    /// Les compteurs d'un groupe — ceux du v1 pour le groupe par défaut d'un fichier pas encore
+    /// migré.
+    fn group(&self, group: &str) -> Option<&HashMap<String, i64>> {
+        if self.by_group.is_empty() && group == DEFAULT_GROUP_ID {
+            return Some(&self.by_key);
+        }
+        self.by_group.get(group)
+    }
+
+    /// Passe un fichier v1 en v2 — sans effet sur un fichier déjà migré.
+    fn migrate(&mut self) {
+        if self.by_group.is_empty() && !self.by_key.is_empty() {
+            self.by_group
+                .insert(DEFAULT_GROUP_ID.to_string(), self.by_key.clone());
+        }
+        self.version = 2;
+    }
 }
 
 fn counter_key(name: &str, kind: WatchlistKind) -> String {
@@ -173,6 +209,13 @@ pub struct WatchlistState {
     /// distinction ne vit pas ici (voir sa doc pour pourquoi un échec réseau n'a pas besoin de
     /// remarquer `dirty`).
     dirty: bool,
+    /// Le groupe dont `entries` est la liste — celui dont les compteurs sont vivants. Les autres
+    /// groupes n'existent ici que par leurs compteurs gelés, dans le fichier (`PersistedCounts`).
+    group: String,
+    /// `true` dès que les DÉFINITIONS vivantes ont changé (compte, validation de l'onglet Suivi,
+    /// geste du bandeau, changement de groupe) depuis le dernier `drain_definitions_changed` —
+    /// l'hôte s'en sert pour recopier la liste dans le groupe actif de sa configuration locale.
+    definitions_changed: bool,
 }
 
 impl WatchlistState {
@@ -185,7 +228,121 @@ impl WatchlistState {
             entries: Vec::new(),
             store_path,
             dirty: false,
+            group: DEFAULT_GROUP_ID.to_string(),
+            definitions_changed: false,
         }
+    }
+
+    /// Le groupe actif — voir [`Self::switch_group`].
+    pub fn group(&self) -> &str {
+        &self.group
+    }
+
+    /// **Pose le groupe actif sans rien charger** — au démarrage, AVANT que la liste du compte ne
+    /// descende : `merge_config` lira alors les compteurs de ce groupe-là. Ne touche ni aux entrées
+    /// ni au compte ; pour basculer une liste déjà en place, voir [`Self::switch_group`].
+    pub fn set_group(&mut self, group: String) {
+        self.group = group;
+    }
+
+    /// **Bascule sur un autre groupe d'éléments suivis** (2026-09-30).
+    ///
+    /// Les compteurs du groupe quitté sont écrits tels quels et **gelés** : rien de ce qui se
+    /// ramasse ensuite ne les touche. Ceux du groupe rejoint reprennent où ils en étaient — un
+    /// compteur jamais écrit part de ce que son mode impose, et un compteur au-delà de sa cible
+    /// est périmé (même règle que `merge_config`).
+    ///
+    /// Aucune alerte, aucune entrée « retirée » : changer de groupe n'est pas une suppression.
+    /// Marque l'état `dirty` : le compte reçoit la liste du nouveau groupe, compteurs compris.
+    pub fn switch_group(&mut self, group: String, definitions: Vec<WatchlistEntry>) {
+        // Une liste vide n'a rien à geler — et l'écrire effacerait les compteurs du groupe quitté
+        // si la liste n'était simplement pas encore descendue du compte.
+        if !self.entries.is_empty() {
+            self.persist();
+        }
+        self.group = group;
+        let persisted = load_from(&self.store_path);
+        let counts = persisted.group(&self.group);
+        self.entries = definitions
+            .into_iter()
+            .map(|mut entry| {
+                let stored = counts
+                    .and_then(|c| c.get(&counter_key(&entry.name, entry.kind)))
+                    .copied()
+                    .filter(|&count| !(entry.mode.has_target() && count > entry.countdown_target));
+                entry.count = stored.unwrap_or_else(|| compteur_de_depart(&entry));
+                entry
+            })
+            .collect();
+        self.persist();
+        self.dirty = true;
+        self.definitions_changed = true;
+    }
+
+    /// **Recale les compteurs gelés d'un groupe INACTIF sur ses nouvelles définitions** — ce que
+    /// la validation de l'onglet Suivi produit pour un groupe édité sans être affiché.
+    ///
+    /// Même règle que `apply_definitions` pour le groupe vivant : une entrée dont le mode ou la
+    /// cible change voit son compteur reporté ou remis à zéro (`compteur_reporte`), une entrée
+    /// retirée (ou retirée puis recréée dans la même édition) perd le sien. Sans effet sur le
+    /// groupe actif, qui passe par `apply_definitions`.
+    pub fn redefine_group(
+        &mut self,
+        group: &str,
+        before: &[WatchlistEntry],
+        after: &[WatchlistEntry],
+        retirees: &[WatchlistEntry],
+    ) {
+        if group == self.group {
+            return;
+        }
+        let mut persisted = load_from(&self.store_path);
+        persisted.migrate();
+        let stored = persisted.by_group.remove(group).unwrap_or_default();
+        let redefined: HashMap<String, i64> = after
+            .iter()
+            .filter_map(|definition| {
+                let key = counter_key(&definition.name, definition.kind);
+                if retirees.iter().any(|r| meme_entree(r, definition)) {
+                    return None;
+                }
+                let count = *stored.get(&key)?;
+                let mut existante = before.iter().find(|b| meme_entree(b, definition))?.clone();
+                existante.count = count;
+                compteur_reporte(&existante, definition).map(|c| (key, c))
+            })
+            .collect();
+        persisted.by_group.insert(group.to_string(), redefined);
+        save_to(&self.store_path, &persisted);
+    }
+
+    /// **Oublie les compteurs d'un groupe supprimé** (2026-09-30). Sans effet sur le groupe actif :
+    /// l'hôte bascule d'abord ailleurs.
+    pub fn forget_group(&mut self, group: &str) {
+        if group == self.group {
+            return;
+        }
+        let mut persisted = load_from(&self.store_path);
+        persisted.migrate();
+        if persisted.by_group.remove(group).is_some() {
+            save_to(&self.store_path, &persisted);
+        }
+    }
+
+    /// **Vide la liste sans rien écrire** — la déconnexion : plus de compte, plus de liste à
+    /// afficher, mais ni les compteurs du fichier ni la configuration locale des groupes n'ont à
+    /// l'apprendre (le fichier part par `local_data::purge`, les groupes restent à la machine).
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// Vide et renvoie `(groupe, définitions)` si les définitions vivantes ont changé depuis le
+    /// dernier appel — voir `definitions_changed`.
+    pub fn drain_definitions_changed(&mut self) -> Option<(String, Vec<WatchlistEntry>)> {
+        if !std::mem::take(&mut self.definitions_changed) {
+            return None;
+        }
+        Some((self.group.clone(), self.entries.clone()))
     }
 
     /// Remplace la liste des entrées suivies par celle du compte (`from_settings_json`), en
@@ -202,13 +359,15 @@ impl WatchlistState {
     /// envoyé » ou localement plus récent côté web.
     pub fn merge_config(&mut self, incoming: Vec<WatchlistEntry>) {
         let persisted = load_from(&self.store_path);
+        let empty = HashMap::new();
+        let counts = persisted.group(&self.group).unwrap_or(&empty);
         let mut needs_catchup = false;
         // Voir plus bas : au moins un compteur local périmé, fichier à réécrire.
         let mut stale = false;
         self.entries = incoming
             .into_iter()
             .map(|mut entry| {
-                if let Some(&count) = persisted.by_key.get(&counter_key(&entry.name, entry.kind)) {
+                if let Some(&count) = counts.get(&counter_key(&entry.name, entry.kind)) {
                     // **Un compteur local au-delà de la cible est PÉRIMÉ, pas en avance**
                     // (2026-09-15). En décompte comme en objectif, `count` est une position sur
                     // l'échelle `[0, countdown_target]` : le voir dépasser la cible que le compte annonce ne
@@ -237,6 +396,7 @@ impl WatchlistState {
         if needs_catchup {
             self.dirty = true;
         }
+        self.definitions_changed = true;
     }
 
     pub fn entries(&self) -> &[WatchlistEntry] {
@@ -315,6 +475,7 @@ impl WatchlistState {
             .collect();
         self.persist();
         self.dirty = true;
+        self.definitions_changed = true;
     }
 
     /// Applique un `LogEntry` déjà déterminé comme HORS rattrapage initial par l'appelant (voir
@@ -420,13 +581,21 @@ impl WatchlistState {
         changed
     }
 
+    /// Écrit les compteurs du groupe actif — dans `by_group`, sans toucher aux autres groupes, et
+    /// dans `by_key` pour un binaire antérieur aux groupes (voir `PersistedCounts`).
     fn persist(&self) {
-        let by_key = self
+        let by_key: HashMap<String, i64> = self
             .entries
             .iter()
             .map(|e| (counter_key(&e.name, e.kind), e.count))
             .collect();
-        save_to(&self.store_path, &PersistedCounts { by_key });
+        let mut persisted = load_from(&self.store_path);
+        persisted.migrate();
+        persisted
+            .by_group
+            .insert(self.group.clone(), by_key.clone());
+        persisted.by_key = by_key;
+        save_to(&self.store_path, &persisted);
     }
 }
 
@@ -1133,5 +1302,207 @@ mod definitions_tests {
         assert!(state.drain_pending_sync().is_some());
         // Et une seule fois : le drain vide le drapeau.
         assert!(state.drain_pending_sync().is_none());
+    }
+}
+
+/// Groupes d'éléments suivis (2026-09-30) : compteurs rangés par groupe, bascule, redéfinition
+/// d'un groupe inactif, oubli d'un groupe supprimé.
+#[cfg(test)]
+mod groups_tests {
+    use super::*;
+
+    static NEXT_TEST_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    fn item(name: &str, mode: WatchlistMode, countdown_target: i64) -> WatchlistEntry {
+        WatchlistEntry {
+            name: name.to_string(),
+            kind: WatchlistKind::Item,
+            mode,
+            count: 0,
+            countdown_target,
+            catalog_id: None,
+        }
+    }
+
+    fn enemy(name: &str) -> WatchlistEntry {
+        WatchlistEntry {
+            kind: WatchlistKind::Enemy,
+            ..item(name, WatchlistMode::Up, 0)
+        }
+    }
+
+    fn loot(item_name: &str, quantity: i64) -> LogEntry {
+        LogEntry::Loot {
+            time: "12:00:00,000".to_string(),
+            item: item_name.to_string(),
+            quantity,
+            fight_id: None,
+        }
+    }
+
+    fn defeated(name: &str) -> LogEntry {
+        LogEntry::EnemyDefeated {
+            time: "12:00:00,000".to_string(),
+            name: name.to_string(),
+            fight_id: None,
+        }
+    }
+
+    fn state_with(entries: Vec<WatchlistEntry>) -> WatchlistState {
+        let mut state = WatchlistState::new(temp_store());
+        state.entries = entries;
+        state
+    }
+
+    fn temp_store() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "wakfu-overlay-watchlist-test-groupes-{}-{}.json",
+            std::process::id(),
+            NEXT_TEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn changer_de_groupe_gele_les_compteurs_et_les_retrouve_au_retour() {
+        let path = temp_store();
+        let mut state = WatchlistState::new(path.clone());
+        let defaut = vec![item("Bois de Frêne", WatchlistMode::Up, 0)];
+        let paysan = vec![item("Blé", WatchlistMode::Goal, 100)];
+        state.merge_config(defaut.clone());
+        state.apply(&loot("Bois de Frêne", 12));
+
+        state.switch_group("paysan".into(), paysan.clone());
+        assert_eq!(state.group(), "paysan");
+        state.apply(&loot("Blé", 40));
+        // Le groupe quitté ne compte plus.
+        state.apply(&loot("Bois de Frêne", 5));
+        assert_eq!(state.entries()[0].count, 40);
+
+        state.switch_group(DEFAULT_GROUP_ID.into(), defaut);
+        assert_eq!(state.entries()[0].count, 12);
+        state.switch_group("paysan".into(), paysan);
+        assert_eq!(state.entries()[0].count, 40);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn un_meme_objet_dans_deux_groupes_a_deux_compteurs() {
+        let path = temp_store();
+        let mut state = WatchlistState::new(path.clone());
+        state.merge_config(vec![item("Bois de Frêne", WatchlistMode::Up, 0)]);
+        state.apply(&loot("Bois de Frêne", 12));
+        state.switch_group(
+            "paysan".into(),
+            vec![item("Bois de Frêne", WatchlistMode::Goal, 50)],
+        );
+        assert_eq!(state.entries()[0].count, 0);
+        state.apply(&loot("Bois de Frêne", 5));
+        assert_eq!(state.entries()[0].count, 5);
+        state.switch_group(
+            DEFAULT_GROUP_ID.into(),
+            vec![item("Bois de Frêne", WatchlistMode::Up, 0)],
+        );
+        assert_eq!(state.entries()[0].count, 12);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn un_fichier_v1_devient_le_groupe_par_defaut() {
+        let path = temp_store();
+        std::fs::write(&path, r#"{"by_key":{"Item:bois de frêne":7}}"#).unwrap();
+        let mut state = WatchlistState::new(path.clone());
+        state.merge_config(vec![item("Bois de Frêne", WatchlistMode::Up, 0)]);
+        assert_eq!(state.entries()[0].count, 7);
+        state.apply(&loot("Bois de Frêne", 1));
+        let persisted = load_from(&path);
+        assert_eq!(persisted.version, 2);
+        assert_eq!(
+            persisted.by_group[DEFAULT_GROUP_ID]["Item:bois de frêne"],
+            8
+        );
+        // `by_key` garde le groupe actif, pour un binaire antérieur aux groupes.
+        assert_eq!(persisted.by_key["Item:bois de frêne"], 8);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn le_groupe_pose_au_demarrage_lit_ses_propres_compteurs() {
+        let path = temp_store();
+        std::fs::write(
+            &path,
+            r#"{"version":2,"by_key":{},"by_group":{"default":{"Item:blé":3},"paysan":{"Item:blé":40}}}"#,
+        )
+        .unwrap();
+        let mut state = WatchlistState::new(path.clone());
+        state.set_group("paysan".into());
+        state.merge_config(vec![item("Blé", WatchlistMode::Goal, 100)]);
+        assert_eq!(state.entries()[0].count, 40);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn redefinir_un_groupe_inactif_reporte_ou_oublie_ses_compteurs() {
+        let path = temp_store();
+        let mut state = WatchlistState::new(path.clone());
+        let avant = vec![
+            item("Blé", WatchlistMode::Down, 50),
+            item("Ortie", WatchlistMode::Up, 0),
+            item("Lin", WatchlistMode::Up, 0),
+        ];
+        state.switch_group("paysan".into(), avant.clone());
+        state.apply(&loot("Blé", 5)); // 45 restants sur 50
+        state.apply(&loot("Ortie", 3));
+        state.apply(&loot("Lin", 2));
+        state.switch_group(DEFAULT_GROUP_ID.into(), Vec::new());
+
+        let apres = vec![
+            item("Blé", WatchlistMode::Down, 80), // cible relevée : 5 ramassés reportés
+            item("Ortie", WatchlistMode::Goal, 10), // mode changé : repart de zéro
+            item("Lin", WatchlistMode::Up, 0),    // retiré puis recréé : repart de zéro
+        ];
+        state.redefine_group(
+            "paysan",
+            &avant,
+            &apres,
+            &[item("Lin", WatchlistMode::Up, 0)],
+        );
+        state.switch_group("paysan".into(), apres);
+        let counts: Vec<i64> = state.entries().iter().map(|e| e.count).collect();
+        assert_eq!(counts, vec![75, 0, 0]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn oublier_un_groupe_efface_ses_compteurs_mais_jamais_ceux_du_groupe_actif() {
+        let path = temp_store();
+        let mut state = WatchlistState::new(path.clone());
+        state.switch_group("paysan".into(), vec![item("Blé", WatchlistMode::Up, 0)]);
+        state.apply(&loot("Blé", 4));
+        state.forget_group("paysan");
+        assert!(load_from(&path).by_group.contains_key("paysan"));
+        state.switch_group(
+            DEFAULT_GROUP_ID.into(),
+            vec![item("Ortie", WatchlistMode::Up, 0)],
+        );
+        state.forget_group("paysan");
+        assert!(!load_from(&path).by_group.contains_key("paysan"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn les_definitions_signalent_leur_changement_une_seule_fois() {
+        let mut state = state_with(Vec::new());
+        assert!(state.drain_definitions_changed().is_none());
+        state.merge_config(vec![enemy("Bouftou")]);
+        let (groupe, entrees) = state.drain_definitions_changed().unwrap();
+        assert_eq!(groupe, DEFAULT_GROUP_ID);
+        assert_eq!(entrees.len(), 1);
+        assert!(state.drain_definitions_changed().is_none());
+        // Un ramassage ne change que les compteurs, pas les définitions.
+        state.apply(&defeated("Bouftou"));
+        assert!(state.drain_definitions_changed().is_none());
+        // La déconnexion vide la liste sans la signaler.
+        state.clear();
+        assert!(state.drain_definitions_changed().is_none());
     }
 }

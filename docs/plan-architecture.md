@@ -2718,6 +2718,38 @@ infobulle en dessous) et `suivi_confirmation_reinitialisation` (la question nomm
 de glisser-déposer du bandeau prend désormais la tuile par son bord (`BANDEAU_TUILE_0_PRISE`) : son
 centre est un bouton, il annonce une main.
 
+### 9.1 quinvicies Groupes d'éléments suivis (2026-09-30)
+
+**Demande utilisateur** : préparer plusieurs listes d'éléments suivis et passer de l'une à l'autre
+sans perdre l'avancement des compteurs. La liste unique d'avant devient le **groupe par défaut**.
+
+- **Option, décochée par défaut** : « Activer les groupes », section « Suivi » de l'onglet
+  « Paramètres » (`config::OverlayConfig::suivi_groups_enabled`). Décochée, l'onglet Suivi est celui
+  d'avant les groupes et n'édite que le groupe par défaut ; les autres groupes sont conservés.
+- **Un seul groupe affiché** : sa liste est celle du compte (clé `watchlist`, **modèle des settings
+  inchangé**) et ses compteurs sont vivants. Changer de groupe gèle les compteurs du groupe quitté
+  et reprend ceux du groupe rejoint où ils en étaient (`WatchlistState::switch_group`).
+- **Où vivent les données** : les groupes (identifiant, libellé, définitions) dans `config.toml`,
+  table `[watchlist_groups]` — seule exception à « ce qui appartient au joueur passe par le compte »,
+  faute d'autre endroit sans toucher au modèle des settings. Les compteurs restent dans
+  `watchlist-counts.json`, **rangés par groupe** (format v2, `by_group` ; `by_key` garde le groupe
+  actif pour un binaire antérieur).
+- **Synchronisation config ↔ liste affichée** : le moteur signale chaque changement des définitions
+  vivantes (compte, validation, bandeau, retrait d'un élément complété, bascule) par
+  `engine_thread::WatchlistDefinitions` ; l'hôte les recopie dans le groupe actif.
+- **Interface** (`panels::suivi_groups`) : ligne « Groupe » de 48 px sous « Activer le suivi » —
+  liste déroulante (champ de recherche dès 5 groupes, `Select::searchable_from`), puis Renommer,
+  Supprimer (socle rouge, `IconButton::danger`), Nouveau. Le groupe par défaut n'a pas de libellé
+  (« Groupe par défaut » est un texte de l'interface) et ne se renomme ni ne se supprime. Le bandeau
+  in-game ne change pas.
+- **Validation** (`suivi_groups::plan_commit`) : `SetWatchlistDefinitions` pour le groupe vivant,
+  `RedefineWatchlistGroup` pour un groupe gelé édité, `SwitchWatchlistGroup` si le groupe affiché
+  change (ou si la case est décochée), `ForgetWatchlistGroup` pour un groupe supprimé, après la
+  bascule.
+- **Limites assumées** : les groupes inactifs n'existent que sur la machine (ni sur un autre PC ni
+  sur le site) ; ils ne sont pas rangés par compte — un second compte sur le même PC partage les
+  mêmes groupes.
+
 ### 9.2 Design system — composants réutilisables (2026-09-09)
 
 `crates/overlay-ui/src/design/` — couche introduite sur demande explicite de l'utilisateur, dont le

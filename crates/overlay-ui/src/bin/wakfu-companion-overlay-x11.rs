@@ -85,7 +85,7 @@ mod linux_main {
     use overlay_ui::config;
     use overlay_ui::engine_thread::{
         spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
-        SharedRosterDraft, WatchlistCompleted,
+        SharedRosterDraft, WatchlistCompleted, WatchlistDefinitions,
     };
     use overlay_ui::frame::{render, sync_hit_test, GpuState};
     use overlay_ui::game_servers::GameServers;
@@ -101,6 +101,7 @@ mod linux_main {
     use overlay_ui::panels::notifications::AlertMutes;
     use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
     use overlay_ui::panels::personnages_tab::{PersonnagesAvailability, PersonnagesTabState};
+    use overlay_ui::panels::suivi_groups;
     use overlay_ui::panels::suivi_tab;
     use overlay_ui::panels::watchlist::WatchlistToast;
     use overlay_ui::portraits::PortraitAtlas;
@@ -261,6 +262,12 @@ mod linux_main {
         /// Par où les complétions arrivent du thread Engine — voir
         /// `engine_thread::WatchlistCompleted`.
         completions_rx: mpsc::Receiver<WatchlistCompleted>,
+        /// Voir `main.rs::App::watchlist_definitions_rx` (2026-09-30).
+        watchlist_definitions_rx: mpsc::Receiver<WatchlistDefinitions>,
+        /// Voir `main.rs::App::watchlist_groups`.
+        watchlist_groups: config::WatchlistGroupsConfig,
+        /// Voir `main.rs::App::suivi_groups_enabled`.
+        suivi_groups_enabled: bool,
         /// Voir `main.rs::App::watchlist_reset_pending` — l'entrée dont la réinitialisation attend
         /// confirmation (2026-09-18).
         watchlist_reset_pending: Option<WatchlistEntry>,
@@ -322,6 +329,8 @@ mod linux_main {
         /// Les deux sourdines — voir `main.rs::App::alert_mutes`, même politique et même effet
         /// unique : le thread Engine ne joue plus le son de l'alerte concernée, sa carte reste.
         alert_mutes: AlertMutes,
+        /// Les quatre volumes — voir `main.rs::App::alert_volumes`.
+        alert_volumes: overlay_ui::alert_sound::AlertVolumes,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
         /// Réglages de la carte de décompte à zéro en vigueur — voir
@@ -610,6 +619,8 @@ mod linux_main {
         features: FeatureToggles,
         /// Voir `App::alert_mutes` — lues de la config au démarrage (`run`).
         alert_mutes: AlertMutes,
+        /// Voir `App::alert_volumes` — lus de la config au démarrage (`run`).
+        alert_volumes: overlay_ui::alert_sound::AlertVolumes,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
         /// Réglages de la carte de décompte à zéro en vigueur — voir
@@ -619,6 +630,12 @@ mod linux_main {
         completion: suivi_tab::CompletionSettings,
         /// Voir `App::completions_rx` — le canal créé par `run`, avant le thread Engine.
         completions_rx: mpsc::Receiver<WatchlistCompleted>,
+        /// Voir `App::watchlist_definitions_rx` — même origine.
+        watchlist_definitions_rx: mpsc::Receiver<WatchlistDefinitions>,
+        /// Voir `App::watchlist_groups` — lus de la config au démarrage.
+        watchlist_groups: config::WatchlistGroupsConfig,
+        /// Voir `App::suivi_groups_enabled` — lue de la config au démarrage.
+        suivi_groups_enabled: bool,
         /// La session du Récap relue du disque — voir `main.rs::AppState::recap_session`.
         recap_session: RecapSession,
         /// La position de la bande Récap relue de la config — voir `App::recap_position`.
@@ -671,10 +688,14 @@ mod linux_main {
                 turn_notification_muted,
                 features,
                 alert_mutes,
+                alert_volumes,
                 chat_toast,
                 countdown_toast,
                 completion,
                 completions_rx,
+                watchlist_definitions_rx,
+                watchlist_groups,
+                suivi_groups_enabled,
                 recap_session,
                 recap_position,
                 click_through_position,
@@ -712,6 +733,9 @@ mod linux_main {
                 watchlist_selection: panels::watchlist::WatchlistSelection::default(),
                 watchlist_completions: Default::default(),
                 completions_rx,
+                watchlist_definitions_rx,
+                watchlist_groups,
+                suivi_groups_enabled,
                 watchlist_reset_pending: None,
                 interactive: true,
                 snapshot,
@@ -742,6 +766,7 @@ mod linux_main {
                 turn_notification_muted,
                 features,
                 alert_mutes,
+                alert_volumes,
                 chat_toast,
                 countdown_toast,
                 completion,
@@ -1918,6 +1943,12 @@ mod linux_main {
                         suivi_tab::SuiviAvailability::Ready,
                     )
                 };
+            // Voir `main.rs::open_options_modal` et `suivi_groups::open_draft`.
+            let (suivi_groups, suivi_groups_initial) = suivi_groups::open_draft(
+                &self.watchlist_groups,
+                self.suivi_groups_enabled,
+                suivi_draft.as_deref(),
+            );
             let settings_tx = self.settings_tx.clone();
             thread::spawn(move || {
                 let Some(token) = overlay_sync::token_store::load_token() else {
@@ -1963,6 +1994,7 @@ mod linux_main {
                 // cases « Couper le son des notifications » aussi.
                 features: self.features,
                 mutes: self.alert_mutes,
+                volumes: self.alert_volumes,
                 // La fermeture de la carte de décompte (2026-09-16) — réglage local, la ligne
                 // s'ouvre directement sur sa valeur, voir `main.rs`.
                 countdown_toast: self.countdown_toast,
@@ -2013,6 +2045,8 @@ mod linux_main {
                     path: self.log_path.display().to_string(),
                     alerts: alerts_draft.clone(),
                     suivi: suivi_draft.clone(),
+                    suivi_groups: suivi_groups_initial,
+                    suivi_groups_enabled: self.suivi_groups_enabled,
                     chat: chat_draft.clone(),
                     personnages: personnages_draft.clone(),
                     combat_always_visible: self.combat_always_visible,
@@ -2021,6 +2055,7 @@ mod linux_main {
                     turn_notification_muted: self.turn_notification_muted,
                     features: self.features,
                     mutes: self.alert_mutes,
+                    volumes: self.alert_volumes,
                     countdown_toast: self.countdown_toast,
                     completion: self.completion,
                     recap_resume: self.recap_session.resume_settings(),
@@ -2042,6 +2077,8 @@ mod linux_main {
                 },
                 suivi_draft,
                 suivi_availability,
+                suivi_groups,
+                suivi_groups_enabled: self.suivi_groups_enabled,
             });
             overlay.window.request_redraw();
             self.windows.insert(overlay.window.id(), overlay);
@@ -2177,20 +2214,42 @@ mod linux_main {
                 return;
             };
             let retirees = state.suivi.retirees.clone();
-            if state.initial.suivi.as_ref() == Some(&draft) && retirees.is_empty() {
-                return;
-            }
+            let plan = suivi_groups::plan_commit(
+                &self.watchlist_groups,
+                self.suivi_groups_enabled,
+                &state.suivi_groups,
+                &draft,
+                &retirees,
+                state.suivi_groups_enabled,
+                &state.initial.suivi_groups.0,
+            );
             tracing::info!(
                 entry_count = draft.len(),
                 removed_count = retirees.len(),
+                command_count = plan.commands.len(),
                 "[options] liste de suivi validée"
             );
-            let _ = self
-                .settings_tx
-                .send(EngineCommand::SetWatchlistDefinitions {
-                    definitions: draft,
-                    retirees,
-                });
+            for command in plan.commands {
+                let _ = self.settings_tx.send(command);
+            }
+            if let Some((groupes, actives)) = plan.config {
+                self.watchlist_groups = groupes;
+                self.suivi_groups_enabled = actives;
+                self.persist_config();
+            }
+        }
+
+        /// Voir `main.rs::tick_watchlist_definitions`.
+        fn tick_watchlist_definitions(&mut self) {
+            let mut changed = false;
+            while let Ok(WatchlistDefinitions { group, entries }) =
+                self.watchlist_definitions_rx.try_recv()
+            {
+                changed |= self.watchlist_groups.set_definitions(&group, &entries);
+            }
+            if changed {
+                self.persist_config();
+            }
         }
 
         /// Voir `main.rs::start_recipe_resolution` — sur un thread, jamais sur la boucle winit.
@@ -2593,6 +2652,9 @@ mod linux_main {
             saved.combat_collapsed = self.combat_collapsed;
             saved.set_features(self.features);
             saved.set_alert_mutes(self.alert_mutes);
+            saved.set_alert_volumes(self.alert_volumes);
+            saved.suivi_groups_enabled = self.suivi_groups_enabled;
+            saved.watchlist_groups = self.watchlist_groups.clone();
             config::save(&saved);
         }
 
@@ -2626,6 +2688,14 @@ mod linux_main {
             self.combat_on_right = settings.combat_on_right;
             self.turn_notification = settings.turn_notification;
             self.turn_notification_muted = settings.turn_notification_muted;
+
+            // Les quatre volumes (2026-09-30) — posés sur le module audio, comme à la validation de la
+            // fenêtre Options.
+            let volumes = settings.volumes.clamped();
+            if volumes != self.alert_volumes {
+                self.alert_volumes = volumes;
+                overlay_ui::alert_sound::set_volumes(self.alert_volumes);
+            }
 
             let mut mutes = self.alert_mutes;
             mutes.suivi = settings.suivi_muted;
@@ -2836,6 +2906,19 @@ mod linux_main {
                         let _ = self
                             .settings_tx
                             .send(EngineCommand::SetAlertMutes(self.alert_mutes));
+                    }
+                    // Les quatre volumes (2026-09-30) — voir `main.rs` : posés sur le module
+                    // audio, que le thread Engine lit à chaque son.
+                    if commit.volumes != self.alert_volumes {
+                        self.alert_volumes = commit.volumes;
+                        overlay_ui::alert_sound::set_volumes(self.alert_volumes);
+                        tracing::info!(
+                            tour = self.alert_volumes.turn,
+                            suivi = self.alert_volumes.suivi,
+                            alertes = self.alert_volumes.alertes,
+                            chat = self.alert_volumes.chat,
+                            "[options] volumes des sons d'alerte mis à jour"
+                        );
                     }
                     // La fermeture de la carte de décompte (2026-09-16) — voir `main.rs` : c'est
                     // le thread Engine qui pose `hide_at` quand l'alerte naît.
@@ -3325,6 +3408,7 @@ mod linux_main {
                             chat_muted: self.alert_mutes.chat,
                             chat_auto_close: !self.chat_toast.manual_close,
                             chat_seconds: self.chat_toast.duration_seconds,
+                            volumes: self.alert_volumes,
                             start_with_os: overlay_ui::autostart::is_enabled(),
                             log_path: self.log_path.display().to_string(),
                             verbose_log: self.verbose_log,
@@ -3920,19 +4004,28 @@ mod linux_main {
                             post_redraw = PostRedraw::ValidateOptions(commit)
                         }
                         // Les sons d'essai se jouent par le même chemin qu'en jeu — c'est tout
-                        // l'intérêt du bouton : entendre ce qu'on entendra.
-                        OptionsModalAction::TestAlertSound => {
-                            overlay_ui::alert_sound::play_loot_alert()
+                        // l'intérêt du bouton : entendre ce qu'on entendra — au volume du
+                        // brouillon, voir `main.rs`.
+                        OptionsModalAction::TestAlertSound(volume) => {
+                            overlay_ui::alert_sound::play(
+                                overlay_ui::alert_sound::Sound::Loot,
+                                volume,
+                            )
                         }
-                        OptionsModalAction::TestChatSound => {
-                            overlay_ui::alert_sound::play_chat_alert()
+                        OptionsModalAction::TestChatSound(volume) => overlay_ui::alert_sound::play(
+                            overlay_ui::alert_sound::Sound::Chat,
+                            volume,
+                        ),
+                        OptionsModalAction::TestCountdownSound(volume) => {
+                            overlay_ui::alert_sound::play(
+                                overlay_ui::alert_sound::Sound::Countdown,
+                                volume,
+                            )
                         }
-                        OptionsModalAction::TestCountdownSound => {
-                            overlay_ui::alert_sound::play_countdown_alert()
-                        }
-                        OptionsModalAction::TestTurnSound => {
-                            overlay_ui::alert_sound::play_turn_alert()
-                        }
+                        OptionsModalAction::TestTurnSound(volume) => overlay_ui::alert_sound::play(
+                            overlay_ui::alert_sound::Sound::Turn,
+                            volume,
+                        ),
                         OptionsModalAction::Disconnect => {
                             post_redraw = PostRedraw::DisconnectAccount
                         }
@@ -4083,6 +4176,7 @@ mod linux_main {
             // ne dépend ni d'une fenêtre visible ni d'un rendu (voir
             // `tick_watchlist_completions`).
             self.tick_watchlist_completions();
+            self.tick_watchlist_definitions();
             // Bug réel trouvé côté X11 (spike S3, 2026-09-03, voir son README « Bugs réels
             // trouvés » n°3) : `global-hotkey` (XGrabKey) remonte DEUX événements par pression
             // (`Pressed` ET `Released`), contrairement à `WM_HOTKEY` sous Windows. Filtré sur
@@ -4474,6 +4568,7 @@ mod linux_main {
         // **Le canal des complétions** (2026-09-17) — voir `engine_thread::WatchlistCompleted` sur
         // pourquoi un canal et pas un `ArcSwap` : une complétion perdue est une entrée jamais retirée.
         let (completions_tx, completions_rx) = mpsc::channel();
+        let (watchlist_definitions_tx, watchlist_definitions_rx) = mpsc::channel();
         spawn_engine_thread(
             log_path.clone(),
             EngineHandles {
@@ -4481,6 +4576,11 @@ mod linux_main {
                 watchlist: Arc::clone(&watchlist),
                 watchlist_toast: Arc::clone(&watchlist_toast),
                 completions: completions_tx,
+                watchlist_definitions: watchlist_definitions_tx,
+                watchlist_group: saved_config
+                    .watchlist_groups
+                    .effective_active(saved_config.suivi_groups_enabled)
+                    .to_string(),
                 alert_profile: Arc::clone(&alert_profile),
                 chat_filters: Arc::clone(&chat_filters),
                 roster,
@@ -4503,6 +4603,8 @@ mod linux_main {
         let _ = settings_tx.send(EngineCommand::SetFeatures(saved_config.features()));
         // Les sourdines de même — voir `main.rs`.
         let _ = settings_tx.send(EngineCommand::SetAlertMutes(saved_config.alert_mutes()));
+        // Les volumes — voir `main.rs`.
+        overlay_ui::alert_sound::set_volumes(saved_config.alert_volumes());
 
         event_loop.set_control_flow(ControlFlow::Wait);
         let mut app = App::new(AppState {
@@ -4516,10 +4618,14 @@ mod linux_main {
             turn_notification_muted: saved_config.turn_notification_muted,
             features: saved_config.features(),
             alert_mutes: saved_config.alert_mutes(),
+            alert_volumes: saved_config.alert_volumes(),
             chat_toast: saved_config.chat_toast(),
             countdown_toast: saved_config.countdown_toast(),
             completion: saved_config.completion(),
             completions_rx,
+            watchlist_definitions_rx,
+            watchlist_groups: saved_config.watchlist_groups.clone(),
+            suivi_groups_enabled: saved_config.suivi_groups_enabled,
             // Voir `main.rs` : à côté des combats en cours.
             recap_session: RecapSession::load(
                 overlay_engine::fight_store::default_store_dir().join(recap_session::FILE_NAME),

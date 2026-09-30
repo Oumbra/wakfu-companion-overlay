@@ -67,6 +67,21 @@
 //! - **Désactivé** : la poignée est teintée en [`tokens::TEXT_DISABLED`], par cohérence avec le
 //!   bouton et le champ désactivés.
 //!
+//! ## Remplissage et repères libres, pour un volume
+//!
+//! Deux options, **désactivées par défaut** pour que le curseur du jeu reste celui qu'on a relevé,
+//! posées le 2026-09-30 pour le volume des notifications (demande utilisateur) :
+//!
+//! - [`Slider::filled`] peint la portion parcourue — du bord gauche au centre de la poignée — en
+//!   [`tokens::SLIDER_FILL`], la teinte du cœur de la poignée. Un volume est une quantité, pas un
+//!   cran : « du début jusqu'à la pastille, c'est rempli ».
+//! - [`Slider::marks`] pose des repères à des **valeurs** choisies, en deux tailles
+//!   ([`SliderMark::major`] et [`SliderMark::minor`]), sans quantifier la poignée. C'est ce qui
+//!   les distingue de [`Slider::steps`] : un volume de 1 à 100 a cent arrêts, qu'on ne veut pas
+//!   voir, et dix repères, qu'on veut voir. Même géométrie que les graduations — deux segments qui
+//!   mordent le liseré, jamais un trait qui traverse — la majeure débordant de
+//!   [`tokens::SLIDER_MAJOR_TICK_OVERHANG`] au lieu de [`tokens::SLIDER_TICK_OVERHANG`].
+//!
 //! ## Pourquoi la poignée est un asset
 //!
 //! Ses trois teintes sont plates — pas le moindre dégradé — et pourtant elle n'est pas peinte en
@@ -115,6 +130,29 @@ pub fn snap_to_step(fraction: f32, steps: usize) -> f32 {
     (fraction * intervals).round() / intervals
 }
 
+/// Un repère posé à une **valeur** du curseur — voir [`Slider::marks`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SliderMark {
+    /// Valeur repérée, dans la plage du curseur ([`Slider::range`]). Hors plage, le repère n'est
+    /// pas peint.
+    pub value: f32,
+    /// Repère majeur — plus long, voir [`tokens::SLIDER_MAJOR_TICK_OVERHANG`].
+    pub major: bool,
+}
+
+impl SliderMark {
+    pub const fn major(value: f32) -> Self {
+        Self { value, major: true }
+    }
+
+    pub const fn minor(value: f32) -> Self {
+        Self {
+            value,
+            major: false,
+        }
+    }
+}
+
 /// État visuel d'un curseur — les trois états du design system, `Hovered` étant identique à `Idle`
 /// faute de référence (doc de module).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +172,8 @@ pub fn slider(value: &mut f32) -> Slider<'_> {
         tooltip: None,
         log_name: None,
         steps: None,
+        marks: &[],
+        filled: false,
         forced_state: None,
         forced_fraction: None,
     }
@@ -148,6 +188,8 @@ pub struct Slider<'a> {
     tooltip: Option<String>,
     log_name: Option<String>,
     steps: Option<usize>,
+    marks: &'a [SliderMark],
+    filled: bool,
     forced_state: Option<SliderState>,
     forced_fraction: Option<f32>,
 }
@@ -179,6 +221,21 @@ impl<'a> Slider<'a> {
     /// traité comme un curseur continu, avec une ligne dans le journal.
     pub fn steps(mut self, steps: usize) -> Self {
         self.steps = Some(steps);
+        self
+    }
+
+    /// Repères posés à des valeurs choisies, **sans quantifier la poignée** — voir la doc de module.
+    /// Se combine avec [`Self::steps`] sans le remplacer, mais n'a de sens que sur un curseur
+    /// continu.
+    pub fn marks(mut self, marks: &'a [SliderMark]) -> Self {
+        self.marks = marks;
+        self
+    }
+
+    /// Remplit la portion parcourue de la rainure — voir la doc de module. Désactivé, le
+    /// remplissage prend la teinte grisée de la poignée.
+    pub fn filled(mut self, filled: bool) -> Self {
+        self.filled = filled;
         self
     }
 
@@ -350,6 +407,55 @@ impl Widget for Slider<'_> {
             }
             painter.rect_filled(inner, 0.0, tokens::SLIDER_TRACK_SHADE);
 
+            let center_x = rect.left() + radius + fraction * travel;
+
+            // La portion parcourue, peinte SUR le creux et SOUS les repères : un repère doit
+            // rester lisible sur la partie remplie comme sur la partie nue. Elle s'arrête au
+            // centre de la poignée, que le disque recouvre de toute façon.
+            if self.filled {
+                let fill = egui::Rect::from_min_max(
+                    track.left_top(),
+                    egui::pos2(center_x.round(), track.bottom()),
+                );
+                let color = match state {
+                    SliderState::Disabled => tokens::TEXT_DISABLED,
+                    SliderState::Idle | SliderState::Hovered => tokens::SLIDER_FILL,
+                };
+                painter.rect_filled(fill, 0.0, color);
+            }
+
+            // Les repères libres — même géométrie que les graduations ci-dessous, en deux
+            // longueurs. Leur abscisse est calée sur le **centre d'un pixel** : un trait de 1 px
+            // posé à cheval sur deux colonnes se peindrait en deux colonnes à demi-teinte.
+            let (lo, hi) = (*self.range.start(), *self.range.end());
+            if hi > lo {
+                let half = tokens::SLIDER_TICK_WIDTH / 2.0;
+                for mark in self.marks {
+                    if mark.value < lo || mark.value > hi {
+                        continue;
+                    }
+                    let over = if mark.major {
+                        tokens::SLIDER_MAJOR_TICK_OVERHANG
+                    } else {
+                        tokens::SLIDER_TICK_OVERHANG
+                    };
+                    let x = rect.left() + radius + (mark.value - lo) / (hi - lo) * travel;
+                    let x = (x - half).round() + half;
+                    for band in [
+                        egui::Rect::from_min_max(
+                            egui::pos2(x - half, track.top() - over),
+                            egui::pos2(x + half, track.top() + tokens::SLIDER_TICK_BITE),
+                        ),
+                        egui::Rect::from_min_max(
+                            egui::pos2(x - half, track.bottom() - tokens::SLIDER_TICK_BITE),
+                            egui::pos2(x + half, track.bottom() + over),
+                        ),
+                    ] {
+                        painter.rect_filled(band, 0.0, tokens::SLIDER_TICK);
+                    }
+                }
+            }
+
             // Les graduations, peintes APRÈS la rainure et JAMAIS dans son intérieur : sur la
             // capture, les pixels d'une colonne graduée sont identiques à ceux d'une colonne nue
             // entre les deux liserés. Chaque graduation est donc deux segments, pas un trait.
@@ -378,7 +484,6 @@ impl Widget for Slider<'_> {
                 }
             }
 
-            let center_x = rect.left() + radius + fraction * travel;
             let handle = egui::Rect::from_center_size(
                 egui::pos2(center_x, rect.center().y),
                 Vec2::splat(tokens::SLIDER_HANDLE_SIZE),
@@ -479,6 +584,17 @@ mod tests {
                 <= tokens::SLIDER_HANDLE_SIZE,
             "c'est la poignée qui fixe la hauteur, les graduations doivent y tenir",
         );
+    }
+
+    #[test]
+    fn un_repere_majeur_tient_dans_la_hauteur_du_composant() {
+        // Le débord d'un repère majeur est le plus grand que la poignée laisse : au-delà, il
+        // sortirait du rectangle alloué et serait rogné par le voisin du dessus.
+        assert!(
+            tokens::SLIDER_TRACK_HEIGHT + tokens::SLIDER_MAJOR_TICK_OVERHANG * 2.0
+                <= tokens::SLIDER_HANDLE_SIZE,
+        );
+        assert!(tokens::SLIDER_MAJOR_TICK_OVERHANG > tokens::SLIDER_TICK_OVERHANG);
     }
 
     #[test]

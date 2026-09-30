@@ -426,6 +426,63 @@ mod tests {
         );
     }
 
+    /// Passif Sacrieur « Retour de flamme » : PV que le Sacrieur s'inflige lui-même — jamais un dégât
+    /// infligé (même juste après un sort de ce Sacrieur, dernier lanceur), mais un soin NÉGATIF
+    /// crédité au Sacrieur, libellé du nom du passif.
+    #[test]
+    fn le_retour_de_flamme_du_sacrieur_est_un_soin_negatif() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let lignes: Vec<String> = [
+            " INFO 10:00:00,000 [T] (a:1) - [_FL_] fightId=1 Oumbra breed : 11 [1] isControlledByAI=false obstacleId : -1 join the fight at {P}",
+            " INFO 10:00:00,001 [T] (a:1) - [_FL_] fightId=1 Grokoko breed : 10 [-1] isControlledByAI=true obstacleId : -1 join the fight at {P}",
+            " INFO 10:00:01,000 [T] (a:1) - [Information (combat)] Oumbra lance le sort Assaut",
+            " INFO 10:00:01,100 [T] (a:1) - [Information (combat)] Grokoko: -188 PV (Feu)",
+            " INFO 10:00:01,200 [T] (a:1) - [Information (combat)] Oumbra: -94 PV (Feu) (Retour de flamme)",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+        let entries = engine.parse_lines(&lignes).expect("parsing");
+        let damages: Vec<(String, String, i64)> = entries
+            .iter()
+            .filter_map(|e| match e {
+                LogEntry::Damage {
+                    attacker,
+                    target,
+                    amount,
+                    ..
+                } => Some((attacker.clone(), target.clone(), *amount)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            damages,
+            vec![("Oumbra".to_string(), "Grokoko".to_string(), 188)]
+        );
+        let heals: Vec<(String, String, String, i64)> = entries
+            .iter()
+            .filter_map(|e| match e {
+                LogEntry::Heal {
+                    attacker,
+                    target,
+                    spell,
+                    amount,
+                    ..
+                } => Some((attacker.clone(), target.clone(), spell.clone(), *amount)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            heals,
+            vec![(
+                "Oumbra".to_string(),
+                "Oumbra".to_string(),
+                "Retour de flamme".to_string(),
+                -94
+            )]
+        );
+    }
+
     #[test]
     fn sans_catalogue_le_repli_dinvocation_avale_nimporte_quel_nouveau_venu() {
         let engine = LogParserEngine::new().expect("moteur QuickJS");
@@ -478,5 +535,209 @@ mod tests {
             })
             .collect();
         assert_eq!(anchors, vec![2026]);
+    }
+
+    /// Forme du combat réel (fixture anonymisée) : ce sont les MONSTRES (Flamiche, puis Elitendard)
+    /// qui portent « Protection pourpre » ; le Cra frappe Flamiche, le dégât est répercuté sur
+    /// `boss`.
+    fn lignes_protection_pourpre(boss: &str) -> Vec<String> {
+        [
+            " INFO 20:00:00,000 [T] (a:1) - [_FL_] fightId=42 Anonyme-Cra1 breed : 9 [1] isControlledByAI=false obstacleId : -1 join the fight at {P}".to_string(),
+            " INFO 20:00:00,001 [T] (a:1) - [_FL_] fightId=42 Anonyme-Iop2 breed : 8 [2] isControlledByAI=false obstacleId : -1 join the fight at {P}".to_string(),
+            format!(" INFO 20:00:00,002 [T] (a:1) - [_FL_] fightId=42 {boss} breed : 100 [-1] isControlledByAI=true obstacleId : -1 join the fight at {{P}}"),
+            " INFO 20:00:00,003 [T] (a:1) - [_FL_] fightId=42 Flamiche breed : 101 [-2] isControlledByAI=true obstacleId : -1 join the fight at {P}".to_string(),
+            " INFO 20:00:00,004 [T] (a:1) - [_FL_] fightId=42 Elitendard breed : 102 [-3] isControlledByAI=true obstacleId : -1 join the fight at {P}".to_string(),
+            " INFO 20:00:01,000 [T] (a:1) - [Information (combat)] Flamiche: Protection pourpre (Niv. 1)".to_string(),
+            " INFO 20:00:01,001 [T] (a:1) - [Information (combat)] Elitendard: Protection pourpre (Niv. 1)".to_string(),
+            " INFO 20:00:05,000 [T] (a:1) - [Information (combat)] Anonyme-Cra1 lance le sort Flèche ardente".to_string(),
+            " INFO 20:00:05,100 [T] (a:1) - [Information (combat)] Flamiche: -300 PV (Feu)".to_string(),
+            format!(" INFO 20:00:05,101 [T] (a:1) - [Information (combat)] {boss}: -150 PV (Feu) (Protection pourpre)"),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    fn degats_sur(entries: &[LogEntry], cible: &str) -> Vec<(String, String)> {
+        entries
+            .iter()
+            .filter_map(|e| match e {
+                LogEntry::Damage {
+                    target,
+                    attacker,
+                    spell,
+                    ..
+                } if target == cible => Some((attacker.clone(), spell.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Règle de mécanique de combat vendue (`engine-js/src/combat-mechanics/`) : contre
+    /// Ignemikhal, le dégât répercuté par « Protection pourpre » est crédité au lanceur du sort
+    /// précédent, pas au dernier monstre à avoir reçu le passif.
+    #[test]
+    fn protection_pourpre_est_creditee_au_lanceur_contre_ignemikhal() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let entries = engine
+            .parse_lines(&lignes_protection_pourpre("Ignemikhal"))
+            .expect("parsing");
+        assert_eq!(
+            degats_sur(&entries, "Ignemikhal"),
+            vec![("Anonyme-Cra1".to_string(), "Protection pourpre".to_string())]
+        );
+    }
+
+    /// Sans Ignemikhal dans le combat, la règle reste inactive : résolution générique inchangée.
+    #[test]
+    fn protection_pourpre_reste_generique_sans_ignemikhal() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let entries = engine
+            .parse_lines(&lignes_protection_pourpre("Autre Boss"))
+            .expect("parsing");
+        assert_eq!(
+            degats_sur(&entries, "Autre Boss"),
+            vec![("Elitendard".to_string(), "Protection pourpre".to_string())]
+        );
+    }
+
+    /// Combat réel contre Ignemikhal (`tests/ignemikhal_protection_pourpre.log`, même fixture que
+    /// `tests/logs/fr/` côté web) : tous les dégâts répercutés vont à des joueurs, jamais à un
+    /// monstre porteur du passif — mêmes totaux que `ignemikhal.mechanic.spec.ts`.
+    #[test]
+    fn protection_pourpre_sur_le_combat_reel() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let lignes: Vec<String> = include_str!("../tests/ignemikhal_protection_pourpre.log")
+            .lines()
+            .map(str::to_string)
+            .collect();
+        let entries = engine.parse_lines(&lignes).expect("parsing");
+        let mut par_attaquant = std::collections::BTreeMap::<String, i64>::new();
+        let mut nombre = 0;
+        for entry in &entries {
+            if let LogEntry::Damage {
+                target,
+                attacker,
+                spell,
+                amount,
+                ..
+            } = entry
+            {
+                if target == "Ignemikhal" && spell == "Protection pourpre" {
+                    nombre += 1;
+                    *par_attaquant.entry(attacker.clone()).or_default() += amount;
+                }
+            }
+        }
+        assert_eq!(nombre, 108);
+        let attendu: std::collections::BTreeMap<String, i64> = [
+            ("Anonyme-Roublard1", 177_799),
+            ("Anonyme-Sram1", 133_513),
+            ("Anonyme-Pandawa1", 3_380),
+            ("Anonyme-Ecaflip1", 1_063),
+            ("Anonyme-Feca1", 452),
+            ("Anonyme-Eniripsa1", 100),
+        ]
+        .into_iter()
+        .map(|(nom, total)| (nom.to_string(), total))
+        .collect();
+        assert_eq!(par_attaquant, attendu);
+    }
+
+    /// Lignes de combat au format du log (même forme que `log-parser.spec.ts` côté web, section
+    /// « effets suivis par porteur ») : `(heure, texte)` pour `[Information (combat)]`, ou une
+    /// jointure `[_FL_]` quand le texte commence par `JOIN `.
+    fn lignes_effets(lignes: &[(&str, &str)]) -> Vec<String> {
+        lignes
+            .iter()
+            .enumerate()
+            .map(|(i, (heure, texte))| match texte.strip_prefix("JOIN ") {
+                Some(reste) => {
+                    let (nom, ia) = reste.rsplit_once(' ').expect("JOIN <nom> <ia>");
+                    format!(" INFO {heure} [T] (a:1) - [_FL_] fightId=7 {nom} breed : 1 [{i}] isControlledByAI={ia} obstacleId : -1 join the fight at {{P}}")
+                }
+                None => format!(" INFO {heure} [T] (a:1) - [Information (combat)] {texte}"),
+            })
+            .collect()
+    }
+
+    fn attaquants(entries: &[LogEntry]) -> Vec<(String, String, String)> {
+        entries
+            .iter()
+            .filter_map(|e| match e {
+                LogEntry::Damage {
+                    target, attacker, ..
+                } => Some(("dégât".to_string(), target.clone(), attacker.clone())),
+                LogEntry::Heal {
+                    target, attacker, ..
+                } => Some(("soin".to_string(), target.clone(), attacker.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Effets suivis par porteur (report du correctif web du 2026-09-30) : une nouvelle pose
+    /// n'écrase plus la précédente, l'expiration chez un porteur n'efface plus les autres, et un
+    /// statut posé par un joueur qui se propage d'un monstre à l'autre revient au joueur.
+    #[test]
+    fn les_effets_sont_suivis_par_porteur() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let lignes = lignes_effets(&[
+            ("20:00:00,000", "JOIN Anonyme-Ouginak1 false"),
+            ("20:00:00,001", "JOIN Anonyme-Eniripsa1 false"),
+            ("20:00:00,002", "JOIN Anonyme-Pandawa1 false"),
+            ("20:00:00,003", "JOIN Anonyme-Sram1 false"),
+            ("20:00:00,004", "JOIN Anonyme-Roublard1 false"),
+            ("20:00:00,005", "JOIN Grokoko true"),
+            ("20:00:00,006", "JOIN Grokokolantha true"),
+            // Hachure : la pose sur Grokokolantha n'écrase pas celle sur Grokoko.
+            ("20:43:26,452", "Anonyme-Ouginak1 lance le sort Hachure"),
+            ("20:43:27,271", "Grokoko: Hachure (Niv. 8)"),
+            ("20:43:34,161", "Grokokolantha lance le sort Divine Koko"),
+            ("20:43:34,958", "Grokokolantha: Hachure (Niv. 8)"),
+            ("20:43:35,701", "Grokoko: -188 PV (Terre) (Hachure)"),
+            // Marque eting : l'expiration chez le Sram n'efface pas celle du Pandawa.
+            (
+                "21:48:34,553",
+                "Anonyme-Eniripsa1 lance le sort Feu gardien",
+            ),
+            ("21:48:36,368", "Anonyme-Pandawa1: Marque eting (Niv. 170)"),
+            (
+                "21:52:37,000",
+                "Anonyme-Eniripsa1 lance le sort Feu gardien",
+            ),
+            ("21:52:37,959", "Anonyme-Sram1: Marque eting (Niv. 170)"),
+            (
+                "21:53:01,100",
+                "Anonyme-Sram1: n'est plus sous l'emprise de 'Marque eting'",
+            ),
+            ("21:58:00,000", "Anonyme-Pandawa1 lance le sort Chamrak"),
+            (
+                "22:01:51,471",
+                "Anonyme-Pandawa1: +2 638 PV (Feu) (Marque eting)",
+            ),
+            // Bombe collante posée par le Roublard sur Grokoko, qui touche Grokokolantha.
+            (
+                "22:10:00,000",
+                "Anonyme-Roublard1 lance le sort Bombe collante (Critiques)",
+            ),
+            ("22:10:00,500", "Grokoko: Bombe collante (Niv. 98)"),
+            ("22:10:05,000", "Grokoko lance le sort Coup d'Koko"),
+            (
+                "22:10:10,000",
+                "Grokokolantha: -1 585 PV (Feu) (Bombe collante)",
+            ),
+        ]);
+        let entries = engine.parse_lines(&lignes).expect("parsing");
+        let attendu = |k: &str, cible: &str, auteur: &str| {
+            (k.to_string(), cible.to_string(), auteur.to_string())
+        };
+        assert_eq!(
+            attaquants(&entries),
+            vec![
+                attendu("dégât", "Grokoko", "Anonyme-Ouginak1"),
+                attendu("soin", "Anonyme-Pandawa1", "Anonyme-Eniripsa1"),
+                attendu("dégât", "Grokokolantha", "Anonyme-Roublard1"),
+            ]
+        );
     }
 }
