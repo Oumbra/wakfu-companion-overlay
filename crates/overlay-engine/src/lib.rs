@@ -63,5 +63,5 @@ pub use spells::{
 };
 pub use watchlist::{
     watchlist_from_settings_json, watchlist_patch_entry, WatchlistAlert, WatchlistAlertReason,
-    WatchlistEntry, WatchlistKind, WatchlistMode,
+    WatchlistEntry, WatchlistKind, WatchlistMode, DEFAULT_GROUP_ID,
 };

@@ -2584,6 +2584,49 @@ impl Engine {
         self.watchlist.apply_definitions(definitions, retirees);
     }
 
+    /// **Vide la liste suivie sans rien écrire** — la déconnexion, voir
+    /// [`WatchlistState::clear`](crate::watchlist::WatchlistState::clear).
+    pub fn clear_watchlist(&mut self) {
+        self.watchlist.clear();
+    }
+
+    /// Pose le groupe d'éléments suivis actif avant que la liste du compte ne descende — voir
+    /// [`WatchlistState::set_group`](crate::watchlist::WatchlistState::set_group).
+    pub fn set_watchlist_group(&mut self, group: String) {
+        self.watchlist.set_group(group);
+    }
+
+    /// **Bascule sur un autre groupe d'éléments suivis** (2026-09-30) — voir
+    /// [`WatchlistState::switch_group`](crate::watchlist::WatchlistState::switch_group).
+    pub fn switch_watchlist_group(&mut self, group: String, definitions: Vec<WatchlistEntry>) {
+        self.watchlist.switch_group(group, definitions);
+    }
+
+    /// Recale les compteurs gelés d'un groupe inactif sur ses nouvelles définitions — voir
+    /// [`WatchlistState::redefine_group`](crate::watchlist::WatchlistState::redefine_group).
+    pub fn redefine_watchlist_group(
+        &mut self,
+        group: &str,
+        before: &[WatchlistEntry],
+        after: &[WatchlistEntry],
+        retirees: &[WatchlistEntry],
+    ) {
+        self.watchlist
+            .redefine_group(group, before, after, retirees);
+    }
+
+    /// Oublie les compteurs d'un groupe supprimé — voir
+    /// [`WatchlistState::forget_group`](crate::watchlist::WatchlistState::forget_group).
+    pub fn forget_watchlist_group(&mut self, group: &str) {
+        self.watchlist.forget_group(group);
+    }
+
+    /// `(groupe, définitions)` si les définitions vivantes ont changé depuis le dernier appel —
+    /// voir [`WatchlistState::drain_definitions_changed`](crate::watchlist::WatchlistState::drain_definitions_changed).
+    pub fn drain_watchlist_definitions(&mut self) -> Option<(String, Vec<WatchlistEntry>)> {
+        self.watchlist.drain_definitions_changed()
+    }
+
     /// **Remet le compteur d'une entrée suivie à sa valeur de départ** (2026-09-18) — le bouton
     /// de réinitialisation d'une tuile du bandeau, après confirmation. Voir
     /// [`WatchlistState::reset_counter`](crate::watchlist::WatchlistState::reset_counter) pour ce
