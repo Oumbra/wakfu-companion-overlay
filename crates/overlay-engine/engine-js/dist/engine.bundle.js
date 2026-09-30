@@ -14,11 +14,16 @@
   var IGNEMIKHAL_PROTECTION_POURPRE = {
     id: "ignemikhal-protection-pourpre",
     triggerFighterNames: ["Ignemikhal"],
-    resolveDamage({ target, effectTag, lastCast }) {
+    resolveDamage({ target, effectTag, lastCast, lastDamage, isMonster }) {
       if (!effectTag || normalizeMechanicName(effectTag) !== PROTECTION_POURPRE) return null;
       if (normalizeMechanicName(target) !== IGNEMIKHAL) return null;
-      if (!lastCast || normalizeMechanicName(lastCast.caster) === IGNEMIKHAL) return null;
-      return { attacker: lastCast.caster, spell: effectTag };
+      if (lastCast && !isMonster(lastCast.caster)) {
+        return { attacker: lastCast.caster, spell: effectTag };
+      }
+      if (lastDamage && isMonster(lastDamage.attacker) && !isMonster(lastDamage.target)) {
+        return { attacker: lastDamage.target, spell: effectTag };
+      }
+      return null;
     }
   };
 
@@ -138,7 +143,8 @@
       pendingSummonCasters: [],
       seenFighterIds: /* @__PURE__ */ new Set(),
       lastActionMs: -1,
-      activeMechanics: []
+      activeMechanics: [],
+      monsterNames: /* @__PURE__ */ new Set()
     };
   }
   var LogParser = class {
@@ -363,6 +369,7 @@
           }
         }
       }
+      if (isControlledByAI && !summonedBy) state.monsterNames.add(name);
       let fightIds = this.nameToFightIds.get(name);
       if (!fightIds) {
         fightIds = /* @__PURE__ */ new Set();
@@ -760,7 +767,9 @@
       const mechanicAttribution = options.combatMechanics && state.activeMechanics.length > 0 ? resolveMechanicDamage(state.activeMechanics, {
         target,
         effectTag,
-        lastCast: state.lastCast
+        lastCast: state.lastCast,
+        lastDamage: state.lastDamage,
+        isMonster: (name) => state.monsterNames.has(name)
       }) : null;
       if (mechanicAttribution) {
         attacker = mechanicAttribution.attacker;

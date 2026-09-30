@@ -537,16 +537,18 @@ mod tests {
         assert_eq!(anchors, vec![2026]);
     }
 
-    /// Combat à deux alliés porteurs de « Protection pourpre » (Cra puis Iop), avec `boss` et un
-    /// second monstre ; le Cra frappe l'autre monstre, le dégât est répercuté sur `boss`.
+    /// Forme du combat réel (fixture anonymisée) : ce sont les MONSTRES (Flamiche, puis Elitendard)
+    /// qui portent « Protection pourpre » ; le Cra frappe Flamiche, le dégât est répercuté sur
+    /// `boss`.
     fn lignes_protection_pourpre(boss: &str) -> Vec<String> {
         [
             " INFO 20:00:00,000 [T] (a:1) - [_FL_] fightId=42 Anonyme-Cra1 breed : 9 [1] isControlledByAI=false obstacleId : -1 join the fight at {P}".to_string(),
             " INFO 20:00:00,001 [T] (a:1) - [_FL_] fightId=42 Anonyme-Iop2 breed : 8 [2] isControlledByAI=false obstacleId : -1 join the fight at {P}".to_string(),
             format!(" INFO 20:00:00,002 [T] (a:1) - [_FL_] fightId=42 {boss} breed : 100 [-1] isControlledByAI=true obstacleId : -1 join the fight at {{P}}"),
             " INFO 20:00:00,003 [T] (a:1) - [_FL_] fightId=42 Flamiche breed : 101 [-2] isControlledByAI=true obstacleId : -1 join the fight at {P}".to_string(),
-            " INFO 20:00:01,000 [T] (a:1) - [Information (combat)] Anonyme-Cra1: Protection pourpre (Niv. 1)".to_string(),
-            " INFO 20:00:01,001 [T] (a:1) - [Information (combat)] Anonyme-Iop2: Protection pourpre (Niv. 1)".to_string(),
+            " INFO 20:00:00,004 [T] (a:1) - [_FL_] fightId=42 Elitendard breed : 102 [-3] isControlledByAI=true obstacleId : -1 join the fight at {P}".to_string(),
+            " INFO 20:00:01,000 [T] (a:1) - [Information (combat)] Flamiche: Protection pourpre (Niv. 1)".to_string(),
+            " INFO 20:00:01,001 [T] (a:1) - [Information (combat)] Elitendard: Protection pourpre (Niv. 1)".to_string(),
             " INFO 20:00:05,000 [T] (a:1) - [Information (combat)] Anonyme-Cra1 lance le sort Flèche ardente".to_string(),
             " INFO 20:00:05,100 [T] (a:1) - [Information (combat)] Flamiche: -300 PV (Feu)".to_string(),
             format!(" INFO 20:00:05,101 [T] (a:1) - [Information (combat)] {boss}: -150 PV (Feu) (Protection pourpre)"),
@@ -572,7 +574,7 @@ mod tests {
 
     /// Règle de mécanique de combat vendue (`engine-js/src/combat-mechanics/`) : contre
     /// Ignemikhal, le dégât répercuté par « Protection pourpre » est crédité au lanceur du sort
-    /// précédent, pas au dernier allié à avoir reçu le passif.
+    /// précédent, pas au dernier monstre à avoir reçu le passif.
     #[test]
     fn protection_pourpre_est_creditee_au_lanceur_contre_ignemikhal() {
         let engine = LogParserEngine::new().expect("moteur QuickJS");
@@ -594,7 +596,50 @@ mod tests {
             .expect("parsing");
         assert_eq!(
             degats_sur(&entries, "Autre Boss"),
-            vec![("Anonyme-Iop2".to_string(), "Protection pourpre".to_string())]
+            vec![("Elitendard".to_string(), "Protection pourpre".to_string())]
         );
+    }
+
+    /// Combat réel contre Ignemikhal (`tests/ignemikhal_protection_pourpre.log`, même fixture que
+    /// `tests/logs/fr/` côté web) : tous les dégâts répercutés vont à des joueurs, jamais à un
+    /// monstre porteur du passif — mêmes totaux que `ignemikhal.mechanic.spec.ts`.
+    #[test]
+    fn protection_pourpre_sur_le_combat_reel() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let lignes: Vec<String> = include_str!("../tests/ignemikhal_protection_pourpre.log")
+            .lines()
+            .map(str::to_string)
+            .collect();
+        let entries = engine.parse_lines(&lignes).expect("parsing");
+        let mut par_attaquant = std::collections::BTreeMap::<String, i64>::new();
+        let mut nombre = 0;
+        for entry in &entries {
+            if let LogEntry::Damage {
+                target,
+                attacker,
+                spell,
+                amount,
+                ..
+            } = entry
+            {
+                if target == "Ignemikhal" && spell == "Protection pourpre" {
+                    nombre += 1;
+                    *par_attaquant.entry(attacker.clone()).or_default() += amount;
+                }
+            }
+        }
+        assert_eq!(nombre, 108);
+        let attendu: std::collections::BTreeMap<String, i64> = [
+            ("Anonyme-Roublard1", 177_799),
+            ("Anonyme-Sram1", 133_513),
+            ("Anonyme-Pandawa1", 3_380),
+            ("Anonyme-Ecaflip1", 1_063),
+            ("Anonyme-Feca1", 452),
+            ("Anonyme-Eniripsa1", 100),
+        ]
+        .into_iter()
+        .map(|(nom, total)| (nom.to_string(), total))
+        .collect();
+        assert_eq!(par_attaquant, attendu);
     }
 }

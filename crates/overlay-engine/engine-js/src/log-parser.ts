@@ -404,6 +404,9 @@ interface FightParseState {
    * `combat-mechanics/`) — activées par la jointure d'un combattant déclencheur (ex. boss
    * « Ignemikhal »), vide dans l'immense majorité des combats. */
   activeMechanics: CombatMechanic[];
+  /** Monstres de CE combat : jointure `isControlledByAI=true` qui n'est pas une invocation (voir
+   * parseFighterJoin) — exposé aux règles de `combat-mechanics/` (`isMonster`). */
+  monsterNames: Set<string>;
 }
 
 function createFightParseState(): FightParseState {
@@ -417,6 +420,7 @@ function createFightParseState(): FightParseState {
     seenFighterIds: new Set(),
     lastActionMs: -1,
     activeMechanics: [],
+    monsterNames: new Set(),
   };
 }
 
@@ -716,6 +720,8 @@ export class LogParser {
         }
       }
     }
+
+    if (isControlledByAI && !summonedBy) state.monsterNames.add(name);
 
     let fightIds = this.nameToFightIds.get(name);
     if (!fightIds) {
@@ -1167,6 +1173,8 @@ export class LogParser {
             target,
             effectTag,
             lastCast: state.lastCast,
+            lastDamage: state.lastDamage,
+            isMonster: (name) => state.monsterNames.has(name),
           })
         : null;
     if (mechanicAttribution) {
