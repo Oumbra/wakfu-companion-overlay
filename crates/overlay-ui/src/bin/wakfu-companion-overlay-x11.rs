@@ -1746,6 +1746,23 @@ mod linux_main {
             }
         }
 
+        /// Une fenêtre de jeu, ou une fenêtre de CE processus (overlays, modale Options…), est-elle
+        /// active ? Décide si les raccourcis globaux sont réservés — même règle que
+        /// `main.rs::App::game_or_overlay_focused`, voir `shortcuts::FocusGate`. Le `_NET_WM_PID`
+        /// couvre toutes les fenêtres winit ; la comparaison aux XID connus reste en filet si le
+        /// WM ou la fenêtre ne l'expose pas.
+        fn game_or_overlay_focused(&self) -> bool {
+            let Some(active) = self.game_window.active_window() else {
+                return false;
+            };
+            self.game_window.window_pid(active) == Some(std::process::id())
+                || self
+                    .windows
+                    .values()
+                    .any(|overlay| Self::xid_of(&overlay.window) == active)
+                || self.game_window.is_game_window(active)
+        }
+
         /// Même politique focus-aware que Windows (`main.rs::App::sync_topmost`), portée sur
         /// `overlay_platform::linux::topmost::decide` (délai de grâce déjà testé unitairement,
         /// jamais réécrit ici) plutôt que `SetWindowPos`/`GetForegroundWindow` — `_NET_ACTIVE_
@@ -4182,6 +4199,11 @@ mod linux_main {
             // (`Pressed` ET `Released`), contrairement à `WM_HOTKEY` sous Windows. Filtré sur
             // `Pressed` uniquement dès l'écriture de ce binaire — jamais reproduit ici comme un
             // "nouveau" bug, le correctif est appliqué avant même le premier lancement.
+            //
+            // Avant de lire la file : raccourcis réservés seulement si le jeu (ou l'overlay) est
+            // actif — même garde que `main.rs`, voir `shortcuts::FocusGate`.
+            let focused = self.game_or_overlay_focused();
+            let _ = self.hotkeys.set_game_focused(focused);
             while let Ok(event) = self.hotkey_events.try_recv() {
                 if event.state != global_hotkey::HotKeyState::Pressed {
                     continue;
