@@ -642,4 +642,102 @@ mod tests {
         .collect();
         assert_eq!(par_attaquant, attendu);
     }
+
+    /// Lignes de combat au format du log (même forme que `log-parser.spec.ts` côté web, section
+    /// « effets suivis par porteur ») : `(heure, texte)` pour `[Information (combat)]`, ou une
+    /// jointure `[_FL_]` quand le texte commence par `JOIN `.
+    fn lignes_effets(lignes: &[(&str, &str)]) -> Vec<String> {
+        lignes
+            .iter()
+            .enumerate()
+            .map(|(i, (heure, texte))| match texte.strip_prefix("JOIN ") {
+                Some(reste) => {
+                    let (nom, ia) = reste.rsplit_once(' ').expect("JOIN <nom> <ia>");
+                    format!(" INFO {heure} [T] (a:1) - [_FL_] fightId=7 {nom} breed : 1 [{i}] isControlledByAI={ia} obstacleId : -1 join the fight at {{P}}")
+                }
+                None => format!(" INFO {heure} [T] (a:1) - [Information (combat)] {texte}"),
+            })
+            .collect()
+    }
+
+    fn attaquants(entries: &[LogEntry]) -> Vec<(String, String, String)> {
+        entries
+            .iter()
+            .filter_map(|e| match e {
+                LogEntry::Damage {
+                    target, attacker, ..
+                } => Some(("dégât".to_string(), target.clone(), attacker.clone())),
+                LogEntry::Heal {
+                    target, attacker, ..
+                } => Some(("soin".to_string(), target.clone(), attacker.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Effets suivis par porteur (report du correctif web du 2026-09-30) : une nouvelle pose
+    /// n'écrase plus la précédente, l'expiration chez un porteur n'efface plus les autres, et un
+    /// statut posé par un joueur qui se propage d'un monstre à l'autre revient au joueur.
+    #[test]
+    fn les_effets_sont_suivis_par_porteur() {
+        let engine = LogParserEngine::new().expect("moteur QuickJS");
+        let lignes = lignes_effets(&[
+            ("20:00:00,000", "JOIN Anonyme-Ouginak1 false"),
+            ("20:00:00,001", "JOIN Anonyme-Eniripsa1 false"),
+            ("20:00:00,002", "JOIN Anonyme-Pandawa1 false"),
+            ("20:00:00,003", "JOIN Anonyme-Sram1 false"),
+            ("20:00:00,004", "JOIN Anonyme-Roublard1 false"),
+            ("20:00:00,005", "JOIN Grokoko true"),
+            ("20:00:00,006", "JOIN Grokokolantha true"),
+            // Hachure : la pose sur Grokokolantha n'écrase pas celle sur Grokoko.
+            ("20:43:26,452", "Anonyme-Ouginak1 lance le sort Hachure"),
+            ("20:43:27,271", "Grokoko: Hachure (Niv. 8)"),
+            ("20:43:34,161", "Grokokolantha lance le sort Divine Koko"),
+            ("20:43:34,958", "Grokokolantha: Hachure (Niv. 8)"),
+            ("20:43:35,701", "Grokoko: -188 PV (Terre) (Hachure)"),
+            // Marque eting : l'expiration chez le Sram n'efface pas celle du Pandawa.
+            (
+                "21:48:34,553",
+                "Anonyme-Eniripsa1 lance le sort Feu gardien",
+            ),
+            ("21:48:36,368", "Anonyme-Pandawa1: Marque eting (Niv. 170)"),
+            (
+                "21:52:37,000",
+                "Anonyme-Eniripsa1 lance le sort Feu gardien",
+            ),
+            ("21:52:37,959", "Anonyme-Sram1: Marque eting (Niv. 170)"),
+            (
+                "21:53:01,100",
+                "Anonyme-Sram1: n'est plus sous l'emprise de 'Marque eting'",
+            ),
+            ("21:58:00,000", "Anonyme-Pandawa1 lance le sort Chamrak"),
+            (
+                "22:01:51,471",
+                "Anonyme-Pandawa1: +2 638 PV (Feu) (Marque eting)",
+            ),
+            // Bombe collante posée par le Roublard sur Grokoko, qui touche Grokokolantha.
+            (
+                "22:10:00,000",
+                "Anonyme-Roublard1 lance le sort Bombe collante (Critiques)",
+            ),
+            ("22:10:00,500", "Grokoko: Bombe collante (Niv. 98)"),
+            ("22:10:05,000", "Grokoko lance le sort Coup d'Koko"),
+            (
+                "22:10:10,000",
+                "Grokokolantha: -1 585 PV (Feu) (Bombe collante)",
+            ),
+        ]);
+        let entries = engine.parse_lines(&lignes).expect("parsing");
+        let attendu = |k: &str, cible: &str, auteur: &str| {
+            (k.to_string(), cible.to_string(), auteur.to_string())
+        };
+        assert_eq!(
+            attaquants(&entries),
+            vec![
+                attendu("dégât", "Grokoko", "Anonyme-Ouginak1"),
+                attendu("soin", "Anonyme-Pandawa1", "Anonyme-Eniripsa1"),
+                attendu("dégât", "Grokokolantha", "Anonyme-Roublard1"),
+            ]
+        );
+    }
 }

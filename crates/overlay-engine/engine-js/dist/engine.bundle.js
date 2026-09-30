@@ -637,7 +637,13 @@
       if (statusRemoval) {
         const carrier = statusRemoval[1].trim();
         const fightId = this.resolveFightIdForName(carrier);
-        this.getFightState(fightId).effectOwners.delete(statusRemoval[2].trim().toLowerCase());
+        const effectOwners = this.getFightState(fightId).effectOwners;
+        const effectKey = statusRemoval[2].trim().toLowerCase();
+        const carriers = effectOwners.get(effectKey);
+        if (carriers) {
+          carriers.delete(carrier);
+          if (carriers.size === 0) effectOwners.delete(effectKey);
+        }
         return null;
       }
       const statusEffect = STATUS_EFFECT_RE.exec(content);
@@ -645,10 +651,14 @@
         const carrier = statusEffect[1].trim();
         const effectName = statusEffect[2].trim();
         const state = this.getFightState(this.resolveFightIdForName(carrier));
-        state.effectOwners.set(effectName.toLowerCase(), {
-          carrier,
-          applier: state.lastCast?.caster ?? carrier
-        });
+        const effectKey = effectName.toLowerCase();
+        let carriers = state.effectOwners.get(effectKey);
+        if (!carriers) {
+          carriers = /* @__PURE__ */ new Map();
+          state.effectOwners.set(effectKey, carriers);
+        }
+        carriers.delete(carrier);
+        carriers.set(carrier, state.lastCast?.caster ?? carrier);
         return null;
       }
       const xp = XP_RE.exec(content);
@@ -775,9 +785,11 @@
         attacker = mechanicAttribution.attacker;
         spell = mechanicAttribution.spell;
       } else if (effectTag) {
-        const owner = state.effectOwners.get(effectTag.toLowerCase());
+        const owner = this.resolveEffectOwner(state, effectTag.toLowerCase(), target, {
+          creditCarrier: options.riposteFallback
+        });
         if (owner) {
-          attacker = owner.carrier === target ? owner.applier : owner.carrier;
+          attacker = owner;
         } else if (options.riposteFallback) {
           const caster = state.spellCasters.get(effectTag.toLowerCase());
           if (caster) {
@@ -796,6 +808,37 @@
         attacker = rootOwner;
       }
       return { attacker, spell, element };
+    }
+    /**
+     * Qui créditer pour un effet suivi (voir EffectCarriers) qui touche `target` — `null` si
+     * personne ne porte cet effet dans ce combat.
+     * - Porté par la cible elle-même (ex. Hachure, Marque eting) : celui qui le lui a appliqué.
+     * - Soin/armure (`creditCarrier: false`) porté par un tiers : celui qui a posé l'effet (ex.
+     *   « Marque unt » de l'Eniripsa, posée sur un allié, qui soigne ses voisins — le porteur n'y est
+     *   pour rien). Un effet que le porteur s'est appliqué lui-même revient au même.
+     * - Dégât (`creditCarrier: true`) porté par un tiers (ex. Enflammé) : ce porteur (le plus récent
+     *   s'ils sont plusieurs), qui inflige les dégâts à quelqu'un d'autre — SAUF si porteur et cible sont deux monstres et que
+     *   l'applicateur n'en est pas un : c'est alors un statut posé par un joueur sur un monstre qui
+     *   se propage à un autre monstre (ex. « Bombe collante » du Roublard, « Hémorragie » du Sram),
+     *   crédité au joueur. Bug réel corrigé le 2026-09-30 (combat Ignemikhal, 12 dégâts crédités à
+     *   un monstre sur `tests/logs/fr/fight_single-account_ignemikhal_protection-pourpre.log`).
+     */
+    resolveEffectOwner(state, effectKey, target, options) {
+      const carriers = state.effectOwners.get(effectKey);
+      if (!carriers) return null;
+      const onTarget = carriers.get(target);
+      if (onTarget !== void 0) return onTarget;
+      let carrier = null;
+      let applier = "";
+      for (const [name, appliedBy] of carriers) {
+        carrier = name;
+        applier = appliedBy;
+      }
+      if (carrier === null) return null;
+      if (!options.creditCarrier) return applier;
+      const monsters = state.monsterNames;
+      if (monsters.has(carrier) && monsters.has(target) && !monsters.has(applier)) return applier;
+      return carrier;
     }
     /**
      * Remonte la chaîne `summonOwners` jusqu'à son sommet (un nom qui n'est lui-même l'invocation de
