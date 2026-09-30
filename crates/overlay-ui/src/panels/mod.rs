@@ -26,6 +26,7 @@ pub mod personnages_tab;
 pub mod raccourcis_tab;
 pub mod recap;
 pub mod recipe_dialog;
+pub mod suivi_groups;
 pub mod suivi_tab;
 pub mod tile_button;
 pub mod tile_reorder;

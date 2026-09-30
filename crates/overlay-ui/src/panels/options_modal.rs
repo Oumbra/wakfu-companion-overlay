@@ -331,6 +331,13 @@ pub struct OptionsModalState {
     pub suivi_draft: Option<Vec<overlay_engine::WatchlistEntry>>,
     /// D'où vient la liste suivie, et si elle est modifiable — posé par l'hôte à l'ouverture.
     pub suivi_availability: suivi_tab::SuiviAvailability,
+    /// **Les groupes d'éléments suivis** (2026-09-30) — tous les groupes sauf la liste du groupe
+    /// choisi, qui est [`Self::suivi_draft`]. Voir `panels::suivi_groups`.
+    pub suivi_groups: crate::panels::suivi_groups::SuiviGroupsDraft,
+    /// **Case « Activer les groupes »** de la section « Suivi » de l'onglet « Paramètres »
+    /// (2026-09-30) — brouillon, comme les autres cases : pris en compte à « Valider ». Décochée,
+    /// l'onglet Suivi ne montre que le groupe par défaut.
+    pub suivi_groups_enabled: bool,
     /// Ce que l'onglet « Raccourcis » garde entre deux frames — recherche, case en écoute, dernier
     /// refus. **Pas les combinaisons** : celles-ci sont le brouillon ci-dessous.
     pub raccourcis: raccourcis_tab::RaccourcisTabState,
@@ -445,6 +452,12 @@ pub struct OptionsInitial {
     /// Les entrées suivies telles qu'elles étaient à l'ouverture — c'est elles que « Annuler »
     /// abandonne, et leur comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
     pub suivi: Option<Vec<overlay_engine::WatchlistEntry>>,
+    /// Les groupes tels qu'ils étaient à l'ouverture, liste du groupe choisi comprise
+    /// (`SuiviGroupsDraft::flushed`), et l'index du groupe choisi — même rôle que les champs
+    /// ci-dessus.
+    pub suivi_groups: (Vec<crate::panels::suivi_groups::GroupDraft>, usize),
+    /// La case « Activer les groupes » telle qu'elle était à l'ouverture.
+    pub suivi_groups_enabled: bool,
     pub chat: Option<ChatDraft>,
     /// Le roster tel qu'il était à l'ouverture — c'est lui que « Annuler » abandonne, et sa
     /// comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
@@ -507,6 +520,7 @@ impl OptionsModalState {
             mutes: self.mutes,
             countdown_toast: self.countdown_toast,
             completion: self.completion,
+            suivi_groups_enabled: self.suivi_groups_enabled,
             recap_resume: self.recap_resume,
             shortcuts: self.shortcuts.clone(),
             auto_update: self.auto_update,
@@ -540,6 +554,20 @@ impl OptionsModalState {
         OptionsModalAction::Validate(self.commit())
     }
 
+    /// Les groupes ont-ils changé depuis l'ouverture — un groupe créé, renommé, supprimé, édité,
+    /// ou un autre groupe choisi ?
+    pub fn suivi_groups_changed(&self) -> bool {
+        let Some(draft) = self.suivi_draft.as_ref() else {
+            return false;
+        };
+        let (groupes, choisi) = &self.initial.suivi_groups;
+        if groupes.is_empty() {
+            return false;
+        }
+        self.suivi_groups.selected != *choisi
+            || self.suivi_groups.flushed(draft, &self.suivi.retirees) != *groupes
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.path_input.trim() != self.initial.path.trim()
             || self.combat_always_visible != self.initial.combat_always_visible
@@ -553,6 +581,8 @@ impl OptionsModalState {
             || self.recap_resume != self.initial.recap_resume
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
+            || self.suivi_groups_enabled != self.initial.suivi_groups_enabled
+            || self.suivi_groups_changed()
             || self.chat_draft != self.initial.chat
             || self.personnages_draft != self.initial.personnages
             || self.shortcuts != self.initial.shortcuts
@@ -700,6 +730,10 @@ pub struct OptionsCommit {
     /// Ce que devient un suivi complété — même trajet que `countdown_toast` : enregistré dans la
     /// config locale (`config::OverlayConfig::set_completion`) et gardé en vigueur par l'hôte.
     pub completion: suivi_tab::CompletionSettings,
+    /// État de la case « Activer les groupes » — ce que l'hôte persiste
+    /// (`config::OverlayConfig::suivi_groups_enabled`). Les groupes eux-mêmes partent par
+    /// `main.rs::commit_suivi`, avec la liste suivie.
+    pub suivi_groups_enabled: bool,
     /// La reprise de la session du Récap ([`crate::recap_session::ResumeSettings`]) — ce que
     /// l'hôte persiste (`config::OverlayConfig::set_recap_resume`) et pose sur sa session
     /// (`recap_session::RecapSession::set_resume_settings`).
@@ -870,6 +904,14 @@ pub fn show(
             let mut vide = Vec::new();
             let availability = state.suivi_availability;
             let entries = state.suivi_draft.as_mut().unwrap_or(&mut vide);
+            // Groupes désactivés dans le brouillon : l'onglet revient au groupe par défaut, le seul
+            // qu'il montre alors — voir la case « Activer les groupes ».
+            if !state.suivi_groups_enabled {
+                state
+                    .suivi_groups
+                    .select(0, entries, &mut state.suivi.retirees);
+                state.suivi.group_row = Default::default();
+            }
             suivi_action = suivi_tab::show(
                 ui,
                 panel,
@@ -882,6 +924,9 @@ pub fn show(
                     icons: ctx.icons,
                     availability,
                     enabled: &mut state.features.suivi,
+                    groups: state
+                        .suivi_groups_enabled
+                        .then_some(&mut state.suivi_groups),
                 },
             );
             return;
@@ -1373,6 +1418,21 @@ pub fn show(
                     .log_name("options-suivi-animation"),
                 );
             });
+            // **Les groupes d'éléments suivis** (2026-09-30, demande utilisateur) : une option,
+            // décochée par défaut. Cochée, l'onglet Suivi gagne sa ligne « Groupe » ; décochée, il
+            // n'édite que le groupe par défaut et les autres groupes sont conservés tels quels.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.add(
+                design::checkbox(&mut state.suivi_groups_enabled, "Activer les groupes")
+                    .enabled(state.features.suivi)
+                    .tooltip(
+                        "Permet de préparer plusieurs listes d'éléments suivis et de passer de \
+                         l'une à l'autre depuis l'onglet Suivi, sans perdre les compteurs. \
+                         Décochée, seul le groupe par défaut est affiché ; les autres groupes \
+                         sont conservés.",
+                    )
+                    .log_name("options-suivi-groupes"),
+            );
 
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Alertes"));
@@ -1916,6 +1976,7 @@ mod tests {
                 mutes: AlertMutes::default(),
                 countdown_toast: suivi_tab::CountdownToastSettings::default(),
                 completion: suivi_tab::CompletionSettings::default(),
+                suivi_groups_enabled: false,
                 recap_resume: ResumeSettings::default(),
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,

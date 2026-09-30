@@ -193,6 +193,8 @@ fn harnais(p: Planche) -> Harness<'static> {
             // Le champ de durée que cette planche ne montre pas : il est peint dans l'onglet
             // « Paramètres », section « Suivi » (`panels::notifications`).
             duration_input: String::new(),
+            // Les groupes sont désactivés sur ces planches : aucune ligne « Groupe ».
+            group_row: Default::default(),
         },
         suivi_draft: Some(entrees()),
         suivi_availability: p.availability,

@@ -65,7 +65,7 @@ use overlay_engine::{
 };
 
 use crate::design::{self, ButtonSize, ButtonVariant, DsIcon, SlotFrame};
-use crate::panels::{bulk_select, feature_switch, notifications, tile_reorder};
+use crate::panels::{bulk_select, feature_switch, notifications, suivi_groups, tile_reorder};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -318,6 +318,8 @@ pub struct SuiviTabState {
     /// elle vit ici, avec le reste de ce que l'onglet du même nom garde entre deux frames, comme
     /// `chat_tab::ChatTabState::duration_input` pour la carte de chat.
     pub duration_input: String,
+    /// Ce que la ligne « Groupe » garde entre deux frames — voir `panels::suivi_groups`.
+    pub group_row: suivi_groups::GroupRowState,
 }
 
 impl Default for SuiviTabState {
@@ -332,6 +334,7 @@ impl Default for SuiviTabState {
             retirees: Vec::new(),
             recipe: None,
             duration_input: String::new(),
+            group_row: Default::default(),
         }
     }
 }
@@ -395,6 +398,10 @@ pub struct SuiviTabContext<'a> {
     /// contenu sous la case est grisé et inerte.
     pub enabled: &'a mut bool,
     pub availability: SuiviAvailability,
+    /// **Les groupes d'éléments suivis** (2026-09-30) — `Some` quand la case « Activer les
+    /// groupes » de l'onglet « Paramètres » est cochée (dans le brouillon de la fenêtre) : la ligne
+    /// « Groupe » est alors peinte sous « Activer le suivi ». Voir `panels::suivi_groups`.
+    pub groups: Option<&'a mut suivi_groups::SuiviGroupsDraft>,
 }
 
 /// Ce que l'utilisateur vient de demander et que l'onglet ne sait pas faire lui-même.
@@ -471,6 +478,30 @@ pub fn show(
         "suivi.activer",
     );
 
+    // **La ligne « Groupe »**, avant le formulaire : le groupe se choisit d'abord, et tout ce qui
+    // suit — formulaire, recherche, liste — s'y applique. Pas pendant une lecture en vol : la
+    // liste du groupe affiché n'est pas encore là.
+    if ctx.availability == SuiviAvailability::Ready {
+        if let Some(groups) = ctx.groups.as_deref_mut() {
+            let avant = groups.selected;
+            suivi_groups::row(
+                ui,
+                width,
+                groups,
+                &mut state.group_row,
+                ctx.entries,
+                &mut state.retirees,
+            );
+            if groups.selected != avant {
+                // Une autre liste : la sélection multiple et la saisie en cours portaient sur
+                // l'ancienne.
+                state.select_mode = false;
+                state.selected.clear();
+                state.search.clear();
+            }
+            ui.add_space(FORM_ROW_GAP);
+        }
+    }
     add_form(ui, state, width);
     ui.add_space(SECTION_GAP * 0.75);
     if let Some(demande) = add_field(ui, state, ctx, width) {

@@ -81,7 +81,7 @@ use overlay_ui::combat_placement;
 use overlay_ui::config;
 use overlay_ui::engine_thread::{
     spawn_engine_thread, EngineCommand, EngineHandles, SharedAlertProfile, SharedChatFilters,
-    SharedRosterDraft, WatchlistCompleted,
+    SharedRosterDraft, WatchlistCompleted, WatchlistDefinitions,
 };
 use overlay_ui::frame::{recreate_surface, render, sync_hit_test, GpuState};
 use overlay_ui::game_servers::GameServers;
@@ -98,6 +98,7 @@ use overlay_ui::panels::login::{self, LoginState};
 use overlay_ui::panels::notifications::AlertMutes;
 use overlay_ui::panels::options_modal::{self, OptionsModalAction, OptionsModalState};
 use overlay_ui::panels::personnages_tab::{PersonnagesAvailability, PersonnagesTabState};
+use overlay_ui::panels::suivi_groups;
 use overlay_ui::panels::suivi_tab;
 use overlay_ui::panels::watchlist::WatchlistToast;
 use overlay_ui::portraits::PortraitAtlas;
@@ -681,6 +682,16 @@ struct App {
     /// Par où les complétions arrivent du thread Engine — voir
     /// [`WatchlistCompleted`].
     completions_rx: mpsc::Receiver<WatchlistCompleted>,
+    /// Par où les définitions vivantes du Suivi arrivent du thread Engine — voir
+    /// [`WatchlistDefinitions`] ; recopiées dans [`Self::watchlist_groups`] par
+    /// `tick_watchlist_definitions`.
+    watchlist_definitions_rx: mpsc::Receiver<WatchlistDefinitions>,
+    /// **Les groupes d'éléments suivis EN VIGUEUR** (2026-09-30) — lus de la config locale au
+    /// démarrage, réécrits à la validation de l'onglet Suivi et chaque fois que la liste affichée
+    /// change (voir `tick_watchlist_definitions`).
+    watchlist_groups: config::WatchlistGroupsConfig,
+    /// La case « Activer les groupes » EN VIGUEUR — voir `config::OverlayConfig::suivi_groups_enabled`.
+    suivi_groups_enabled: bool,
     /// **L'entrée dont la réinitialisation attend confirmation** (2026-09-18) — posée à
     /// l'ouverture de `OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)`, reprise à la
     /// réponse. Ici et non dans la cible : `OverlayKind` est `Copy` (voir
@@ -1012,6 +1023,12 @@ struct AppState {
     completion: suivi_tab::CompletionSettings,
     /// Voir `App::completions_rx` — le canal créé par `main`, avant le thread Engine.
     completions_rx: mpsc::Receiver<WatchlistCompleted>,
+    /// Voir `App::watchlist_definitions_rx` — même origine.
+    watchlist_definitions_rx: mpsc::Receiver<WatchlistDefinitions>,
+    /// Voir `App::watchlist_groups` — lus de la config au démarrage.
+    watchlist_groups: config::WatchlistGroupsConfig,
+    /// Voir `App::suivi_groups_enabled` — lue de la config au démarrage.
+    suivi_groups_enabled: bool,
     /// Voir `App::recap_session` — relue du disque au démarrage, avec le réglage de la config.
     recap_session: RecapSession,
     /// Voir `App::recap_position` — relue du disque au démarrage (`config::OverlayConfig::
@@ -1069,6 +1086,9 @@ impl App {
             countdown_toast,
             completion,
             completions_rx,
+            watchlist_definitions_rx,
+            watchlist_groups,
+            suivi_groups_enabled,
             recap_session,
             recap_position,
             click_through_position,
@@ -1109,6 +1129,9 @@ impl App {
             watchlist_selection: panels::watchlist::WatchlistSelection::default(),
             watchlist_completions: Default::default(),
             completions_rx,
+            watchlist_definitions_rx,
+            watchlist_groups,
+            suivi_groups_enabled,
             watchlist_reset_pending: None,
             watchlist_toast,
             alert_profile,
@@ -3315,6 +3338,13 @@ impl App {
             )
         };
 
+        // **Les groupes d'éléments suivis** (2026-09-30) — voir `suivi_groups::open_draft`.
+        let (suivi_groups, suivi_groups_initial) = suivi_groups::open_draft(
+            &self.watchlist_groups,
+            self.suivi_groups_enabled,
+            suivi_draft.as_deref(),
+        );
+
         // **Le compte est relu à l'OUVERTURE de la fenêtre**, pas seulement au démarrage
         // (2026-09-13). Sans ça, une liste modifiée depuis le site n'arrivait qu'au prochain
         // lancement — et le brouillon partait d'un état périmé qu'il écrasait à la validation, la
@@ -3424,6 +3454,8 @@ impl App {
                 path: self.log_path.display().to_string(),
                 alerts: alerts_draft.clone(),
                 suivi: suivi_draft.clone(),
+                suivi_groups: suivi_groups_initial,
+                suivi_groups_enabled: self.suivi_groups_enabled,
                 chat: chat_draft.clone(),
                 personnages: personnages_draft.clone(),
                 combat_always_visible: self.combat_always_visible,
@@ -3455,6 +3487,8 @@ impl App {
             },
             suivi_draft,
             suivi_availability,
+            suivi_groups,
+            suivi_groups_enabled: self.suivi_groups_enabled,
         });
         overlay.next_redraw_at = Some(std::time::Instant::now());
         self.windows.insert(overlay.window.id(), overlay);
@@ -3739,25 +3773,48 @@ impl App {
         // puis recréée y figure des deux côtés, et c'est la seule chose qui la distingue d'une
         // entrée jamais touchée (voir `SuiviTabState::retirees`).
         let retirees = state.suivi.retirees.clone();
-        // Rien n'a bougé : ne pas réécrire une clé pour rien, et surtout ne pas repousser son
-        // horodatage — le « dernier écrivain gagne » du serveur ferait alors perdre une
-        // modification faite depuis le site entre-temps. Une entrée supprimée puis recréée à
-        // l'identique laisse bien la liste inchangée, mais son compteur, lui, doit repartir : elle
-        // n'est pas « rien n'a bougé ».
-        if state.initial.suivi.as_ref() == Some(&draft) && retirees.is_empty() {
-            return;
-        }
+        // Les groupes (2026-09-30) : la liste affichée, les groupes gelés édités, un changement de
+        // groupe, les suppressions — voir `suivi_groups::plan_commit`.
+        let plan = suivi_groups::plan_commit(
+            &self.watchlist_groups,
+            self.suivi_groups_enabled,
+            &state.suivi_groups,
+            &draft,
+            &retirees,
+            state.suivi_groups_enabled,
+            &state.initial.suivi_groups.0,
+        );
         tracing::info!(
             entry_count = draft.len(),
             removed_count = retirees.len(),
+            command_count = plan.commands.len(),
             "[options] liste de suivi validée"
         );
-        let _ = self
-            .settings_tx
-            .send(EngineCommand::SetWatchlistDefinitions {
-                definitions: draft,
-                retirees,
-            });
+        for command in plan.commands {
+            let _ = self.settings_tx.send(command);
+        }
+        if let Some((groupes, actives)) = plan.config {
+            self.watchlist_groups = groupes;
+            self.suivi_groups_enabled = actives;
+            self.persist_config();
+        }
+    }
+
+    /// **Recopie la liste affichée dans son groupe** (2026-09-30) — voir
+    /// `engine_thread::WatchlistDefinitions`. C'est ce qui garde la config des groupes d'accord
+    /// avec ce que le bandeau montre, quel que soit le chemin par lequel la liste a bougé (site,
+    /// bandeau, retrait d'un élément complété). Le fichier n'est réécrit que si quelque chose a
+    /// changé.
+    fn tick_watchlist_definitions(&mut self) {
+        let mut changed = false;
+        while let Ok(WatchlistDefinitions { group, entries }) =
+            self.watchlist_definitions_rx.try_recv()
+        {
+            changed |= self.watchlist_groups.set_definitions(&group, &entries);
+        }
+        if changed {
+            self.persist_config();
+        }
     }
 
     /// Résout les ingrédients d'une recette pour la fenêtre de l'onglet « Suivi » — sur un thread,
@@ -4088,6 +4145,8 @@ impl App {
         saved.combat_collapsed = self.combat_collapsed;
         saved.set_features(self.features);
         saved.set_alert_mutes(self.alert_mutes);
+        saved.suivi_groups_enabled = self.suivi_groups_enabled;
+        saved.watchlist_groups = self.watchlist_groups.clone();
         config::save(&saved);
     }
 
@@ -5693,6 +5752,7 @@ impl ApplicationHandler<UserEvent> for App {
         // **Les suivis qui viennent d'aboutir**, avant tout le reste du tick : leur retrait ne
         // dépend ni d'une fenêtre visible ni d'un rendu (voir `tick_watchlist_completions`).
         self.tick_watchlist_completions();
+        self.tick_watchlist_definitions();
         // Hotkey global : thread OS dédié, sondé ici sans bloquer (voir S1). `while let` (pas un
         // simple `if`) : chaque appui PHYSIQUE produit deux événements (`Pressed` PUIS `Released`,
         // voir `HotKeyState`) — les deux peuvent être en file au même tick à ~20 Hz. Filtré sur
@@ -6157,6 +6217,8 @@ fn main() {
     // **Le canal des complétions** (2026-09-17) — voir `engine_thread::WatchlistCompleted` sur
     // pourquoi un canal et pas un `ArcSwap` : une complétion perdue est une entrée jamais retirée.
     let (completions_tx, completions_rx) = mpsc::channel();
+    // **Le canal des définitions du Suivi** (2026-09-30) — voir `engine_thread::WatchlistDefinitions`.
+    let (watchlist_definitions_tx, watchlist_definitions_rx) = mpsc::channel();
     spawn_engine_thread(
         log_path.clone(),
         EngineHandles {
@@ -6164,6 +6226,11 @@ fn main() {
             watchlist: Arc::clone(&watchlist),
             watchlist_toast: Arc::clone(&watchlist_toast),
             completions: completions_tx,
+            watchlist_definitions: watchlist_definitions_tx,
+            watchlist_group: saved_config
+                .watchlist_groups
+                .effective_active(saved_config.suivi_groups_enabled)
+                .to_string(),
             alert_profile: Arc::clone(&alert_profile),
             chat_filters: Arc::clone(&chat_filters),
             roster: Arc::clone(&roster),
@@ -6213,6 +6280,9 @@ fn main() {
         countdown_toast: saved_config.countdown_toast(),
         completion: saved_config.completion(),
         completions_rx,
+        watchlist_definitions_rx,
+        watchlist_groups: saved_config.watchlist_groups.clone(),
+        suivi_groups_enabled: saved_config.suivi_groups_enabled,
         // À côté des combats en cours (`fight-*.json`) — voir la doc de module de
         // `recap_session` pour ce qui y est écrit et quand.
         recap_session: RecapSession::load(

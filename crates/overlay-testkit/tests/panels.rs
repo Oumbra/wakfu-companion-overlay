@@ -2937,6 +2937,7 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Idem pour les deux cases de complétion de la même section (2026-09-17) :
                 // jamais touchées, donc emportées actives — le défaut demandé.
                 completion: overlay_ui::panels::suivi_tab::CompletionSettings::default(),
+                suivi_groups_enabled: false,
                 // Idem pour la ligne « Reprendre la session après une pause » de la section
                 // « Recap » (2026-09-17).
                 recap_resume: overlay_ui::recap_session::ResumeSettings::default(),
@@ -3496,6 +3497,15 @@ fn options_parametres_section_suivi_sans_retrait() {
     let mut etat = parametres_avec_notifications();
     etat.completion.remove = false;
     capture_section_suivi("options_parametres_section_suivi_sans_retrait", etat);
+}
+
+/// **La case « Activer les groupes » cochée** (2026-09-30) — dernière case de la section Suivi,
+/// sans retrait, grisée avec le reste de la section quand le Suivi est éteint.
+#[test]
+fn options_parametres_section_suivi_groupes() {
+    let mut etat = parametres_avec_notifications();
+    etat.suivi_groups_enabled = true;
+    capture_section_suivi("options_parametres_section_suivi_groupes", etat);
 }
 
 fn capture_section_suivi(name: &str, options_state: panels::options_modal::OptionsModalState) {
@@ -5231,6 +5241,154 @@ fn capture_onglet_suivi(
         harness.run();
     }
     harness.snapshot(nom);
+}
+
+/// **Les groupes d'éléments suivis** (2026-09-30) — l'onglet « Suivi » avec la case « Activer les
+/// groupes » cochée : la ligne « Groupe » sous « Activer le suivi ».
+///
+/// `choisi` est l'index du groupe affiché (0 = défaut, 1 = « Métier Paysan ») ; `renommage` ouvre
+/// le champ de renommage sur ce libellé.
+fn capture_onglet_suivi_groupes(nom: &str, choisi: usize, renommage: Option<&str>) {
+    overlay_ui::build_info::freeze_for_snapshots();
+    use overlay_ui::panels::suivi_groups::{GroupDraft, SuiviGroupsDraft};
+    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
+
+    let mut groupes = SuiviGroupsDraft::default();
+    groupes.groups.push(GroupDraft {
+        id: "g1".into(),
+        label: Some("Métier Paysan".into()),
+        entries: entrees_de_suivi().into_iter().take(3).collect(),
+        retirees: Vec::new(),
+    });
+    groupes.groups.push(GroupDraft {
+        id: "g2".into(),
+        label: Some("Donjon Bworks".into()),
+        entries: Vec::new(),
+        retirees: Vec::new(),
+    });
+    let mut entries = entrees_de_suivi();
+    let mut retirees = Vec::new();
+    groupes.select(choisi, &mut entries, &mut retirees);
+
+    let mut suivi = SuiviTabState {
+        mode: overlay_ui::panels::suivi_tab::AddMode::Goal,
+        target: 250,
+        ..Default::default()
+    };
+    if let Some(libelle) = renommage {
+        suivi.group_row.rename = Some(libelle.to_string());
+    }
+    let mut options_state = OptionsModalState {
+        suivi,
+        suivi_draft: Some(entries),
+        suivi_availability: SuiviAvailability::Ready,
+        suivi_groups: groupes,
+        suivi_groups_enabled: true,
+        tab: OptionsTab::Suivi,
+        ..Default::default()
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot(nom);
+}
+
+/// Groupe par défaut affiché : « Renommer » et « Supprimer » grisés, seul « Nouveau » répond.
+#[test]
+fn options_onglet_suivi_groupes_defaut() {
+    capture_onglet_suivi_groupes("options_suivi_groupes_defaut", 0, None);
+}
+
+/// Groupe nommé affiché : ses trois éléments, et les trois boutons — la corbeille sur le socle
+/// rouge du bouton `Danger`.
+#[test]
+fn options_onglet_suivi_groupes_nomme() {
+    capture_onglet_suivi_groupes("options_suivi_groupes_nomme", 1, None);
+}
+
+/// Renommage en cours : la liste devient un champ, suivi de la coche et de la flèche d'annulation.
+#[test]
+fn options_onglet_suivi_groupes_renommage() {
+    capture_onglet_suivi_groupes("options_suivi_groupes_renommage", 1, Some("Métier Paysan"));
+}
+
+/// **La case « Activer les groupes » décochée ne montre pas la ligne**, même quand un groupe nommé
+/// était choisi : l'onglet revient au groupe par défaut, et sa liste est celle qui s'affiche.
+#[test]
+fn options_onglet_suivi_groupes_desactives_reviennent_au_defaut() {
+    use overlay_ui::panels::suivi_groups::{GroupDraft, SuiviGroupsDraft};
+
+    let mut groupes = SuiviGroupsDraft::default();
+    groupes.groups.push(GroupDraft {
+        id: "g1".into(),
+        label: Some("Métier Paysan".into()),
+        entries: Vec::new(),
+        retirees: Vec::new(),
+    });
+    let mut entries = entrees_de_suivi();
+    let mut retirees = Vec::new();
+    groupes.select(1, &mut entries, &mut retirees);
+    let mut options_state = OptionsModalState {
+        suivi_draft: Some(entries),
+        suivi_groups: groupes,
+        suivi_groups_enabled: false,
+        tab: OptionsTab::Suivi,
+        ..Default::default()
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
+                },
+            );
+            assert_eq!(options_state.suivi_groups.selected, 0);
+            assert_eq!(
+                options_state.suivi_draft.as_ref().map(Vec::len),
+                Some(entrees_de_suivi().len())
+            );
+        });
+    harness.run();
 }
 
 /// **L'onglet « Suivi »** — la liste réduite à ses emplacements d'objet, et son formulaire d'ajout.
