@@ -614,6 +614,20 @@ pub const SELECT_ROW_HEIGHT: f32 = 28.0;
 /// Deux pixels de plus que sur le socle, et c'est bien ce que la capture montre.
 pub const SELECT_ROW_PADDING_X: f32 = 12.0;
 
+/// Hauteur de la rangée du champ de recherche en tête d'une liste dépliée (2026-09-30, voir
+/// `design::components::select`, « La recherche dans la liste ») — le champ au gabarit
+/// [`INPUT_SEARCH_HEIGHT`] (28), avec [`SELECT_SEARCH_INSET`] au-dessus et au-dessous.
+pub const SELECT_SEARCH_ROW_HEIGHT: f32 = 36.0;
+
+/// Retrait du champ de recherche dans sa rangée — 6 px sur les côtés, 4 en haut et en bas.
+pub const SELECT_SEARCH_INSET: egui::Vec2 = egui::vec2(6.0, 4.0);
+
+/// Nombre d'entrées visibles au-delà duquel une liste à recherche défile.
+pub const SELECT_SEARCH_MAX_ROWS: usize = 8;
+
+/// Texte de la ligne « Aucun résultat » — le texte des entrées, éteint : ce n'est pas une entrée.
+pub const SELECT_EMPTY_TEXT: Color32 = Color32::from_rgb(0xD8, 0xCC, 0xAE);
+
 /// Fond de la liste dépliée — uniforme, aucun dégradé (contrairement au socle).
 pub const SELECT_LIST_FILL: Color32 = Color32::from_rgb(0x67, 0x5D, 0x46);
 
@@ -819,6 +833,10 @@ pub const SCROLLBAR_OUTER_MARGIN: f32 = 14.0;
 /// `button-icon-first-plan.png`, leurs `-hover` et `button-icon-disabled.png`, toutes 36 × 36).
 /// C'est aussi la taille à laquelle le jeu pose son bouton de réinitialisation.
 pub const ICON_BUTTON_SIZE: f32 = 36.0;
+
+/// Glyphe d'un bouton icône destructif (`IconButton::danger`, 2026-09-30) — blanc, comme le
+/// libellé du bouton texte `Danger` posé sur le même rouge.
+pub const ICON_TINT_DANGER: Color32 = Color32::WHITE;
 
 /// Teinte d'une icône au repos — `#c5cbcc`, mesurée sur `menu-button-icon-first-plan.png`, pas
 /// devinée. Les icônes du design system étant blanc pur avec alpha, une simple teinte suffit à les

@@ -2777,3 +2777,112 @@ enum GalleryTab {
     Avance,
     Indisponible,
 }
+
+/// **La liste déroulante à recherche, et le bouton icône destructif** (2026-09-30) — les deux
+/// pièces que les groupes d'éléments suivis ont ajoutées au design system.
+///
+/// Leur propre planche, pour la même raison que `galerie_de_la_saisie_assistee` : la galerie
+/// principale est pleine.
+///
+/// - **Liste à recherche** : sous le seuil (4 entrées), la liste de toujours ; au seuil (5) et
+///   au-delà, le champ de recherche en tête ; une saisie qui filtre ; une saisie sans résultat ; et
+///   au-delà de huit entrées, une liste qui défile.
+/// - **Bouton icône `danger`** : repos, survol, désactivé, à côté du même glyphe sans la variante.
+#[test]
+fn galerie_select_recherche_et_bouton_danger() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(1080.0, 560.0))
+        .build_ui(|ui| {
+            overlay_ui::style::apply(ui.ctx());
+            egui::Frame::NONE
+                .fill(PAGE_FILL)
+                .inner_margin(16.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    section_select_recherche_et_danger(ui);
+                });
+        });
+    harness.run();
+    harness.snapshot("design_gallery_select_recherche_danger");
+}
+
+fn section_select_recherche_et_danger(ui: &mut egui::Ui) {
+    ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+    const GROUPES: [&str; 10] = [
+        "Groupe par défaut",
+        "Métier Paysan",
+        "Donjon Bworks",
+        "Donjon Tofus",
+        "Récolte de bois",
+        "Almanax",
+        "Quête de Pandala",
+        "Succès Chafer",
+        "Métier Mineur",
+        "Donjon Craqueleurs",
+    ];
+
+    heading(
+        ui,
+        "Bouton icône — variante danger",
+        "Le socle rouge du bouton Danger (button-danger.png, -hover) peint en 9-slice à 36 × 36, glyphe blanc. Désactivé, il reprend le socle éteint de son contexte. À gauche, le même glyphe sans la variante.",
+    );
+    ui.horizontal(|ui| {
+        ui.add(design::icon_button(DsIcon::Delete).context(IconContext::Panel));
+        ui.add_space(20.0);
+        ui.add(
+            design::icon_button(DsIcon::Delete)
+                .context(IconContext::Panel)
+                .danger(true)
+                .log_name("galerie.danger"),
+        );
+        ui.add(
+            design::icon_button(DsIcon::Delete)
+                .context(IconContext::Panel)
+                .danger(true)
+                .preview_state(IconButtonState::Hovered)
+                .log_name("galerie.danger-survol"),
+        );
+        ui.add(
+            design::icon_button(DsIcon::Delete)
+                .context(IconContext::Panel)
+                .danger(true)
+                .enabled(false)
+                .preview_state(IconButtonState::Disabled)
+                .log_name("galerie.danger-off"),
+        );
+    });
+
+    heading(
+        ui,
+        "Liste déroulante — recherche à partir de 5 entrées",
+        "De gauche à droite : 4 entrées (pas de champ), 8 entrées, saisie « donj », saisie sans résultat, 10 entrées (la liste défile au-delà de 8).",
+    );
+    ui.horizontal_top(|ui| {
+        for (n, requete, nom) in [
+            (4_usize, "", "sous-seuil"),
+            (8, "", "seuil"),
+            (8, "donj", "filtre"),
+            (8, "xyz", "vide"),
+            (10, "", "defile"),
+        ] {
+            ui.vertical(|ui| {
+                ui.set_width(190.0);
+                let mut choisi = 1_usize;
+                let mut select = design::select(&mut choisi)
+                    .width(186.0)
+                    .searchable_from(5)
+                    .search_placeholder("Rechercher un groupe…")
+                    .empty_text("Aucun groupe")
+                    .preview_open(true)
+                    .preview_query(requete)
+                    .log_name(format!("galerie.select-recherche-{nom}"));
+                for (i, groupe) in GROUPES.iter().take(n).enumerate() {
+                    select = select.option(i, *groupe);
+                }
+                ui.add(select);
+            });
+            ui.add_space(8.0);
+        }
+    });
+    ui.add_space(36.0 + 8.0 * 28.0 + 10.0);
+}
