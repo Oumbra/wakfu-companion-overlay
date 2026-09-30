@@ -114,15 +114,15 @@ use overlay_ui::startup::StartupProgress;
 use overlay_ui::turn_watch;
 use overlay_ui::ui_icons::{self, UiIcons};
 use overlay_ui::watchlist_placement;
+use overlay_ui::window_style_guard;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
-    GetWindowThreadProcessId, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GW_HWNDPREV,
-    HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    GetWindowThreadProcessId, SetWindowPos, GWL_EXSTYLE, GW_HWNDPREV, HWND_NOTOPMOST, HWND_TOPMOST,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_TOPMOST,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -2195,7 +2195,17 @@ impl App {
             // voir `sync_panel_visibility`) : demandé dès les attributs plutôt que par un
             // `set_visible(false)` juste après la création, qui la laisserait clignoter à l'écran
             // le temps d'une frame. Toujours `true` pour Suivi et Options.
-            .with_visible(visible);
+            .with_visible(visible)
+            // **Jamais d'activation par `winit` pour un bandeau** (2026-09-30) : `apply_diff`
+            // rappelle `ShowWindow` à CHAQUE changement de drapeaux d'une fenêtre visible
+            // (bascule interactif, réaffichage), en `SW_SHOW` — qui active la fenêtre — sauf si
+            // elle a été créée inactive, auquel cas c'est `SW_SHOWNOACTIVATE` pour toute sa vie.
+            // Options et la confirmation prennent le focus exprès (`focus_window`), elles gardent
+            // le comportement par défaut.
+            .with_active(matches!(
+                kind,
+                OverlayKind::Options | OverlayKind::ResetConfirm(_)
+            ));
         #[cfg(target_os = "windows")]
         let attrs = attrs
             .with_skip_taskbar(true)
@@ -2335,24 +2345,19 @@ impl App {
     }
 
     /// `WS_EX_NOACTIVATE`/`WS_EX_TOOLWINDOW`, non exposés par `winit` — voir S1 (§6.2 du plan).
+    /// **Verrouillés**, pas seulement posés (2026-09-30) : `winit` réécrit tout le style étendu à
+    /// chaque `set_cursor_hittest`/`set_visible` et les effaçait, ce qui rendait les bandeaux
+    /// activables et faisait tomber Alt+Échap dessus — voir `overlay_ui::window_style_guard`.
     fn apply_extended_styles(hwnd: HWND) {
-        unsafe {
-            let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            let new_style = current | (WS_EX_NOACTIVATE.0 as isize) | (WS_EX_TOOLWINDOW.0 as isize);
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
-        }
+        window_style_guard::install(hwnd, window_style_guard::OVERLAY);
     }
 
     /// Variante SANS `WS_EX_NOACTIVATE` — voir l'appelant (`create_overlay_window`, cas
     /// `OverlayKind::Options`, 2026-09-08) : cette fenêtre doit pouvoir recevoir le focus clavier
     /// pour éditer son champ de chemin, contrairement à Combat/Suivi. `WS_EX_TOOLWINDOW` seul
-    /// suffit à la garder hors barre des tâches/alt-tab.
+    /// suffit à la garder hors barre des tâches/alt-tab — verrouillé comme ci-dessus.
     fn apply_extended_styles_focusable(hwnd: HWND) {
-        unsafe {
-            let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            let new_style = current | (WS_EX_TOOLWINDOW.0 as isize);
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
-        }
+        window_style_guard::install(hwnd, window_style_guard::FOCUSABLE);
     }
 
     fn hwnd_of(window: &Window) -> HWND {
