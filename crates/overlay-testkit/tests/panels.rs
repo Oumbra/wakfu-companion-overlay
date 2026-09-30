@@ -7278,6 +7278,10 @@ fn carte_volet_parametres_champs_inactifs() {
         suivi_auto_close: false,
         alerts_available: false,
         chat_auto_close: false,
+        // Les jauges de volume ont la même branche inactive (2026-09-30).
+        turn_notification_muted: true,
+        suivi_muted: true,
+        chat_muted: true,
         ..Default::default()
     };
     let (mut harness, measured) = login_card_harness(
@@ -7293,6 +7297,51 @@ fn carte_volet_parametres_champs_inactifs() {
     );
     harness.run();
     assert_eq!(measured.get(), CARTE_A_PROPOS_HAUTEUR);
+}
+
+/// **Les jauges de volume de la Carte** (2026-09-30) — une ligne sous chaque bouton d'essai,
+/// dans le style de la Carte. Quatre valeurs différentes, le Chat coupé pour montrer la jauge
+/// estompée (et faire passer sa branche inactive, qui résout sa police hors de `fonts_mut` — voir
+/// `carte_volet_parametres_champs_inactifs`). Défilé pour poser Combat à Chat à l'écran.
+#[test]
+fn carte_volet_parametres_volumes() {
+    let settings = overlay_ui::panels::login::CardSettings {
+        volumes: overlay_ui::alert_sound::AlertVolumes {
+            turn: 80,
+            suivi: 100,
+            alertes: 65,
+            chat: 40,
+        },
+        chat_muted: true,
+        ..Default::default()
+    };
+    let (mut harness, measured) = login_card_harness(
+        AuthStatus::Connected,
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::Settings,
+        None,
+        Some(true),
+        Some(settings),
+        CARTE_A_PROPOS_HAUTEUR,
+    );
+    harness.run();
+    harness.event(egui::Event::PointerMoved(egui::pos2(200.0, 400.0)));
+    harness.run();
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -300.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.step();
+    harness.event(egui::Event::PointerGone);
+    for _ in 0..12 {
+        harness.run();
+    }
+    assert_eq!(measured.get(), CARTE_A_PROPOS_HAUTEUR);
+    harness.snapshot("carte_parametres_volumes");
 }
 
 /// **L'écran « Compte connecté »** (2026-09-22) — il n'existait pas : `AuthStatus::Connected`

@@ -2689,6 +2689,14 @@ mod linux_main {
             self.turn_notification = settings.turn_notification;
             self.turn_notification_muted = settings.turn_notification_muted;
 
+            // Les quatre volumes (2026-09-30) — posés sur le module audio, comme à la validation de la
+            // fenêtre Options.
+            let volumes = settings.volumes.clamped();
+            if volumes != self.alert_volumes {
+                self.alert_volumes = volumes;
+                overlay_ui::alert_sound::set_volumes(self.alert_volumes);
+            }
+
             let mut mutes = self.alert_mutes;
             mutes.suivi = settings.suivi_muted;
             mutes.chat = settings.chat_muted;
@@ -3400,6 +3408,7 @@ mod linux_main {
                             chat_muted: self.alert_mutes.chat,
                             chat_auto_close: !self.chat_toast.manual_close,
                             chat_seconds: self.chat_toast.duration_seconds,
+                            volumes: self.alert_volumes,
                             start_with_os: overlay_ui::autostart::is_enabled(),
                             log_path: self.log_path.display().to_string(),
                             verbose_log: self.verbose_log,
