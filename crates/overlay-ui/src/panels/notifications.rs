@@ -45,6 +45,16 @@
 //! son grisée sous une notification de tour décochée (`panels::options_modal`) : un réglage qui
 //! n'a plus d'effet se voit avant le clic.
 //!
+//! ## Le volume suit le bouton d'essai
+//!
+//! Depuis le 2026-09-30 (demande utilisateur), chaque bouton d'essai est suivi d'une **jauge de
+//! volume** ([`volume_control`]) : un curseur gradué, rempli jusqu'à la poignée, et un champ
+//! numérique de 1 à 100 suivi de « % ». **Un volume par section** : les quatre sons n'ont pas le
+//! même niveau, et chacun n'est pas sensible de la même façon aux aigus et aux graves.
+//!
+//! Elle obéit à la même règle que le bouton : **grisée quand le son est coupé**, sans perdre sa
+//! valeur. Pas de 0 % : un volume nul serait une seconde sourdine, qui contredirait la case.
+//!
 //! ## Pas de fond de ligne sous la fermeture automatique
 //!
 //! Le couple case + durée était posé sur un pavé arrondi plus sombre (`#26282b`, l'idiome des
@@ -56,7 +66,8 @@
 use egui::{Color32, RichText, Vec2};
 use overlay_engine::AlertProfile;
 
-use crate::design::{self, DsIcon, IconContext, InputSize};
+use crate::alert_sound::{clamp_volume, VOLUME_MAX, VOLUME_MIN};
+use crate::design::{self, DsIcon, IconContext, InputSize, SliderMark};
 
 /// **Les sourdines, ensemble** — Suivi et Chat.
 ///
@@ -96,6 +107,33 @@ pub const BODY_FONT_SIZE: f32 = 15.0;
 /// Largeur du champ de durée — celle de la maquette d'« Alertes », assez pour « 30 » comme pour
 /// « 0,75 ».
 const DURATION_FIELD_WIDTH: f32 = 52.0;
+
+/// Largeur de la rainure du curseur de volume — 160 px : à 120, les dix repères tombaient à
+/// 10 px les uns des autres, trop serrés pour qu'on distingue un majeur d'un mineur (maquette du
+/// 2026-09-30).
+pub const VOLUME_SLIDER_WIDTH: f32 = 160.0;
+
+/// Écart entre le curseur de volume et son champ — 10 px, l'écart relevé entre une rainure et son
+/// libellé de droite (`tokens::SLIDER_LABEL_GAP` en donne 10 côté droit).
+const VOLUME_FIELD_GAP: f32 = 10.0;
+
+/// Largeur du champ de volume — celle du champ de durée : « 100 » y tient au corps du jeu.
+const VOLUME_FIELD_WIDTH: f32 = DURATION_FIELD_WIDTH;
+
+/// Les repères du curseur de volume : **majeurs tous les 20 %**, mineurs sur les 10 qui ne sont
+/// pas des 20 (demande utilisateur du 2026-09-30).
+const VOLUME_MARKS: [SliderMark; 10] = [
+    SliderMark::minor(10.0),
+    SliderMark::major(20.0),
+    SliderMark::minor(30.0),
+    SliderMark::major(40.0),
+    SliderMark::minor(50.0),
+    SliderMark::major(60.0),
+    SliderMark::minor(70.0),
+    SliderMark::major(80.0),
+    SliderMark::minor(90.0),
+    SliderMark::major(100.0),
+];
 
 /// Écart entre un libellé et le contrôle posé à sa droite — la valeur du relevé de section
 /// (`panels::options_modal::FIELD_TO_BROWSE_GAP` en pose la sœur à 10).
@@ -195,6 +233,8 @@ pub struct Section<'a> {
     /// La sourdine, pour les fonctionnalités qui en ont une (Suivi et Chat — voir [`AlertMutes`]).
     /// Le bouton d'essai se pose sur sa ligne ; sans sourdine, il a la sienne ([`TEST_LABEL`]).
     pub muted: Option<&'a mut bool>,
+    /// Le volume du son de la section, en pour cent — brouillon, voir [`volume_control`].
+    pub volume: &'a mut u8,
     /// La fermeture automatique de la carte, pour les fonctionnalités qui en affichent une —
     /// le Suivi, les Alertes et le Chat (toutes, depuis le 2026-09-16 ; voir
     /// [`COUNTDOWN_AUTO_CLOSE_LABEL`]).
@@ -212,6 +252,7 @@ pub fn section(ui: &mut egui::Ui, width: f32, spec: Section<'_>) -> bool {
         log_prefix,
         enabled,
         muted,
+        volume,
         auto_close,
     } = spec;
     ui.scope(|ui| {
@@ -222,8 +263,8 @@ pub fn section(ui: &mut egui::Ui, width: f32, spec: Section<'_>) -> bool {
             ui.disable();
         }
         let clicked = match muted {
-            Some(muted) => mute_row(ui, width, log_prefix, muted),
-            None => test_row(ui, width, log_prefix),
+            Some(muted) => mute_row(ui, width, log_prefix, muted, volume),
+            None => test_row(ui, width, log_prefix, volume),
         };
         if let Some(auto_close) = auto_close {
             close_row(ui, width, log_prefix, auto_close);
@@ -236,7 +277,13 @@ pub fn section(ui: &mut egui::Ui, width: f32, spec: Section<'_>) -> bool {
 /// « Couper le son des notifications », et le bouton d'essai à sa droite — voir la doc de module.
 ///
 /// Renvoie `true` la frame où le bouton est cliqué.
-fn mute_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, muted: &mut bool) -> bool {
+fn mute_row(
+    ui: &mut egui::Ui,
+    width: f32,
+    log_prefix: &str,
+    muted: &mut bool,
+    volume: &mut u8,
+) -> bool {
     let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
     let mut cell = ui.new_child(
         egui::UiBuilder::new()
@@ -253,14 +300,17 @@ fn mute_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, muted: &mut bool) -
                 .log_name(format!("{log_prefix}.sans-son")),
         );
         ui.add_space(CONTROL_GAP);
-        test_sound_button(ui, log_prefix, !*muted)
+        let audible = !*muted;
+        let clicked = test_sound_button(ui, log_prefix, audible);
+        volume_control(ui, log_prefix, volume, audible);
+        clicked
     })
     .inner
 }
 
 /// « Tester le son des notifications » et son bouton — la ligne des Alertes, seule section sans
 /// sourdine où le poser (voir la doc de module).
-fn test_row(ui: &mut egui::Ui, width: f32, log_prefix: &str) -> bool {
+fn test_row(ui: &mut egui::Ui, width: f32, log_prefix: &str, volume: &mut u8) -> bool {
     let row = ui.allocate_space(Vec2::new(width, ROW_HEIGHT)).1;
     let mut cell = ui.new_child(
         egui::UiBuilder::new()
@@ -270,7 +320,9 @@ fn test_row(ui: &mut egui::Ui, width: f32, log_prefix: &str) -> bool {
     cell.horizontal_centered(|ui| {
         ui.label(RichText::new(TEST_LABEL).color(TEXT).size(BODY_FONT_SIZE));
         ui.add_space(CONTROL_GAP);
-        test_sound_button(ui, log_prefix, true)
+        let clicked = test_sound_button(ui, log_prefix, true);
+        volume_control(ui, log_prefix, volume, true);
+        clicked
     })
     .inner
 }
@@ -296,6 +348,76 @@ pub fn test_sound_button(ui: &mut egui::Ui, log_prefix: &str, audible: bool) -> 
             .log_name(format!("{log_prefix}.tester")),
     )
     .clicked()
+}
+
+/// **La jauge de volume** — à poser juste après [`test_sound_button`], sur la même ligne : un
+/// curseur gradué et rempli, un champ numérique, « % ». Voir la doc de module. Publique pour la
+/// section « Combat », qui peint sa ligne elle-même (`panels::options_modal`).
+///
+/// `audible` faux grise le tout, comme le bouton : la valeur reste affichée et revient telle
+/// quelle quand on relève la sourdine.
+///
+/// **Le champ n'a pas d'état chez l'appelant.** Hors focus, il affiche la valeur — que le curseur
+/// vient peut-être de changer ; pendant la frappe, il garde ce qui est tapé (mémoire d'egui, clé
+/// dérivée de `log_prefix`), et ne le borne qu'à la **perte de focus** (Entrée comprise), comme
+/// le champ de durée : borner à la frappe ferait retomber à 1 un champ qu'on vide pour retaper
+/// une valeur.
+pub fn volume_control(ui: &mut egui::Ui, log_prefix: &str, volume: &mut u8, audible: bool) {
+    ui.add_space(CONTROL_GAP);
+    let mut value = f32::from(*volume);
+    let slider = ui.add(
+        design::slider(&mut value)
+            .range(f32::from(VOLUME_MIN)..=f32::from(VOLUME_MAX))
+            .width(VOLUME_SLIDER_WIDTH)
+            .marks(&VOLUME_MARKS)
+            .filled(true)
+            .enabled(audible)
+            .tooltip(if audible {
+                "Volume des notifications de cette section."
+            } else {
+                "Le son des notifications est coupé."
+            })
+            .log_name(format!("{log_prefix}.volume")),
+    );
+    if slider.changed() {
+        *volume = clamp_volume(value.round() as u8);
+    }
+
+    ui.add_space(VOLUME_FIELD_GAP);
+    let id = egui::Id::new((log_prefix, "volume-saisie"));
+    let mut text = ui
+        .data(|d| d.get_temp::<String>(id))
+        .unwrap_or_else(|| volume.to_string());
+    let field = ui.add(
+        design::input(&mut text)
+            .size(InputSize::Standard)
+            .width(VOLUME_FIELD_WIDTH)
+            .enabled(audible)
+            .log_name(format!("{log_prefix}.volume-saisie")),
+    );
+    if field.changed() {
+        text.retain(|c| c.is_ascii_digit());
+        text.truncate(3);
+    }
+    if field.lost_focus() {
+        *volume = parse_volume(&text, *volume);
+    }
+    if !field.has_focus() {
+        text = volume.to_string();
+    }
+    ui.data_mut(|d| d.insert_temp(id, text));
+    // Pas d'espace ajouté : l'écart d'egui entre deux éléments d'une ligne est celui qui sépare
+    // déjà « 3,5 » de « sec. » sur la ligne de durée.
+    ui.label(RichText::new("%").color(SUBDUED).size(BODY_FONT_SIZE));
+}
+
+/// Lit un volume tapé, borné à `1..=100`. Une saisie vide ou illisible garde la valeur en place,
+/// comme [`parse_duration`] : vider le champ par mégarde ne réécrit pas le réglage.
+pub fn parse_volume(raw: &str, actuel: u8) -> u8 {
+    match raw.trim().parse::<u32>() {
+        Ok(v) => clamp_volume(v.min(u32::from(u8::MAX)) as u8),
+        Err(_) => actuel,
+    }
 }
 
 /// « Fermeture automatique des notifications » et sa durée — **sans fond de ligne**, voir la doc
@@ -400,6 +522,32 @@ mod tests {
     fn une_saisie_vide_garde_la_valeur_en_place() {
         assert_eq!(parse_duration("", 3.5), 3.5);
         assert_eq!(parse_duration("abc", 3.5), 3.5);
+    }
+
+    #[test]
+    fn un_volume_tape_est_borne_a_1_100() {
+        assert_eq!(parse_volume("42", 80), 42);
+        assert_eq!(parse_volume(" 7 ", 80), 7);
+        assert_eq!(parse_volume("0", 80), 1, "0 serait une seconde sourdine");
+        assert_eq!(parse_volume("150", 80), 100);
+        assert_eq!(parse_volume("99999", 80), 100);
+    }
+
+    #[test]
+    fn une_saisie_de_volume_vide_garde_la_valeur_en_place() {
+        assert_eq!(parse_volume("", 80), 80);
+        assert_eq!(parse_volume("abc", 80), 80);
+    }
+
+    #[test]
+    fn les_reperes_de_volume_alternent_mineur_et_majeur() {
+        for mark in VOLUME_MARKS {
+            assert_eq!(mark.major, mark.value as u32 % 20 == 0, "{}", mark.value);
+        }
+        assert_eq!(
+            VOLUME_MARKS.last().map(|m| m.value),
+            Some(f32::from(VOLUME_MAX))
+        );
     }
 
     #[test]

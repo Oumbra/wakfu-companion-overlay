@@ -85,6 +85,7 @@
 
 use overlay_sync::update::UpdateStatus;
 
+use crate::alert_sound::AlertVolumes;
 use crate::design::{self, ButtonSize, ButtonVariant};
 use crate::panels::alerts_tab::{self, AlertsTabContext, AlertsTabState};
 use crate::panels::chat_tab::{self, ChatAvailability, ChatDraft, ChatTabState};
@@ -300,6 +301,12 @@ pub struct OptionsModalState {
     /// l'alerte continue de s'afficher — c'est le demi-pas entre « tout actif » et une
     /// fonctionnalité éteinte.
     pub mutes: AlertMutes,
+    /// **Les quatre volumes** — jauge posée après le bouton d'essai de chaque section de
+    /// notifications (2026-09-30, `panels::notifications::volume_control`). Même mécanique de
+    /// brouillon que [`Self::mutes`] : initialisés par l'hôte au réglage en vigueur
+    /// (`config::OverlayConfig::alert_volumes`), pris en compte seulement à « Valider ». Le
+    /// bouton d'essai, lui, fait entendre le volume du brouillon tout de suite.
+    pub volumes: AlertVolumes,
     /// **La fermeture automatique de la carte de décompte** — ligne « Fermeture automatique des
     /// notifications de décompte » de la section « Suivi » (2026-09-16, voir
     /// [`suivi_tab::CountdownToastSettings`]).
@@ -479,6 +486,8 @@ pub struct OptionsInitial {
     /// Les deux sourdines telles qu'elles étaient à l'ouverture — même rôle que les champs
     /// ci-dessus.
     pub mutes: AlertMutes,
+    /// Les quatre volumes tels qu'ils étaient à l'ouverture — même rôle.
+    pub volumes: AlertVolumes,
     /// La fermeture de la carte de décompte telle qu'elle était à l'ouverture — même rôle.
     pub countdown_toast: suivi_tab::CountdownToastSettings,
     /// Les deux réglages de complétion tels qu'ils étaient à l'ouverture — même rôle.
@@ -518,6 +527,7 @@ impl OptionsModalState {
             turn_notification_muted: self.turn_notification_muted,
             features: self.features,
             mutes: self.mutes,
+            volumes: self.volumes,
             countdown_toast: self.countdown_toast,
             completion: self.completion,
             suivi_groups_enabled: self.suivi_groups_enabled,
@@ -576,6 +586,7 @@ impl OptionsModalState {
             || self.turn_notification_muted != self.initial.turn_notification_muted
             || self.features != self.initial.features
             || self.mutes != self.initial.mutes
+            || self.volumes != self.initial.volumes
             || self.countdown_toast != self.initial.countdown_toast
             || self.completion != self.initial.completion
             || self.recap_resume != self.initial.recap_resume
@@ -612,17 +623,20 @@ pub enum OptionsModalAction {
     Validate(OptionsCommit),
     /// Jouer le son de ramassage, depuis la ligne « Tester le son des notifications » de la
     /// section « Alertes » — l'appelant seul a le périphérique audio
-    /// (`alert_sound::play_loot_alert`).
-    TestAlertSound,
+    /// (`alert_sound::Sound::Loot`).
+    ///
+    /// Les quatre actions d'essai portent le **volume du brouillon** (`alert_sound::play`) : on
+    /// écoute le réglage qu'on est en train de faire, avant de le valider.
+    TestAlertSound(u8),
     /// Le bouton d'essai de la section « Chat » : jouer le son de recherche
-    /// (`alert_sound::play_chat_alert`).
-    TestChatSound,
+    /// (`alert_sound::Sound::Chat`).
+    TestChatSound(u8),
     /// Le bouton d'essai de la section « Suivi » : jouer le son du décompte arrivé à 0
-    /// (`alert_sound::play_countdown_alert`).
-    TestCountdownSound,
+    /// (`alert_sound::Sound::Countdown`).
+    TestCountdownSound(u8),
     /// Le bouton d'essai de la section « Combat » : jouer le son de la notification de tour
-    /// (`alert_sound::play_turn_alert`).
-    TestTurnSound,
+    /// (`alert_sound::Sound::Turn`).
+    TestTurnSound(u8),
     /// Déconnecter le compte, depuis la section « Compte » de l'onglet « Paramètres »
     /// (**confirmée**, voir `show`) — l'appelant seul parle au thread Auth
     /// (`main.rs::App::disconnect_account`) et sait refermer cette fenêtre derrière.
@@ -722,6 +736,10 @@ pub struct OptionsCommit {
     /// l'hôte persiste (`config::OverlayConfig::set_alert_mutes`) et transmet au thread Engine
     /// (`engine_thread::EngineCommand::SetAlertMutes`).
     pub mutes: AlertMutes,
+    /// Les quatre volumes (`panels::notifications::volume_control`) — ce que l'hôte persiste
+    /// (`config::OverlayConfig::set_alert_volumes`) et pose sur le module audio
+    /// (`alert_sound::set_volumes`).
+    pub volumes: AlertVolumes,
     /// La durée d'affichage de la carte de décompte et sa fermeture manuelle
     /// (`panels::suivi_tab::CountdownToastSettings`) — ce que l'hôte persiste
     /// (`config::OverlayConfig::set_countdown_toast`) et transmet au thread Engine
@@ -1307,13 +1325,11 @@ pub fn show(
                     .log_name("options-notification-de-tour-sans-son"),
                 );
                 ui.add_space(notifications::CONTROL_GAP);
-                if notifications::test_sound_button(
-                    ui,
-                    "combat",
-                    state.turn_notification && !state.turn_notification_muted,
-                ) {
-                    action = OptionsModalAction::TestTurnSound;
+                let audible = state.turn_notification && !state.turn_notification_muted;
+                if notifications::test_sound_button(ui, "combat", audible) {
+                    action = OptionsModalAction::TestTurnSound(state.volumes.turn);
                 }
+                notifications::volume_control(ui, "combat", &mut state.volumes.turn, audible);
             },
             );
 
@@ -1356,6 +1372,7 @@ pub fn show(
                     log_prefix: "suivi",
                     enabled: state.features.suivi,
                     muted: Some(&mut state.mutes.suivi),
+                    volume: &mut state.volumes.suivi,
                     // `available: true` sans condition, contrairement aux deux sections
                     // suivantes : ce réglage est LOCAL (`config::OverlayConfig`), il n'y a aucun
                     // brouillon de compte à attendre et donc jamais de ligne grisée.
@@ -1367,7 +1384,7 @@ pub fn show(
                     }),
                 },
             ) {
-                action = OptionsModalAction::TestCountdownSound;
+                action = OptionsModalAction::TestCountdownSound(state.volumes.suivi);
             }
 
             // **Ce que devient un suivi qui vient d'aboutir** (2026-09-17, demande utilisateur).
@@ -1450,6 +1467,7 @@ pub fn show(
                     log_prefix: "alertes",
                     enabled: state.features.alerts,
                     muted: None,
+                    volume: &mut state.volumes.alertes,
                     auto_close: Some(notifications::AutoClose {
                         available: alertes_prêtes,
                         label: notifications::AUTO_CLOSE_LABEL,
@@ -1458,7 +1476,7 @@ pub fn show(
                     }),
                 },
             ) {
-                action = OptionsModalAction::TestAlertSound;
+                action = OptionsModalAction::TestAlertSound(state.volumes.alertes);
             }
 
             ui.add_space(SECTION_GAP);
@@ -1473,6 +1491,7 @@ pub fn show(
                     log_prefix: "chat",
                     enabled: state.features.chat,
                     muted: Some(&mut state.mutes.chat),
+                    volume: &mut state.volumes.chat,
                     auto_close: Some(notifications::AutoClose {
                         available: chat_prêt,
                         label: notifications::AUTO_CLOSE_LABEL,
@@ -1481,7 +1500,7 @@ pub fn show(
                     }),
                 },
             ) {
-                action = OptionsModalAction::TestChatSound;
+                action = OptionsModalAction::TestChatSound(state.volumes.chat);
             }
 
             // **Section « Démarrage » (2026-09-16)** — une seule case : ce que l'overlay fait
@@ -1974,6 +1993,7 @@ mod tests {
                 turn_notification_muted: false,
                 features: FeatureToggles::default(),
                 mutes: AlertMutes::default(),
+                volumes: AlertVolumes::default(),
                 countdown_toast: suivi_tab::CountdownToastSettings::default(),
                 completion: suivi_tab::CompletionSettings::default(),
                 suivi_groups_enabled: false,
@@ -2036,6 +2056,23 @@ mod tests {
             !state.is_dirty(),
             "décocher ramène la fenêtre à son état d'ouverture"
         );
+    }
+
+    /// **Un volume est un brouillon** comme les sourdines : le bouger ouvre la garde de
+    /// fermeture, « Valider » l'emporte, et le ramener à sa valeur d'ouverture la referme.
+    #[test]
+    fn un_volume_modifie_est_un_brouillon() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        state.volumes.chat = 40;
+        assert!(state.is_dirty());
+        let commit = state.commit();
+        assert_eq!(commit.volumes.chat, 40, "« Valider » l'emporte");
+        assert_eq!(
+            commit.volumes.turn, 100,
+            "les autres sections gardent le leur"
+        );
+        state.volumes.chat = 100;
+        assert!(!state.is_dirty());
     }
 
     /// La case « Couper le son des notifications » est un brouillon comme sa voisine, et se

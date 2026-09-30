@@ -382,6 +382,23 @@ pub struct OverlayConfig {
     /// « Chat », et même politique que [`Self::suivi_alert_muted`] : la carte reste, le son part.
     #[serde(default)]
     pub chat_alert_muted: bool,
+    /// **Volumes des quatre sons, en pour cent** — curseur et champ posés après le bouton d'essai
+    /// de chaque section de « Paramètres » (2026-09-30, voir
+    /// [`crate::alert_sound::AlertVolumes`]). Un par son : les fichiers n'ont pas le même niveau,
+    /// et chacun n'est pas sensible de la même façon aux aigus et aux graves.
+    ///
+    /// **Locaux**, comme les sourdines : le bon volume dépend de la machine et du casque. Champs
+    /// PLATS dans le TOML, même raison que les interrupteurs de fonctionnalité. Défaut **100** :
+    /// un `config.toml` écrit avant ces clés joue ses sons au volume d'avant. Relus bornés à
+    /// `1..=100` par [`Self::alert_volumes`], jamais tels qu'écrits à la main.
+    #[serde(default = "volume_plein")]
+    pub turn_notification_volume: u8,
+    #[serde(default = "volume_plein")]
+    pub suivi_alert_volume: u8,
+    #[serde(default = "volume_plein")]
+    pub loot_alert_volume: u8,
+    #[serde(default = "volume_plein")]
+    pub chat_alert_volume: u8,
     /// **Installer automatiquement les mises à jour au démarrage** — case de la section « Mise à
     /// jour » de l'onglet « Paramètres » (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décision 3
     /// du mainteneur : oui par défaut). Cochée, une version plus récente trouvée derrière l'écran
@@ -603,6 +620,11 @@ impl WatchlistGroupsConfig {
 /// Valeur par défaut des drapeaux de fonctionnalité — **une fonction, parce que
 /// `#[serde(default)]` ne sait produire que `bool::default()`, c'est-à-dire `false`**. Voir
 /// `OverlayConfig::suivi_enabled` : le défaut d'une fonctionnalité est d'être active.
+/// Défaut `serde` des quatre volumes — voir `OverlayConfig::turn_notification_volume`.
+fn volume_plein() -> u8 {
+    crate::alert_sound::VOLUME_DEFAULT
+}
+
 fn actif() -> bool {
     true
 }
@@ -648,6 +670,10 @@ impl Default for OverlayConfig {
             recap_locked: actif(),
             suivi_alert_muted: false,
             chat_alert_muted: false,
+            turn_notification_volume: volume_plein(),
+            suivi_alert_volume: volume_plein(),
+            loot_alert_volume: volume_plein(),
+            chat_alert_volume: volume_plein(),
             auto_update: actif(),
             verbose_log: false,
             multiaccount_shortcuts: false,
@@ -849,6 +875,26 @@ impl OverlayConfig {
     pub fn set_alert_mutes(&mut self, mutes: crate::panels::notifications::AlertMutes) {
         self.suivi_alert_muted = mutes.suivi;
         self.chat_alert_muted = mutes.chat;
+    }
+
+    /// Les quatre volumes de cette config, **bornés** — voir [`Self::turn_notification_volume`].
+    pub fn alert_volumes(&self) -> crate::alert_sound::AlertVolumes {
+        crate::alert_sound::AlertVolumes {
+            turn: self.turn_notification_volume,
+            suivi: self.suivi_alert_volume,
+            alertes: self.loot_alert_volume,
+            chat: self.chat_alert_volume,
+        }
+        .clamped()
+    }
+
+    /// Reporte les quatre volumes dans la config — appelée à la validation de la fenêtre Options.
+    pub fn set_alert_volumes(&mut self, volumes: crate::alert_sound::AlertVolumes) {
+        let volumes = volumes.clamped();
+        self.turn_notification_volume = volumes.turn;
+        self.suivi_alert_volume = volumes.suivi;
+        self.loot_alert_volume = volumes.alertes;
+        self.chat_alert_volume = volumes.chat;
     }
 }
 
@@ -1335,6 +1381,39 @@ mod tests {
         let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
         assert!(relu.alert_mutes().suivi);
         assert!(!relu.alert_mutes().chat);
+    }
+
+    /// **Un volume jamais réglé est plein** — y compris dans un `config.toml` écrit avant ces
+    /// clés : personne n'entend ses alertes baisser en installant cette version. Réglé, il survit
+    /// à un aller-retour sur disque ; retouché à la main hors bornes, il est relu borné.
+    #[test]
+    fn aller_retour_des_volumes() {
+        use crate::alert_sound::AlertVolumes;
+        assert_eq!(
+            OverlayConfig::default().alert_volumes(),
+            AlertVolumes::default()
+        );
+        let ancienne: OverlayConfig =
+            toml::from_str("log_path = \"/config/wakfu.log\"").expect("ancienne config lisible");
+        assert_eq!(ancienne.alert_volumes(), AlertVolumes::default());
+
+        let mut config = OverlayConfig::default();
+        let reglés = AlertVolumes {
+            turn: 30,
+            suivi: 1,
+            alertes: 65,
+            chat: 100,
+        };
+        config.set_alert_volumes(reglés);
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert_eq!(relu.alert_volumes(), reglés);
+
+        let retouchée: OverlayConfig =
+            toml::from_str("turn_notification_volume = 0\nchat_alert_volume = 250")
+                .expect("config retouchée lisible");
+        assert_eq!(retouchée.alert_volumes().turn, 1);
+        assert_eq!(retouchée.alert_volumes().chat, 100);
     }
 
     #[test]

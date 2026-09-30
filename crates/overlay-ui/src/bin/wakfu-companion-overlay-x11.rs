@@ -329,6 +329,8 @@ mod linux_main {
         /// Les deux sourdines — voir `main.rs::App::alert_mutes`, même politique et même effet
         /// unique : le thread Engine ne joue plus le son de l'alerte concernée, sa carte reste.
         alert_mutes: AlertMutes,
+        /// Les quatre volumes — voir `main.rs::App::alert_volumes`.
+        alert_volumes: overlay_ui::alert_sound::AlertVolumes,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
         /// Réglages de la carte de décompte à zéro en vigueur — voir
@@ -617,6 +619,8 @@ mod linux_main {
         features: FeatureToggles,
         /// Voir `App::alert_mutes` — lues de la config au démarrage (`run`).
         alert_mutes: AlertMutes,
+        /// Voir `App::alert_volumes` — lus de la config au démarrage (`run`).
+        alert_volumes: overlay_ui::alert_sound::AlertVolumes,
         /// Réglages de la carte d'alerte de chat en vigueur — voir `main.rs::App::chat_toast`.
         chat_toast: chat_tab::ChatToastSettings,
         /// Réglages de la carte de décompte à zéro en vigueur — voir
@@ -684,6 +688,7 @@ mod linux_main {
                 turn_notification_muted,
                 features,
                 alert_mutes,
+                alert_volumes,
                 chat_toast,
                 countdown_toast,
                 completion,
@@ -761,6 +766,7 @@ mod linux_main {
                 turn_notification_muted,
                 features,
                 alert_mutes,
+                alert_volumes,
                 chat_toast,
                 countdown_toast,
                 completion,
@@ -1988,6 +1994,7 @@ mod linux_main {
                 // cases « Couper le son des notifications » aussi.
                 features: self.features,
                 mutes: self.alert_mutes,
+                volumes: self.alert_volumes,
                 // La fermeture de la carte de décompte (2026-09-16) — réglage local, la ligne
                 // s'ouvre directement sur sa valeur, voir `main.rs`.
                 countdown_toast: self.countdown_toast,
@@ -2048,6 +2055,7 @@ mod linux_main {
                     turn_notification_muted: self.turn_notification_muted,
                     features: self.features,
                     mutes: self.alert_mutes,
+                    volumes: self.alert_volumes,
                     countdown_toast: self.countdown_toast,
                     completion: self.completion,
                     recap_resume: self.recap_session.resume_settings(),
@@ -2644,6 +2652,7 @@ mod linux_main {
             saved.combat_collapsed = self.combat_collapsed;
             saved.set_features(self.features);
             saved.set_alert_mutes(self.alert_mutes);
+            saved.set_alert_volumes(self.alert_volumes);
             saved.suivi_groups_enabled = self.suivi_groups_enabled;
             saved.watchlist_groups = self.watchlist_groups.clone();
             config::save(&saved);
@@ -2889,6 +2898,19 @@ mod linux_main {
                         let _ = self
                             .settings_tx
                             .send(EngineCommand::SetAlertMutes(self.alert_mutes));
+                    }
+                    // Les quatre volumes (2026-09-30) — voir `main.rs` : posés sur le module
+                    // audio, que le thread Engine lit à chaque son.
+                    if commit.volumes != self.alert_volumes {
+                        self.alert_volumes = commit.volumes;
+                        overlay_ui::alert_sound::set_volumes(self.alert_volumes);
+                        tracing::info!(
+                            tour = self.alert_volumes.turn,
+                            suivi = self.alert_volumes.suivi,
+                            alertes = self.alert_volumes.alertes,
+                            chat = self.alert_volumes.chat,
+                            "[options] volumes des sons d'alerte mis à jour"
+                        );
                     }
                     // La fermeture de la carte de décompte (2026-09-16) — voir `main.rs` : c'est
                     // le thread Engine qui pose `hide_at` quand l'alerte naît.
@@ -3973,19 +3995,28 @@ mod linux_main {
                             post_redraw = PostRedraw::ValidateOptions(commit)
                         }
                         // Les sons d'essai se jouent par le même chemin qu'en jeu — c'est tout
-                        // l'intérêt du bouton : entendre ce qu'on entendra.
-                        OptionsModalAction::TestAlertSound => {
-                            overlay_ui::alert_sound::play_loot_alert()
+                        // l'intérêt du bouton : entendre ce qu'on entendra — au volume du
+                        // brouillon, voir `main.rs`.
+                        OptionsModalAction::TestAlertSound(volume) => {
+                            overlay_ui::alert_sound::play(
+                                overlay_ui::alert_sound::Sound::Loot,
+                                volume,
+                            )
                         }
-                        OptionsModalAction::TestChatSound => {
-                            overlay_ui::alert_sound::play_chat_alert()
+                        OptionsModalAction::TestChatSound(volume) => overlay_ui::alert_sound::play(
+                            overlay_ui::alert_sound::Sound::Chat,
+                            volume,
+                        ),
+                        OptionsModalAction::TestCountdownSound(volume) => {
+                            overlay_ui::alert_sound::play(
+                                overlay_ui::alert_sound::Sound::Countdown,
+                                volume,
+                            )
                         }
-                        OptionsModalAction::TestCountdownSound => {
-                            overlay_ui::alert_sound::play_countdown_alert()
-                        }
-                        OptionsModalAction::TestTurnSound => {
-                            overlay_ui::alert_sound::play_turn_alert()
-                        }
+                        OptionsModalAction::TestTurnSound(volume) => overlay_ui::alert_sound::play(
+                            overlay_ui::alert_sound::Sound::Turn,
+                            volume,
+                        ),
                         OptionsModalAction::Disconnect => {
                             post_redraw = PostRedraw::DisconnectAccount
                         }
@@ -4563,6 +4594,8 @@ mod linux_main {
         let _ = settings_tx.send(EngineCommand::SetFeatures(saved_config.features()));
         // Les sourdines de même — voir `main.rs`.
         let _ = settings_tx.send(EngineCommand::SetAlertMutes(saved_config.alert_mutes()));
+        // Les volumes — voir `main.rs`.
+        overlay_ui::alert_sound::set_volumes(saved_config.alert_volumes());
 
         event_loop.set_control_flow(ControlFlow::Wait);
         let mut app = App::new(AppState {
@@ -4576,6 +4609,7 @@ mod linux_main {
             turn_notification_muted: saved_config.turn_notification_muted,
             features: saved_config.features(),
             alert_mutes: saved_config.alert_mutes(),
+            alert_volumes: saved_config.alert_volumes(),
             chat_toast: saved_config.chat_toast(),
             countdown_toast: saved_config.countdown_toast(),
             completion: saved_config.completion(),

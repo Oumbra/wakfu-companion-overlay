@@ -1415,6 +1415,26 @@ pub const SLIDER_TICK_OVERHANG: f32 = 2.0;
 /// seconde fois sur ce composant.
 pub const SLIDER_TICK_BITE: f32 = 1.0;
 
+/// De combien une graduation **majeure** dépasse la rainure — 4 px, le double d'une graduation
+/// ordinaire ([`SLIDER_TICK_OVERHANG`]).
+///
+/// **Pas de référence dans le jeu** : aucun curseur relevé ne porte deux tailles de repère. Posé
+/// pour le volume des notifications (demande utilisateur du 2026-09-30 : « des un peu plus grands
+/// crans » tous les 20 %, « des un peu plus petits » sur les 10 restants). 4 est le plus grand
+/// débord qui tienne dans la hauteur que la poignée impose — 8 de rainure + 2 × 5 visibles = 18 —
+/// en gardant le pixel de morsure.
+pub const SLIDER_MAJOR_TICK_OVERHANG: f32 = 4.0;
+
+/// Remplissage de la **portion parcourue** de la rainure, quand l'appelant le demande
+/// (`Slider::filled`) — `#c6b187`, la teinte du cœur de la poignée (`slider-handle.png`, 93 px
+/// sur 250, la teinte dominante).
+///
+/// Le jeu n'en montre pas (ses deux curseurs de volume sont au minimum, voir `design::slider`) :
+/// c'est une demande utilisateur du 2026-09-30, pour qu'un volume se lise comme une quantité
+/// — « du début jusqu'à la pastille, c'est rempli » — et non comme un cran. La teinte de la
+/// poignée plutôt qu'un or inventé : la barre et le disque se lisent comme une seule pièce.
+pub const SLIDER_FILL: Color32 = Color32::from_rgb(0xC6, 0xB1, 0x87);
+
 // ---------------------------------------------------------------------------------------------
 // Infobulle — `design::tooltip`
 //

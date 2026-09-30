@@ -2931,6 +2931,7 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Et pour les deux cases « Couper le son des notifications » : jamais touchées,
                 // donc emportées levées.
                 mutes: overlay_ui::panels::notifications::AlertMutes::default(),
+                volumes: overlay_ui::alert_sound::AlertVolumes::default(),
                 // Idem pour la ligne « Fermeture automatique des notifications de décompte » de
                 // la section « Suivi » : emportée telle qu'elle a été posée à l'ouverture.
                 countdown_toast: overlay_ui::panels::suivi_tab::CountdownToastSettings::default(),
@@ -3509,6 +3510,20 @@ fn options_parametres_section_suivi_groupes() {
 }
 
 fn capture_section_suivi(name: &str, options_state: panels::options_modal::OptionsModalState) {
+    // Assez pour passer « Recap » et « Combat » et poser la section « Suivi » entière à l'écran,
+    // ses deux cases comprises — sans aller jusqu'à « Alertes », qui n'est pas le sujet. **Réduit
+    // de 276 px le 2026-09-18** : la section « Recap » a perdu sa ligne d'aide et son bouton
+    // « Replacer au défaut » (148), « Combat » son bouton de rafraîchissement (128) — « Suivi »
+    // est remontée d'autant.
+    capture_section_defilee(name, options_state, 154.0);
+}
+
+/// Rend l'onglet « Paramètres » défilé de `offset` px — voir [`defile_les_parametres`].
+fn capture_section_defilee(
+    name: &str,
+    options_state: panels::options_modal::OptionsModalState,
+    offset: f32,
+) {
     // Voir `options_parametres_section_compte` : ce test peint sans passer par
     // `Textures::get_or_load`, c'est `parametres_avec_notifications` qui pose le gel de version.
     let mut harness = Harness::builder()
@@ -3540,12 +3555,7 @@ fn capture_section_suivi(name: &str, options_state: panels::options_modal::Optio
             }
         });
     harness.run();
-    // Assez pour passer « Recap » et « Combat » et poser la section « Suivi » entière à l'écran,
-    // ses deux cases comprises — sans aller jusqu'à « Alertes », qui n'est pas le sujet. **Réduit
-    // de 276 px le 2026-09-18** : la section « Recap » a perdu sa ligne d'aide et son bouton
-    // « Replacer au défaut » (148), « Combat » son bouton de rafraîchissement (128) — « Suivi »
-    // est remontée d'autant.
-    defile_les_parametres(&mut harness, 154.0);
+    defile_les_parametres(&mut harness, offset);
     harness.snapshot(name);
 }
 
@@ -6603,6 +6613,25 @@ fn options_parametres_son_coupe() {
         chat: true,
     };
     capture_parametres("options_parametres_son_coupe", etat);
+}
+
+/// **Les jauges de volume** (2026-09-30) — une par section, après le bouton d'essai : curseur
+/// rempli jusqu'à la poignée, repères majeurs tous les 20 % et mineurs sur les 10, champ et « % ».
+/// Quatre valeurs différentes pour voir que chaque section garde la sienne, et la sourdine du Chat
+/// cochée pour montrer la jauge grisée qui garde sa valeur. Défilé jusqu'à poser les quatre
+/// sections à l'écran, de « Combat » à « Chat ».
+#[test]
+fn options_parametres_volumes() {
+    let mut etat = parametres_avec_notifications();
+    etat.turn_notification = true;
+    etat.volumes = overlay_ui::alert_sound::AlertVolumes {
+        turn: 80,
+        suivi: 100,
+        alertes: 65,
+        chat: 40,
+    };
+    etat.mutes.chat = true;
+    capture_section_defilee("options_parametres_volumes", etat, 330.0);
 }
 
 /// **Fermeture manuelle : le champ de durée se grise** — la logique existait (`.enabled`), aucun

@@ -821,6 +821,11 @@ struct App {
     /// Un seul effet ici, et il est ailleurs : le thread Engine cesse de JOUER le son de l'alerte
     /// concernée (`EngineCommand::SetAlertMutes`) — sa carte, elle, continue de s'afficher.
     alert_mutes: AlertMutes,
+    /// **Les quatre volumes** (2026-09-30) — jauges des sections de notifications. Lus de la
+    /// config au démarrage, remplacés à la validation de la fenêtre Options ; leur seul effet est
+    /// posé sur le module audio (`alert_sound::set_volumes`), que l'hôte et le thread Engine
+    /// partagent.
+    alert_volumes: alert_sound::AlertVolumes,
     /// La surveillance de tour (§9.1 decies) — voir `sync_turn_watch`. Toujours construite, même
     /// option décochée : les gabarits chargés au démarrage servent dès qu'on la coche.
     turn_watcher: turn_watch::watcher::Watcher,
@@ -1004,6 +1009,8 @@ struct AppState {
     features: FeatureToggles,
     /// Voir `App::alert_mutes` — lues de la config au démarrage (`main`).
     alert_mutes: AlertMutes,
+    /// Voir `App::alert_volumes` — lus de la config au démarrage (`main`).
+    alert_volumes: alert_sound::AlertVolumes,
     /// Raccourcis EFFECTIFS au démarrage — défauts, ou personnalisation lue de `config.toml`
     /// (`config::OverlayConfig::shortcuts`). Même provenance que `combat_always_visible` : lus une
     /// fois dans `main`, jamais redécouverts.
@@ -1074,6 +1081,7 @@ impl App {
             turn_notification_muted,
             features,
             alert_mutes,
+            alert_volumes,
             shortcuts,
             snapshot,
             watchlist,
@@ -1163,6 +1171,7 @@ impl App {
             turn_notification_muted,
             features,
             alert_mutes,
+            alert_volumes,
             turn_watcher: turn_watch::watcher::Watcher::new(turn_watch::templates::load_all()),
             turn_watch_last_tick: None,
             game_window: GameWindowTracker::new(),
@@ -3398,6 +3407,8 @@ impl App {
             features: self.features,
             // Idem pour les deux sourdines.
             mutes: self.alert_mutes,
+            // Idem pour les quatre volumes.
+            volumes: self.alert_volumes,
             // Idem pour la fermeture de la carte de décompte (2026-09-16) — réglage local, donc
             // rien à attendre d'un compte : la ligne s'ouvre directement sur sa valeur.
             countdown_toast: self.countdown_toast,
@@ -3464,6 +3475,7 @@ impl App {
                 turn_notification_muted: self.turn_notification_muted,
                 features: self.features,
                 mutes: self.alert_mutes,
+                volumes: self.alert_volumes,
                 countdown_toast: self.countdown_toast,
                 completion: self.completion,
                 recap_resume: self.recap_session.resume_settings(),
@@ -4145,6 +4157,7 @@ impl App {
         saved.combat_collapsed = self.combat_collapsed;
         saved.set_features(self.features);
         saved.set_alert_mutes(self.alert_mutes);
+        saved.set_alert_volumes(self.alert_volumes);
         saved.suivi_groups_enabled = self.suivi_groups_enabled;
         saved.watchlist_groups = self.watchlist_groups.clone();
         config::save(&saved);
@@ -4395,6 +4408,19 @@ impl App {
                     let _ = self
                         .settings_tx
                         .send(EngineCommand::SetAlertMutes(self.alert_mutes));
+                }
+                // **Les quatre volumes (2026-09-30)** — posés sur le module audio, que le thread
+                // Engine lit à chaque son : pas de commande à lui envoyer.
+                if commit.volumes != self.alert_volumes {
+                    self.alert_volumes = commit.volumes;
+                    alert_sound::set_volumes(self.alert_volumes);
+                    tracing::info!(
+                        tour = self.alert_volumes.turn,
+                        suivi = self.alert_volumes.suivi,
+                        alertes = self.alert_volumes.alertes,
+                        chat = self.alert_volumes.chat,
+                        "[options] volumes des sons d'alerte mis à jour"
+                    );
                 }
                 // **La fermeture de la carte de décompte (2026-09-16)** — même chemin que les
                 // sourdines ci-dessus : c'est le thread Engine qui pose `hide_at` au moment où
@@ -5453,11 +5479,20 @@ impl App {
             OptionsModalAction::Cancel => post_redraw = PostRedraw::CloseOptions,
             OptionsModalAction::Browse => post_redraw = PostRedraw::BrowseOptions,
             // Les sons d'essai se jouent par le même chemin qu'en jeu — c'est tout l'intérêt du
-            // bouton : entendre ce qu'on entendra.
-            OptionsModalAction::TestAlertSound => alert_sound::play_loot_alert(),
-            OptionsModalAction::TestChatSound => alert_sound::play_chat_alert(),
-            OptionsModalAction::TestCountdownSound => alert_sound::play_countdown_alert(),
-            OptionsModalAction::TestTurnSound => alert_sound::play_turn_alert(),
+            // bouton : entendre ce qu'on entendra — mais au volume du BROUILLON, pour qu'on
+            // écoute le réglage avant de le valider.
+            OptionsModalAction::TestAlertSound(volume) => {
+                alert_sound::play(alert_sound::Sound::Loot, volume)
+            }
+            OptionsModalAction::TestChatSound(volume) => {
+                alert_sound::play(alert_sound::Sound::Chat, volume)
+            }
+            OptionsModalAction::TestCountdownSound(volume) => {
+                alert_sound::play(alert_sound::Sound::Countdown, volume)
+            }
+            OptionsModalAction::TestTurnSound(volume) => {
+                alert_sound::play(alert_sound::Sound::Turn, volume)
+            }
             OptionsModalAction::Disconnect => post_redraw = PostRedraw::DisconnectAccount,
             OptionsModalAction::Validate(commit) => {
                 post_redraw = PostRedraw::ValidateOptions(commit)
@@ -6255,6 +6290,8 @@ fn main() {
     // Les sourdines de même : sans cet envoi, la première alerte d'une session sonnerait malgré
     // une case cochée à la session précédente.
     let _ = settings_tx.send(EngineCommand::SetAlertMutes(saved_config.alert_mutes()));
+    // Les volumes, eux, vivent dans le module audio que tous les threads partagent.
+    alert_sound::set_volumes(saved_config.alert_volumes());
 
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(AppState {
@@ -6268,6 +6305,7 @@ fn main() {
         turn_notification_muted: saved_config.turn_notification_muted,
         features: saved_config.features(),
         alert_mutes: saved_config.alert_mutes(),
+        alert_volumes: saved_config.alert_volumes(),
         shortcuts: saved_config.shortcuts(),
         snapshot,
         watchlist,
