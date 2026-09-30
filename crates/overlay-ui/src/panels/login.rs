@@ -1286,6 +1286,9 @@ pub struct CardSettings {
     pub chat_muted: bool,
     pub chat_auto_close: bool,
     pub chat_seconds: f32,
+    /// Les quatre volumes, en pour cent — jauge posée sous chaque bouton d'essai (2026-09-30,
+    /// voir `alert_sound::AlertVolumes`). Même réglage que la fenêtre Options.
+    pub volumes: crate::alert_sound::AlertVolumes,
     pub start_with_os: bool,
     pub log_path: String,
     pub verbose_log: bool,
@@ -1319,6 +1322,7 @@ impl Default for CardSettings {
             chat_muted: false,
             chat_auto_close: true,
             chat_seconds: 6.0,
+            volumes: crate::alert_sound::AlertVolumes::default(),
             start_with_os: false,
             log_path: String::new(),
             verbose_log: false,
@@ -1345,6 +1349,8 @@ pub struct SettingsInputs {
     alerts: String,
     chat: String,
     resume: String,
+    /// Les quatre volumes en cours de frappe — tour, décompte, alertes, chat.
+    volumes: [String; 4],
     /// Le chemin de `wakfu.log` en cours de frappe. Il ne devient le chemin retenu qu'à la perte
     /// du focus — c'est l'hôte qui le valide ensuite (`discovery::validate_log_path`), comme pour
     /// « Valider » de la fenêtre Options.
@@ -1358,6 +1364,13 @@ impl SettingsInputs {
             alerts: notifications::format_duration(settings.alerts_seconds),
             chat: notifications::format_duration(settings.chat_seconds),
             resume: settings.recap_resume_minutes.to_string(),
+            volumes: [
+                settings.volumes.turn,
+                settings.volumes.suivi,
+                settings.volumes.alertes,
+                settings.volumes.chat,
+            ]
+            .map(|v| v.to_string()),
             path: settings.log_path.clone(),
         }
     }
@@ -1406,6 +1419,14 @@ const SET_FIELD_HEIGHT: f32 = 30.0;
 const SET_FIELD_RADIUS: f32 = 6.0;
 const ICON_BUTTON_SIZE: f32 = 30.0;
 const SET_BUTTON_HEIGHT: f32 = 30.0;
+/// Jauge de volume (2026-09-30) — **dans le style de la Carte**, pas du jeu : rainure fine et
+/// arrondie comme les barres de la Carte, portion parcourue à l'accent, poignée ronde. Les repères
+/// suivent la demande faite pour la fenêtre Options : grands tous les 20 %, petits sur les 10.
+const VOL_TRACK_HEIGHT: f32 = 4.0;
+const VOL_HANDLE_RADIUS: f32 = 6.0;
+const VOL_TICK_MAJOR: f32 = 4.0;
+const VOL_TICK_MINOR: f32 = 2.0;
+const VOL_FIELD_WIDTH: f32 = 40.0;
 
 /// Le volet des paramètres — même charpente que [`paint_about`] : une zone défilante, la barre
 /// peinte à la main, et la bande « Retour » en bas.
@@ -1643,6 +1664,18 @@ fn paint_settings_content(
         changed,
         sound,
     );
+    let turn_audible = turn_on && !settings.turn_notification_muted;
+    y = set_volume_row(
+        ui,
+        left + SET_INDENT * 2.0,
+        inner - SET_INDENT * 2.0,
+        y,
+        &mut settings.volumes.turn,
+        &mut inputs.volumes[0],
+        turn_audible,
+        "carte-notification-de-tour-volume",
+        changed,
+    );
 
     if connected {
         // ── Suivi ─────────────────────────────────────────────────────────────────────────
@@ -1659,6 +1692,18 @@ fn paint_settings_content(
             "carte-suivi-sans-son",
             changed,
             sound,
+        );
+        let suivi_audible = !settings.suivi_muted;
+        y = set_volume_row(
+            ui,
+            left + SET_INDENT,
+            inner - SET_INDENT,
+            y,
+            &mut settings.volumes.suivi,
+            &mut inputs.volumes[1],
+            suivi_audible,
+            "carte-suivi-volume",
+            changed,
         );
         y = set_check_num(
             ui,
@@ -1712,6 +1757,17 @@ fn paint_settings_content(
             "carte-alertes-tester",
             sound,
         );
+        y = set_volume_row(
+            ui,
+            left,
+            inner,
+            y,
+            &mut settings.volumes.alertes,
+            &mut inputs.volumes[2],
+            true,
+            "carte-alertes-volume",
+            changed,
+        );
         let alerts_ready = settings.alerts_available;
         y = set_check_num_enabled(
             ui,
@@ -1743,6 +1799,18 @@ fn paint_settings_content(
             "carte-chat-sans-son",
             changed,
             sound,
+        );
+        let chat_audible = !settings.chat_muted;
+        y = set_volume_row(
+            ui,
+            left + SET_INDENT,
+            inner - SET_INDENT,
+            y,
+            &mut settings.volumes.chat,
+            &mut inputs.volumes[3],
+            chat_audible,
+            "carte-chat-volume",
+            changed,
         );
         y = set_check_num(
             ui,
@@ -2336,6 +2404,180 @@ fn set_mute_row(
         *sound = Some(channel);
     }
     after.max(y + SET_ROW_HEIGHT + SET_ROW_GAP)
+}
+
+/// **La jauge de volume** d'une section — curseur, champ, « % » — sur sa propre ligne, sous le
+/// bouton d'essai : la Carte est trop étroite pour la poser à sa droite comme la fenêtre Options.
+/// Le curseur prend la largeur que le champ lui laisse.
+///
+/// Inerte et estompée quand le son est coupé (`enabled` faux), valeur conservée. Le champ se borne
+/// à `1..=100` à la perte du focus, comme les autres champs du volet ; pas de chevrons, la valeur
+/// se tape ou se glisse.
+#[allow(clippy::too_many_arguments)]
+fn set_volume_row(
+    ui: &mut egui::Ui,
+    left: f32,
+    width: f32,
+    y: f32,
+    volume: &mut u8,
+    input: &mut String,
+    enabled: bool,
+    log_name: &str,
+    changed: &mut bool,
+) -> f32 {
+    use crate::alert_sound::{clamp_volume, VOLUME_MAX, VOLUME_MIN};
+    let fade = |c: Color32| {
+        if enabled {
+            c
+        } else {
+            c.gamma_multiply(SET_DISABLED_OPACITY)
+        }
+    };
+    let center_y = y + SET_ROW_HEIGHT / 2.0;
+    let unit_font = text::label_font(ui.ctx(), UNIT_SIZE);
+    let unit_galley = ui.fonts_mut(|f| f.layout_no_wrap("%".to_owned(), unit_font, fade(TEXT_DIM)));
+    let unit_width = unit_galley.rect.width();
+    let field_rect = Rect::from_min_size(
+        Pos2::new(
+            left + width - unit_width - 6.0 - VOL_FIELD_WIDTH,
+            center_y - NUMF_HEIGHT / 2.0,
+        ),
+        Vec2::new(VOL_FIELD_WIDTH, NUMF_HEIGHT),
+    );
+    let track = Rect::from_min_max(
+        Pos2::new(left, center_y - VOL_TRACK_HEIGHT / 2.0),
+        Pos2::new(
+            field_rect.left() - NUMF_GAP * 1.5,
+            center_y + VOL_TRACK_HEIGHT / 2.0,
+        ),
+    );
+    // La poignée parcourt la rainure en retrait de son rayon, pour ne jamais en sortir.
+    let travel = (track.width() - VOL_HANDLE_RADIUS * 2.0).max(0.0);
+    let span = f32::from(VOLUME_MAX - VOLUME_MIN);
+    let x_of =
+        |v: f32| track.left() + VOL_HANDLE_RADIUS + (v - f32::from(VOLUME_MIN)) / span * travel;
+
+    let mut hovered = false;
+    if enabled {
+        let hit = track.expand2(Vec2::new(0.0, (SET_ROW_HEIGHT - VOL_TRACK_HEIGHT) / 2.0));
+        let response = ui
+            .interact(
+                hit,
+                ui.id().with((log_name, "curseur")),
+                Sense::click_and_drag(),
+            )
+            .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        hovered = response.hovered() || response.dragged();
+        if response.dragged() || response.clicked() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let fraction = if travel > 0.0 {
+                    ((pos.x - track.left() - VOL_HANDLE_RADIUS) / travel).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let next = clamp_volume((f32::from(VOLUME_MIN) + fraction * span).round() as u8);
+                if next != *volume {
+                    *volume = next;
+                    *input = next.to_string();
+                    *changed = true;
+                }
+            }
+        }
+        if response.drag_stopped() {
+            tracing::info!("[carte] « {log_name} » — {} %.", *volume);
+        }
+    }
+
+    let painter = ui.painter();
+    painter.rect_filled(track, VOL_TRACK_HEIGHT / 2.0, fade(SECONDARY_BORDER));
+    let handle_x = x_of(f32::from(*volume));
+    painter.rect_filled(
+        Rect::from_min_max(track.left_top(), Pos2::new(handle_x, track.bottom())),
+        VOL_TRACK_HEIGHT / 2.0,
+        fade(ACCENT),
+    );
+    for step in (10..=100).step_by(10) {
+        let x = (x_of(step as f32) - 0.5).round() + 0.5;
+        let reach = if step % 20 == 0 {
+            VOL_TICK_MAJOR
+        } else {
+            VOL_TICK_MINOR
+        };
+        for (top, bottom) in [
+            (track.top() - reach, track.top()),
+            (track.bottom(), track.bottom() + reach),
+        ] {
+            painter.line_segment(
+                [Pos2::new(x, top), Pos2::new(x, bottom)],
+                Stroke::new(1.0, fade(TEXT.gamma_multiply(0.7))),
+            );
+        }
+    }
+    painter.circle_filled(
+        Pos2::new(handle_x, center_y),
+        VOL_HANDLE_RADIUS,
+        fade(if hovered { ACCENT_HOVER } else { TEXT }),
+    );
+    painter.circle_stroke(
+        Pos2::new(handle_x, center_y),
+        VOL_HANDLE_RADIUS - 1.0,
+        Stroke::new(2.0, fade(ACCENT)),
+    );
+
+    // Le champ : le cadre des pas numériques, sans chevrons.
+    ui.painter()
+        .rect_filled(field_rect, NUMF_RADIUS, fade(CHECK_FILL));
+    ui.painter().rect_stroke(
+        field_rect.shrink(0.5),
+        NUMF_RADIUS,
+        Stroke::new(1.0, fade(SECONDARY_BORDER)),
+        egui::StrokeKind::Inside,
+    );
+    let font = text::label_font(ui.ctx(), SET_LABEL_SIZE);
+    if enabled {
+        let response = set_field_edit(
+            ui,
+            field_rect,
+            &font,
+            (log_name, "valeur"),
+            egui::TextEdit::singleline(input)
+                .horizontal_align(egui::Align::Center)
+                .char_limit(3)
+                .text_color(TEXT),
+        );
+        if response.changed() {
+            input.retain(|c| c.is_ascii_digit());
+        }
+        if response.lost_focus() {
+            let next = notifications::parse_volume(input, *volume);
+            if next != *volume {
+                *volume = next;
+                *changed = true;
+                tracing::info!("[carte] « {log_name} » — {next} %.");
+            }
+            *input = volume.to_string();
+        }
+    } else {
+        // Même piège que `set_numeric_field` : la police est résolue AVANT `fonts_mut`.
+        let galley = ui.fonts_mut(|f| f.layout_no_wrap(input.clone(), font.clone(), fade(TEXT)));
+        ui.painter().galley(
+            Pos2::new(
+                field_rect.center().x - galley.rect.width() / 2.0,
+                field_rect.center().y - galley.rect.height() / 2.0,
+            ),
+            galley,
+            fade(TEXT),
+        );
+    }
+    ui.painter().galley(
+        Pos2::new(
+            field_rect.right() + 6.0,
+            center_y - unit_galley.rect.height() / 2.0,
+        ),
+        unit_galley,
+        fade(TEXT_DIM),
+    );
+    y + SET_ROW_HEIGHT + SET_ROW_GAP
 }
 
 /// « Tester le son des notifications » : la même ligne, sans case — c'est le cas des alertes, dont

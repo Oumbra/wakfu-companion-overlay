@@ -9,6 +9,13 @@
 //! l'overlay à l'écran). Tout ce qui appartient au JOUEUR — liste suivie, profil d'alertes —
 //! passe par le compte (`overlay_sync::client::fetch_settings`), jamais par ce fichier.
 //!
+//! **Une exception, assumée (2026-09-30) : les groupes d'éléments suivis**
+//! ([`WatchlistGroupsConfig`]). Le compte ne connaît qu'une liste suivie — celle du groupe actif —
+//! et le modèle de ses réglages ne doit pas changer : les groupes inactifs n'ont donc nulle part
+//! ailleurs où vivre. Leurs compteurs, eux, restent dans le fichier de compteurs du moteur
+//! (`watchlist-counts.json`, rangés par groupe) : ils changent à chaque ramassage, ce fichier-ci
+//! à la validation d'une fenêtre.
+//!
 //! **Priorité de résolution du chemin au démarrage** (voir `resolve_log_path`, partagé par
 //! `main.rs` et `bin/wakfu-companion-overlay-x11.rs`) : argument CLI explicite > chemin sauvegardé
 //! ici (choisi via la modale Options, `panels::options_modal`) > découverte automatique
@@ -27,6 +34,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+
+use overlay_engine::{WatchlistEntry, WatchlistKind, WatchlistMode, DEFAULT_GROUP_ID};
 
 use crate::shortcuts::ShortcutBindings;
 
@@ -373,6 +382,23 @@ pub struct OverlayConfig {
     /// « Chat », et même politique que [`Self::suivi_alert_muted`] : la carte reste, le son part.
     #[serde(default)]
     pub chat_alert_muted: bool,
+    /// **Volumes des quatre sons, en pour cent** — curseur et champ posés après le bouton d'essai
+    /// de chaque section de « Paramètres » (2026-09-30, voir
+    /// [`crate::alert_sound::AlertVolumes`]). Un par son : les fichiers n'ont pas le même niveau,
+    /// et chacun n'est pas sensible de la même façon aux aigus et aux graves.
+    ///
+    /// **Locaux**, comme les sourdines : le bon volume dépend de la machine et du casque. Champs
+    /// PLATS dans le TOML, même raison que les interrupteurs de fonctionnalité. Défaut **100** :
+    /// un `config.toml` écrit avant ces clés joue ses sons au volume d'avant. Relus bornés à
+    /// `1..=100` par [`Self::alert_volumes`], jamais tels qu'écrits à la main.
+    #[serde(default = "volume_plein")]
+    pub turn_notification_volume: u8,
+    #[serde(default = "volume_plein")]
+    pub suivi_alert_volume: u8,
+    #[serde(default = "volume_plein")]
+    pub loot_alert_volume: u8,
+    #[serde(default = "volume_plein")]
+    pub chat_alert_volume: u8,
     /// **Installer automatiquement les mises à jour au démarrage** — case de la section « Mise à
     /// jour » de l'onglet « Paramètres » (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décision 3
     /// du mainteneur : oui par défaut). Cochée, une version plus récente trouvée derrière l'écran
@@ -420,6 +446,19 @@ pub struct OverlayConfig {
     /// s'en servait avant la case.
     #[serde(default)]
     pub multiaccount_shortcuts: bool,
+    /// **Activer les groupes d'éléments suivis** — case « Activer les groupes » de la section
+    /// « Suivi » de l'onglet « Paramètres » (2026-09-30). Décochée — le défaut — l'onglet Suivi ne
+    /// montre et n'édite que le groupe par défaut, exactement comme avant les groupes ; les autres
+    /// groupes sont conservés dans [`Self::watchlist_groups`] et retrouvés en la recochant.
+    #[serde(default)]
+    pub suivi_groups_enabled: bool,
+    /// Table `[watchlist_groups]` — les groupes d'éléments suivis et le dernier groupe affiché, voir
+    /// [`WatchlistGroupsConfig`].
+    ///
+    /// **Une table : elle doit suivre tous les champs simples**, et précéder `[shortcuts]` pour la
+    /// même raison que celle-ci doit rester dernière (voir sa doc).
+    #[serde(default)]
+    pub watchlist_groups: WatchlistGroupsConfig,
     /// Table `[shortcuts]` : `clé d'action` -> `combinaison` (`toggle = "Ctrl+Shift+W"`, voir
     /// `shortcuts::ShortcutAction::key`/`shortcuts::Shortcut::label`), alimentée par l'onglet
     /// « Raccourcis » de la fenêtre Options (2026-09-13).
@@ -442,9 +481,150 @@ pub struct OverlayConfig {
     pub shortcuts: BTreeMap<String, String>,
 }
 
+/// **Les groupes d'éléments suivis** (2026-09-30) — table `[watchlist_groups]` de `config.toml`.
+///
+/// Un groupe est une liste d'éléments suivis, avec un libellé. Un seul est affiché à la fois : le
+/// groupe **actif**, dont la liste est celle du compte (clé `watchlist`) et dont les compteurs sont
+/// vivants. Le groupe par défaut ([`DEFAULT_GROUP_ID`]) existe toujours, n'a pas de libellé et ne
+/// se renomme ni ne se supprime : c'est la liste unique d'avant les groupes.
+///
+/// Ne porte que des DÉFINITIONS (nom, genre, mode, cible) : les compteurs sont au moteur, voir la
+/// doc de module.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WatchlistGroupsConfig {
+    /// Le dernier groupe affiché — celui que l'overlay reprend au démarrage, et que « Activer les
+    /// groupes » retrouve quand on la recoche. Voir [`Self::effective_active`].
+    #[serde(default = "groupe_par_defaut")]
+    pub active: String,
+    #[serde(default)]
+    pub groups: Vec<WatchlistGroupConfig>,
+}
+
+impl Default for WatchlistGroupsConfig {
+    fn default() -> Self {
+        Self {
+            active: groupe_par_defaut(),
+            groups: Vec::new(),
+        }
+    }
+}
+
+fn groupe_par_defaut() -> String {
+    DEFAULT_GROUP_ID.to_string()
+}
+
+/// Un groupe d'éléments suivis — voir [`WatchlistGroupsConfig`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WatchlistGroupConfig {
+    pub id: String,
+    /// `None` pour le groupe par défaut, et pour lui seul.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub entries: Vec<WatchlistGroupEntry>,
+}
+
+/// Une définition d'élément suivi, sans compteur — voir [`WatchlistGroupsConfig`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WatchlistGroupEntry {
+    pub name: String,
+    pub kind: WatchlistKind,
+    pub mode: WatchlistMode,
+    #[serde(default)]
+    pub target: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<i64>,
+}
+
+impl WatchlistGroupEntry {
+    pub fn from_entry(entry: &WatchlistEntry) -> Self {
+        Self {
+            name: entry.name.clone(),
+            kind: entry.kind,
+            mode: entry.mode,
+            target: entry.countdown_target,
+            catalog_id: entry.catalog_id,
+        }
+    }
+
+    /// L'entrée que le moteur et l'onglet Suivi manipulent. Le compteur vaut ce dont part une
+    /// entrée neuve : il n'est qu'indicatif ici, le moteur a les vrais.
+    pub fn to_entry(&self) -> WatchlistEntry {
+        WatchlistEntry {
+            name: self.name.clone(),
+            kind: self.kind,
+            mode: self.mode,
+            count: if self.mode == WatchlistMode::Down {
+                self.target
+            } else {
+                0
+            },
+            countdown_target: self.target,
+            catalog_id: self.catalog_id,
+        }
+    }
+}
+
+impl WatchlistGroupsConfig {
+    /// Le groupe affiché : le groupe actif quand les groupes sont activés et qu'il existe encore,
+    /// le groupe par défaut sinon.
+    pub fn effective_active(&self, enabled: bool) -> &str {
+        if enabled && self.groups.iter().any(|g| g.id == self.active) {
+            &self.active
+        } else {
+            DEFAULT_GROUP_ID
+        }
+    }
+
+    /// Les définitions d'un groupe, `None` s'il n'existe pas.
+    pub fn definitions(&self, id: &str) -> Option<Vec<WatchlistEntry>> {
+        self.groups.iter().find(|g| g.id == id).map(|g| {
+            g.entries
+                .iter()
+                .map(WatchlistGroupEntry::to_entry)
+                .collect()
+        })
+    }
+
+    /// **Recopie la liste affichée dans son groupe** — voir `engine_thread::WatchlistDefinitions`.
+    /// Crée le groupe par défaut s'il manque (première ouverture après la mise à jour qui a
+    /// introduit les groupes) ; ignore un autre groupe inconnu. Renvoie `true` si quelque chose a
+    /// changé, pour ne réécrire le fichier qu'à bon escient.
+    pub fn set_definitions(&mut self, id: &str, entries: &[WatchlistEntry]) -> bool {
+        let entries: Vec<WatchlistGroupEntry> = entries
+            .iter()
+            .map(WatchlistGroupEntry::from_entry)
+            .collect();
+        if let Some(group) = self.groups.iter_mut().find(|g| g.id == id) {
+            if group.entries == entries {
+                return false;
+            }
+            group.entries = entries;
+            return true;
+        }
+        if id != DEFAULT_GROUP_ID {
+            return false;
+        }
+        self.groups.insert(
+            0,
+            WatchlistGroupConfig {
+                id: DEFAULT_GROUP_ID.to_string(),
+                label: None,
+                entries,
+            },
+        );
+        true
+    }
+}
+
 /// Valeur par défaut des drapeaux de fonctionnalité — **une fonction, parce que
 /// `#[serde(default)]` ne sait produire que `bool::default()`, c'est-à-dire `false`**. Voir
 /// `OverlayConfig::suivi_enabled` : le défaut d'une fonctionnalité est d'être active.
+/// Défaut `serde` des quatre volumes — voir `OverlayConfig::turn_notification_volume`.
+fn volume_plein() -> u8 {
+    crate::alert_sound::VOLUME_DEFAULT
+}
+
 fn actif() -> bool {
     true
 }
@@ -490,9 +670,15 @@ impl Default for OverlayConfig {
             recap_locked: actif(),
             suivi_alert_muted: false,
             chat_alert_muted: false,
+            turn_notification_volume: volume_plein(),
+            suivi_alert_volume: volume_plein(),
+            loot_alert_volume: volume_plein(),
+            chat_alert_volume: volume_plein(),
             auto_update: actif(),
             verbose_log: false,
             multiaccount_shortcuts: false,
+            suivi_groups_enabled: false,
+            watchlist_groups: WatchlistGroupsConfig::default(),
             shortcuts: BTreeMap::new(),
         }
     }
@@ -689,6 +875,26 @@ impl OverlayConfig {
     pub fn set_alert_mutes(&mut self, mutes: crate::panels::notifications::AlertMutes) {
         self.suivi_alert_muted = mutes.suivi;
         self.chat_alert_muted = mutes.chat;
+    }
+
+    /// Les quatre volumes de cette config, **bornés** — voir [`Self::turn_notification_volume`].
+    pub fn alert_volumes(&self) -> crate::alert_sound::AlertVolumes {
+        crate::alert_sound::AlertVolumes {
+            turn: self.turn_notification_volume,
+            suivi: self.suivi_alert_volume,
+            alertes: self.loot_alert_volume,
+            chat: self.chat_alert_volume,
+        }
+        .clamped()
+    }
+
+    /// Reporte les quatre volumes dans la config — appelée à la validation de la fenêtre Options.
+    pub fn set_alert_volumes(&mut self, volumes: crate::alert_sound::AlertVolumes) {
+        let volumes = volumes.clamped();
+        self.turn_notification_volume = volumes.turn;
+        self.suivi_alert_volume = volumes.suivi;
+        self.loot_alert_volume = volumes.alertes;
+        self.chat_alert_volume = volumes.chat;
     }
 }
 
@@ -1177,6 +1383,39 @@ mod tests {
         assert!(!relu.alert_mutes().chat);
     }
 
+    /// **Un volume jamais réglé est plein** — y compris dans un `config.toml` écrit avant ces
+    /// clés : personne n'entend ses alertes baisser en installant cette version. Réglé, il survit
+    /// à un aller-retour sur disque ; retouché à la main hors bornes, il est relu borné.
+    #[test]
+    fn aller_retour_des_volumes() {
+        use crate::alert_sound::AlertVolumes;
+        assert_eq!(
+            OverlayConfig::default().alert_volumes(),
+            AlertVolumes::default()
+        );
+        let ancienne: OverlayConfig =
+            toml::from_str("log_path = \"/config/wakfu.log\"").expect("ancienne config lisible");
+        assert_eq!(ancienne.alert_volumes(), AlertVolumes::default());
+
+        let mut config = OverlayConfig::default();
+        let reglés = AlertVolumes {
+            turn: 30,
+            suivi: 1,
+            alertes: 65,
+            chat: 100,
+        };
+        config.set_alert_volumes(reglés);
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert_eq!(relu.alert_volumes(), reglés);
+
+        let retouchée: OverlayConfig =
+            toml::from_str("turn_notification_volume = 0\nchat_alert_volume = 250")
+                .expect("config retouchée lisible");
+        assert_eq!(retouchée.alert_volumes().turn, 1);
+        assert_eq!(retouchée.alert_volumes().chat, 100);
+    }
+
     #[test]
     fn config_sans_table_de_raccourcis_reste_lisible() {
         let config: OverlayConfig =
@@ -1208,6 +1447,70 @@ mod tests {
         assert_eq!(relu, config);
         assert_eq!(relu.shortcuts(), bindings);
         assert!(relu.shortcuts().multiaccount_enabled());
+    }
+
+    /// Les groupes d'éléments suivis tiennent dans le TOML entre les champs simples et
+    /// `[shortcuts]`, et en ressortent intacts.
+    #[test]
+    fn aller_retour_toml_avec_groupes_de_suivi() {
+        let mut config = OverlayConfig {
+            suivi_groups_enabled: true,
+            ..Default::default()
+        };
+        let entree = WatchlistEntry {
+            name: "Blé".into(),
+            kind: WatchlistKind::Item,
+            mode: WatchlistMode::Goal,
+            count: 12,
+            countdown_target: 100,
+            catalog_id: Some(42),
+        };
+        assert!(config
+            .watchlist_groups
+            .set_definitions(DEFAULT_GROUP_ID, std::slice::from_ref(&entree)));
+        config.watchlist_groups.groups.push(WatchlistGroupConfig {
+            id: "g1".into(),
+            label: Some("Métier Paysan".into()),
+            entries: vec![WatchlistGroupEntry::from_entry(&entree)],
+        });
+        config.watchlist_groups.active = "g1".into();
+        config
+            .shortcuts
+            .insert("toggle".into(), "Ctrl+Shift+W".into());
+
+        let raw = toml::to_string_pretty(&config).expect("sérialisation");
+        let relu: OverlayConfig = toml::from_str(&raw).expect("relecture");
+        assert_eq!(relu, config);
+        assert_eq!(relu.watchlist_groups.effective_active(true), "g1");
+        assert_eq!(
+            relu.watchlist_groups.effective_active(false),
+            DEFAULT_GROUP_ID
+        );
+        // Le compteur n'est pas stocké : l'entrée relue part de sa valeur de départ.
+        assert_eq!(relu.watchlist_groups.definitions("g1").unwrap()[0].count, 0);
+    }
+
+    /// Une config écrite avant les groupes : groupes désactivés, aucun groupe, défaut actif.
+    #[test]
+    fn groupes_de_suivi_absents_d_une_config_ancienne() {
+        let relu: OverlayConfig = toml::from_str("combat_always_visible = true\n").unwrap();
+        assert!(!relu.suivi_groups_enabled);
+        assert!(relu.watchlist_groups.groups.is_empty());
+        assert_eq!(
+            relu.watchlist_groups.effective_active(true),
+            DEFAULT_GROUP_ID
+        );
+    }
+
+    /// Un groupe inconnu n'est jamais créé par la recopie ; le défaut, si.
+    #[test]
+    fn recopier_les_definitions_ne_cree_que_le_groupe_par_defaut() {
+        let mut groupes = WatchlistGroupsConfig::default();
+        assert!(!groupes.set_definitions("inconnu", &[]));
+        assert!(groupes.groups.is_empty());
+        assert!(groupes.set_definitions(DEFAULT_GROUP_ID, &[]));
+        assert!(!groupes.set_definitions(DEFAULT_GROUP_ID, &[]));
+        assert_eq!(groupes.groups.len(), 1);
     }
 
     /// Une config écrite avant la case multicompte a ses raccourcis F1/F2 désactivés, comme une

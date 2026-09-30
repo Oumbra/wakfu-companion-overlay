@@ -89,7 +89,7 @@ pub use components::select::{select, select_multi, Select, SelectState};
 pub use components::separator::{separator, Separator};
 pub use components::slider::{
     slider, snap_to_step as slider_snap_to_step, track_travel as slider_track_travel, Slider,
-    SliderState,
+    SliderMark, SliderState,
 };
 pub use components::stepper::{stepper, Stepper};
 pub use components::switch::{switch, Switch, SwitchState, SwitchVariant};

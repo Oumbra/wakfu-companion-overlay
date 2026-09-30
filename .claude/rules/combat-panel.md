@@ -13,8 +13,10 @@ sujet se documente ici, jamais dans `CLAUDE.md`.
 ## Ce que l'overlay affiche diffère du site — écart voulu, jamais à « corriger »
 
 Le panneau Combat ne donne une barre chiffrée (colonne de droite) qu'aux combattants ayant produit
-au moins 1 point de la grandeur affichée — dégâts, armure donnée ou soins (filtre
-`measured.value_of(f) > 0` dans `panels/combat.rs`, voir `CombatMetric::value_of`). Le site
+une valeur non nulle de la grandeur affichée — dégâts, armure donnée ou soins (filtre
+`measured.value_of(f) != 0` dans `panels/combat.rs`, voir `CombatMetric::value_of`). `!= 0` depuis
+le 2026-09-29 : le soin peut être négatif (« Retour de flamme » du Sacrieur, perte de PV
+auto-infligée émise en soin négatif par le parseur vendu) — ligne gardée, barre vide. Le site
 (`Oumbra/wakfu-companion`) fait l'inverse : une ligne par combattant du roster, à zéro comprise,
 pour les trois grandeurs.
 

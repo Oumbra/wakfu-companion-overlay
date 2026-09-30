@@ -2931,12 +2931,14 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // Et pour les deux cases « Couper le son des notifications » : jamais touchées,
                 // donc emportées levées.
                 mutes: overlay_ui::panels::notifications::AlertMutes::default(),
+                volumes: overlay_ui::alert_sound::AlertVolumes::default(),
                 // Idem pour la ligne « Fermeture automatique des notifications de décompte » de
                 // la section « Suivi » : emportée telle qu'elle a été posée à l'ouverture.
                 countdown_toast: overlay_ui::panels::suivi_tab::CountdownToastSettings::default(),
                 // Idem pour les deux cases de complétion de la même section (2026-09-17) :
                 // jamais touchées, donc emportées actives — le défaut demandé.
                 completion: overlay_ui::panels::suivi_tab::CompletionSettings::default(),
+                suivi_groups_enabled: false,
                 // Idem pour la ligne « Reprendre la session après une pause » de la section
                 // « Recap » (2026-09-17).
                 recap_resume: overlay_ui::recap_session::ResumeSettings::default(),
@@ -3498,7 +3500,30 @@ fn options_parametres_section_suivi_sans_retrait() {
     capture_section_suivi("options_parametres_section_suivi_sans_retrait", etat);
 }
 
+/// **La case « Activer les groupes » cochée** (2026-09-30) — dernière case de la section Suivi,
+/// sans retrait, grisée avec le reste de la section quand le Suivi est éteint.
+#[test]
+fn options_parametres_section_suivi_groupes() {
+    let mut etat = parametres_avec_notifications();
+    etat.suivi_groups_enabled = true;
+    capture_section_suivi("options_parametres_section_suivi_groupes", etat);
+}
+
 fn capture_section_suivi(name: &str, options_state: panels::options_modal::OptionsModalState) {
+    // Assez pour passer « Recap » et « Combat » et poser la section « Suivi » entière à l'écran,
+    // ses deux cases comprises — sans aller jusqu'à « Alertes », qui n'est pas le sujet. **Réduit
+    // de 276 px le 2026-09-18** : la section « Recap » a perdu sa ligne d'aide et son bouton
+    // « Replacer au défaut » (148), « Combat » son bouton de rafraîchissement (128) — « Suivi »
+    // est remontée d'autant.
+    capture_section_defilee(name, options_state, 154.0);
+}
+
+/// Rend l'onglet « Paramètres » défilé de `offset` px — voir [`defile_les_parametres`].
+fn capture_section_defilee(
+    name: &str,
+    options_state: panels::options_modal::OptionsModalState,
+    offset: f32,
+) {
     // Voir `options_parametres_section_compte` : ce test peint sans passer par
     // `Textures::get_or_load`, c'est `parametres_avec_notifications` qui pose le gel de version.
     let mut harness = Harness::builder()
@@ -3530,12 +3555,7 @@ fn capture_section_suivi(name: &str, options_state: panels::options_modal::Optio
             }
         });
     harness.run();
-    // Assez pour passer « Recap » et « Combat » et poser la section « Suivi » entière à l'écran,
-    // ses deux cases comprises — sans aller jusqu'à « Alertes », qui n'est pas le sujet. **Réduit
-    // de 276 px le 2026-09-18** : la section « Recap » a perdu sa ligne d'aide et son bouton
-    // « Replacer au défaut » (148), « Combat » son bouton de rafraîchissement (128) — « Suivi »
-    // est remontée d'autant.
-    defile_les_parametres(&mut harness, 154.0);
+    defile_les_parametres(&mut harness, offset);
     harness.snapshot(name);
 }
 
@@ -5233,6 +5253,154 @@ fn capture_onglet_suivi(
     harness.snapshot(nom);
 }
 
+/// **Les groupes d'éléments suivis** (2026-09-30) — l'onglet « Suivi » avec la case « Activer les
+/// groupes » cochée : la ligne « Groupe » sous « Activer le suivi ».
+///
+/// `choisi` est l'index du groupe affiché (0 = défaut, 1 = « Métier Paysan ») ; `renommage` ouvre
+/// le champ de renommage sur ce libellé.
+fn capture_onglet_suivi_groupes(nom: &str, choisi: usize, renommage: Option<&str>) {
+    overlay_ui::build_info::freeze_for_snapshots();
+    use overlay_ui::panels::suivi_groups::{GroupDraft, SuiviGroupsDraft};
+    use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
+
+    let mut groupes = SuiviGroupsDraft::default();
+    groupes.groups.push(GroupDraft {
+        id: "g1".into(),
+        label: Some("Métier Paysan".into()),
+        entries: entrees_de_suivi().into_iter().take(3).collect(),
+        retirees: Vec::new(),
+    });
+    groupes.groups.push(GroupDraft {
+        id: "g2".into(),
+        label: Some("Donjon Bworks".into()),
+        entries: Vec::new(),
+        retirees: Vec::new(),
+    });
+    let mut entries = entrees_de_suivi();
+    let mut retirees = Vec::new();
+    groupes.select(choisi, &mut entries, &mut retirees);
+
+    let mut suivi = SuiviTabState {
+        mode: overlay_ui::panels::suivi_tab::AddMode::Goal,
+        target: 250,
+        ..Default::default()
+    };
+    if let Some(libelle) = renommage {
+        suivi.group_row.rename = Some(libelle.to_string());
+    }
+    let mut options_state = OptionsModalState {
+        suivi,
+        suivi_draft: Some(entries),
+        suivi_availability: SuiviAvailability::Ready,
+        suivi_groups: groupes,
+        suivi_groups_enabled: true,
+        tab: OptionsTab::Suivi,
+        ..Default::default()
+    };
+
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            ui.style_mut().visuals.text_cursor.blink = false;
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
+                },
+            );
+        });
+    harness.run();
+    harness.snapshot(nom);
+}
+
+/// Groupe par défaut affiché : « Renommer » et « Supprimer » grisés, seul « Nouveau » répond.
+#[test]
+fn options_onglet_suivi_groupes_defaut() {
+    capture_onglet_suivi_groupes("options_suivi_groupes_defaut", 0, None);
+}
+
+/// Groupe nommé affiché : ses trois éléments, et les trois boutons — la corbeille sur le socle
+/// rouge du bouton `Danger`.
+#[test]
+fn options_onglet_suivi_groupes_nomme() {
+    capture_onglet_suivi_groupes("options_suivi_groupes_nomme", 1, None);
+}
+
+/// Renommage en cours : la liste devient un champ, suivi de la coche et de la flèche d'annulation.
+#[test]
+fn options_onglet_suivi_groupes_renommage() {
+    capture_onglet_suivi_groupes("options_suivi_groupes_renommage", 1, Some("Métier Paysan"));
+}
+
+/// **La case « Activer les groupes » décochée ne montre pas la ligne**, même quand un groupe nommé
+/// était choisi : l'onglet revient au groupe par défaut, et sa liste est celle qui s'affiche.
+#[test]
+fn options_onglet_suivi_groupes_desactives_reviennent_au_defaut() {
+    use overlay_ui::panels::suivi_groups::{GroupDraft, SuiviGroupsDraft};
+
+    let mut groupes = SuiviGroupsDraft::default();
+    groupes.groups.push(GroupDraft {
+        id: "g1".into(),
+        label: Some("Métier Paysan".into()),
+        entries: Vec::new(),
+        retirees: Vec::new(),
+    });
+    let mut entries = entrees_de_suivi();
+    let mut retirees = Vec::new();
+    groupes.select(1, &mut entries, &mut retirees);
+    let mut options_state = OptionsModalState {
+        suivi_draft: Some(entries),
+        suivi_groups: groupes,
+        suivi_groups_enabled: false,
+        tab: OptionsTab::Suivi,
+        ..Default::default()
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(
+            panels::options_modal::WINDOW_SIZE.0,
+            panels::options_modal::WINDOW_SIZE.1,
+        ))
+        .build_ui(move |ui| {
+            overlay_ui::style::apply(ui.ctx());
+            let icons = UiIcons::load(ui.ctx());
+            let remote_icons = RemoteIconStore::empty();
+            let mut remote_icon_textures = RemoteIconTextures::default();
+            let catalog = CatalogIndex::default();
+            panels::options_modal::show(
+                ui,
+                &mut options_state,
+                &mut panels::options_modal::OptionsModalContext {
+                    catalog: &catalog,
+                    remote_icons: &remote_icons,
+                    remote_icon_textures: &mut remote_icon_textures,
+                    icons: &icons,
+                    avatars: None,
+                    game_servers: &Default::default(),
+                },
+            );
+            assert_eq!(options_state.suivi_groups.selected, 0);
+            assert_eq!(
+                options_state.suivi_draft.as_ref().map(Vec::len),
+                Some(entrees_de_suivi().len())
+            );
+        });
+    harness.run();
+}
+
 /// **L'onglet « Suivi »** — la liste réduite à ses emplacements d'objet, et son formulaire d'ajout.
 ///
 /// Ce que cette capture verrouille, et qui est la règle la plus facile à perdre : **les compteurs
@@ -6447,6 +6615,25 @@ fn options_parametres_son_coupe() {
     capture_parametres("options_parametres_son_coupe", etat);
 }
 
+/// **Les jauges de volume** (2026-09-30) — une par section, après le bouton d'essai : curseur
+/// rempli jusqu'à la poignée, repères majeurs tous les 20 % et mineurs sur les 10, champ et « % ».
+/// Quatre valeurs différentes pour voir que chaque section garde la sienne, et la sourdine du Chat
+/// cochée pour montrer la jauge grisée qui garde sa valeur. Défilé jusqu'à poser les quatre
+/// sections à l'écran, de « Combat » à « Chat ».
+#[test]
+fn options_parametres_volumes() {
+    let mut etat = parametres_avec_notifications();
+    etat.turn_notification = true;
+    etat.volumes = overlay_ui::alert_sound::AlertVolumes {
+        turn: 80,
+        suivi: 100,
+        alertes: 65,
+        chat: 40,
+    };
+    etat.mutes.chat = true;
+    capture_section_defilee("options_parametres_volumes", etat, 330.0);
+}
+
 /// **Fermeture manuelle : le champ de durée se grise** — la logique existait (`.enabled`), aucun
 /// rendu ne la montrait. Posée sur les TROIS sections qui en ont une : Suivi (2026-09-16),
 /// Alertes et Chat.
@@ -7091,6 +7278,10 @@ fn carte_volet_parametres_champs_inactifs() {
         suivi_auto_close: false,
         alerts_available: false,
         chat_auto_close: false,
+        // Les jauges de volume ont la même branche inactive (2026-09-30).
+        turn_notification_muted: true,
+        suivi_muted: true,
+        chat_muted: true,
         ..Default::default()
     };
     let (mut harness, measured) = login_card_harness(
@@ -7106,6 +7297,51 @@ fn carte_volet_parametres_champs_inactifs() {
     );
     harness.run();
     assert_eq!(measured.get(), CARTE_A_PROPOS_HAUTEUR);
+}
+
+/// **Les jauges de volume de la Carte** (2026-09-30) — une ligne sous chaque bouton d'essai,
+/// dans le style de la Carte. Quatre valeurs différentes, le Chat coupé pour montrer la jauge
+/// estompée (et faire passer sa branche inactive, qui résout sa police hors de `fonts_mut` — voir
+/// `carte_volet_parametres_champs_inactifs`). Défilé pour poser Combat à Chat à l'écran.
+#[test]
+fn carte_volet_parametres_volumes() {
+    let settings = overlay_ui::panels::login::CardSettings {
+        volumes: overlay_ui::alert_sound::AlertVolumes {
+            turn: 80,
+            suivi: 100,
+            alertes: 65,
+            chat: 40,
+        },
+        chat_muted: true,
+        ..Default::default()
+    };
+    let (mut harness, measured) = login_card_harness(
+        AuthStatus::Connected,
+        Default::default(),
+        false,
+        false,
+        overlay_ui::panels::login::CardPanel::Settings,
+        None,
+        Some(true),
+        Some(settings),
+        CARTE_A_PROPOS_HAUTEUR,
+    );
+    harness.run();
+    harness.event(egui::Event::PointerMoved(egui::pos2(200.0, 400.0)));
+    harness.run();
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -300.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.step();
+    harness.event(egui::Event::PointerGone);
+    for _ in 0..12 {
+        harness.run();
+    }
+    assert_eq!(measured.get(), CARTE_A_PROPOS_HAUTEUR);
+    harness.snapshot("carte_parametres_volumes");
 }
 
 /// **L'écran « Compte connecté »** (2026-09-22) — il n'existait pas : `AuthStatus::Connected`

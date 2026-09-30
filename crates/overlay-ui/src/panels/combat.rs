@@ -389,8 +389,11 @@
 //! absent, camp vide, ennemis nombreux en cadre défilant — et reste le tout premier widget du
 //! panneau, ce dont dépend la marge d'infobulle de `render_content`.
 //!
-//! **Les barres restent filtrées à `value_of(f) > 0` pour les trois grandeurs** — un combattant
-//! qui n'a rien produit de la grandeur affichée garde son portrait mais pas de barre. Le site
+//! **Les barres restent filtrées à `value_of(f) != 0` pour les trois grandeurs** — un combattant
+//! qui n'a rien produit de la grandeur affichée garde son portrait mais pas de barre. `!= 0` et
+//! non `> 0` depuis le 2026-09-29 : le soin peut être NÉGATIF (« Retour de flamme » du Sacrieur,
+//! perte de PV auto-infligée émise en soin négatif par le parseur vendu) — le Sacrieur garde alors
+//! sa ligne, valeur négative affichée, barre vide (`damage_bar` borne le ratio à 0). Le site
 //! (`Oumbra/wakfu-companion`) fait l'inverse et liste tout le roster, zéros compris : cet écart
 //! est voulu (décision utilisateur explicite, 15 sept. 2026, voir CLAUDE.md « Ce que l'overlay
 //! affiche diffère du site ») — temps réel ici, bilan de fin de combat là-bas. Ne pas aligner les
@@ -757,7 +760,7 @@ pub fn show(
     let mut bars: Vec<&FighterDamage> = fighters
         .iter()
         .copied()
-        .filter(|f| measured.value_of(f) > 0)
+        .filter(|f| measured.value_of(f) != 0)
         .collect();
     bars.sort_by_key(|f| std::cmp::Reverse(measured.value_of(f)));
 

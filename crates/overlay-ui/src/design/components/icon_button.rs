@@ -281,6 +281,7 @@ pub struct IconButton {
     log_name: Option<String>,
     forced_state: Option<IconButtonState>,
     mirrored: bool,
+    danger: bool,
 }
 
 impl IconButton {
@@ -294,7 +295,21 @@ impl IconButton {
             log_name: None,
             forced_state: None,
             mirrored: false,
+            danger: false,
         }
+    }
+
+    /// **Bouton icône destructif** (2026-09-30, suppression d'un groupe d'éléments suivis) — le
+    /// socle rouge du bouton [`Danger`](super::button::ButtonVariant::Danger) (`button-danger.png`
+    /// et son survol, peints en 9-slice au côté du bouton), glyphe blanc. Même intention que la
+    /// variante texte : le rouge annonce qu'on retire quelque chose.
+    ///
+    /// Désactivé, il reprend le socle éteint de son contexte : un bouton qu'on ne peut pas presser
+    /// n'a rien à annoncer. Sans effet dans le contexte [`IconContext::Banner`], qui n'a pas de
+    /// socle texturé.
+    pub fn danger(mut self, danger: bool) -> Self {
+        self.danger = danger;
+        self
     }
 
     /// Retourne le glyphe horizontalement.
@@ -379,6 +394,19 @@ impl Widget for IconButton {
                     self.context.icon_tint().unwrap_or(tokens::ICON_TINT_HOVER),
                 ),
                 IconButtonState::Disabled => self.context.disabled(),
+            };
+            let (socle, icon_tint) = match (self.danger, self.context, state) {
+                (true, IconContext::Banner, _)
+                | (true, _, IconButtonState::Disabled)
+                | (false, ..) => (socle, icon_tint),
+                (true, _, IconButtonState::Idle) => (
+                    IconSocle::Texture(DsTexture::ButtonDanger, egui::Color32::WHITE),
+                    tokens::ICON_TINT_DANGER,
+                ),
+                (true, _, IconButtonState::Hovered) => (
+                    IconSocle::Texture(DsTexture::ButtonDangerHover, egui::Color32::WHITE),
+                    tokens::ICON_TINT_DANGER,
+                ),
             };
             match socle {
                 IconSocle::Texture(texture, tint) => {

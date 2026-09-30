@@ -85,6 +85,7 @@
 
 use overlay_sync::update::UpdateStatus;
 
+use crate::alert_sound::AlertVolumes;
 use crate::design::{self, ButtonSize, ButtonVariant};
 use crate::panels::alerts_tab::{self, AlertsTabContext, AlertsTabState};
 use crate::panels::chat_tab::{self, ChatAvailability, ChatDraft, ChatTabState};
@@ -300,6 +301,12 @@ pub struct OptionsModalState {
     /// l'alerte continue de s'afficher — c'est le demi-pas entre « tout actif » et une
     /// fonctionnalité éteinte.
     pub mutes: AlertMutes,
+    /// **Les quatre volumes** — jauge posée après le bouton d'essai de chaque section de
+    /// notifications (2026-09-30, `panels::notifications::volume_control`). Même mécanique de
+    /// brouillon que [`Self::mutes`] : initialisés par l'hôte au réglage en vigueur
+    /// (`config::OverlayConfig::alert_volumes`), pris en compte seulement à « Valider ». Le
+    /// bouton d'essai, lui, fait entendre le volume du brouillon tout de suite.
+    pub volumes: AlertVolumes,
     /// **La fermeture automatique de la carte de décompte** — ligne « Fermeture automatique des
     /// notifications de décompte » de la section « Suivi » (2026-09-16, voir
     /// [`suivi_tab::CountdownToastSettings`]).
@@ -331,6 +338,13 @@ pub struct OptionsModalState {
     pub suivi_draft: Option<Vec<overlay_engine::WatchlistEntry>>,
     /// D'où vient la liste suivie, et si elle est modifiable — posé par l'hôte à l'ouverture.
     pub suivi_availability: suivi_tab::SuiviAvailability,
+    /// **Les groupes d'éléments suivis** (2026-09-30) — tous les groupes sauf la liste du groupe
+    /// choisi, qui est [`Self::suivi_draft`]. Voir `panels::suivi_groups`.
+    pub suivi_groups: crate::panels::suivi_groups::SuiviGroupsDraft,
+    /// **Case « Activer les groupes »** de la section « Suivi » de l'onglet « Paramètres »
+    /// (2026-09-30) — brouillon, comme les autres cases : pris en compte à « Valider ». Décochée,
+    /// l'onglet Suivi ne montre que le groupe par défaut.
+    pub suivi_groups_enabled: bool,
     /// Ce que l'onglet « Raccourcis » garde entre deux frames — recherche, case en écoute, dernier
     /// refus. **Pas les combinaisons** : celles-ci sont le brouillon ci-dessous.
     pub raccourcis: raccourcis_tab::RaccourcisTabState,
@@ -445,6 +459,12 @@ pub struct OptionsInitial {
     /// Les entrées suivies telles qu'elles étaient à l'ouverture — c'est elles que « Annuler »
     /// abandonne, et leur comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
     pub suivi: Option<Vec<overlay_engine::WatchlistEntry>>,
+    /// Les groupes tels qu'ils étaient à l'ouverture, liste du groupe choisi comprise
+    /// (`SuiviGroupsDraft::flushed`), et l'index du groupe choisi — même rôle que les champs
+    /// ci-dessus.
+    pub suivi_groups: (Vec<crate::panels::suivi_groups::GroupDraft>, usize),
+    /// La case « Activer les groupes » telle qu'elle était à l'ouverture.
+    pub suivi_groups_enabled: bool,
     pub chat: Option<ChatDraft>,
     /// Le roster tel qu'il était à l'ouverture — c'est lui que « Annuler » abandonne, et sa
     /// comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
@@ -466,6 +486,8 @@ pub struct OptionsInitial {
     /// Les deux sourdines telles qu'elles étaient à l'ouverture — même rôle que les champs
     /// ci-dessus.
     pub mutes: AlertMutes,
+    /// Les quatre volumes tels qu'ils étaient à l'ouverture — même rôle.
+    pub volumes: AlertVolumes,
     /// La fermeture de la carte de décompte telle qu'elle était à l'ouverture — même rôle.
     pub countdown_toast: suivi_tab::CountdownToastSettings,
     /// Les deux réglages de complétion tels qu'ils étaient à l'ouverture — même rôle.
@@ -505,8 +527,10 @@ impl OptionsModalState {
             turn_notification_muted: self.turn_notification_muted,
             features: self.features,
             mutes: self.mutes,
+            volumes: self.volumes,
             countdown_toast: self.countdown_toast,
             completion: self.completion,
+            suivi_groups_enabled: self.suivi_groups_enabled,
             recap_resume: self.recap_resume,
             shortcuts: self.shortcuts.clone(),
             auto_update: self.auto_update,
@@ -540,6 +564,20 @@ impl OptionsModalState {
         OptionsModalAction::Validate(self.commit())
     }
 
+    /// Les groupes ont-ils changé depuis l'ouverture — un groupe créé, renommé, supprimé, édité,
+    /// ou un autre groupe choisi ?
+    pub fn suivi_groups_changed(&self) -> bool {
+        let Some(draft) = self.suivi_draft.as_ref() else {
+            return false;
+        };
+        let (groupes, choisi) = &self.initial.suivi_groups;
+        if groupes.is_empty() {
+            return false;
+        }
+        self.suivi_groups.selected != *choisi
+            || self.suivi_groups.flushed(draft, &self.suivi.retirees) != *groupes
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.path_input.trim() != self.initial.path.trim()
             || self.combat_always_visible != self.initial.combat_always_visible
@@ -548,11 +586,14 @@ impl OptionsModalState {
             || self.turn_notification_muted != self.initial.turn_notification_muted
             || self.features != self.initial.features
             || self.mutes != self.initial.mutes
+            || self.volumes != self.initial.volumes
             || self.countdown_toast != self.initial.countdown_toast
             || self.completion != self.initial.completion
             || self.recap_resume != self.initial.recap_resume
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
+            || self.suivi_groups_enabled != self.initial.suivi_groups_enabled
+            || self.suivi_groups_changed()
             || self.chat_draft != self.initial.chat
             || self.personnages_draft != self.initial.personnages
             || self.shortcuts != self.initial.shortcuts
@@ -582,17 +623,20 @@ pub enum OptionsModalAction {
     Validate(OptionsCommit),
     /// Jouer le son de ramassage, depuis la ligne « Tester le son des notifications » de la
     /// section « Alertes » — l'appelant seul a le périphérique audio
-    /// (`alert_sound::play_loot_alert`).
-    TestAlertSound,
+    /// (`alert_sound::Sound::Loot`).
+    ///
+    /// Les quatre actions d'essai portent le **volume du brouillon** (`alert_sound::play`) : on
+    /// écoute le réglage qu'on est en train de faire, avant de le valider.
+    TestAlertSound(u8),
     /// Le bouton d'essai de la section « Chat » : jouer le son de recherche
-    /// (`alert_sound::play_chat_alert`).
-    TestChatSound,
+    /// (`alert_sound::Sound::Chat`).
+    TestChatSound(u8),
     /// Le bouton d'essai de la section « Suivi » : jouer le son du décompte arrivé à 0
-    /// (`alert_sound::play_countdown_alert`).
-    TestCountdownSound,
+    /// (`alert_sound::Sound::Countdown`).
+    TestCountdownSound(u8),
     /// Le bouton d'essai de la section « Combat » : jouer le son de la notification de tour
-    /// (`alert_sound::play_turn_alert`).
-    TestTurnSound,
+    /// (`alert_sound::Sound::Turn`).
+    TestTurnSound(u8),
     /// Déconnecter le compte, depuis la section « Compte » de l'onglet « Paramètres »
     /// (**confirmée**, voir `show`) — l'appelant seul parle au thread Auth
     /// (`main.rs::App::disconnect_account`) et sait refermer cette fenêtre derrière.
@@ -692,6 +736,10 @@ pub struct OptionsCommit {
     /// l'hôte persiste (`config::OverlayConfig::set_alert_mutes`) et transmet au thread Engine
     /// (`engine_thread::EngineCommand::SetAlertMutes`).
     pub mutes: AlertMutes,
+    /// Les quatre volumes (`panels::notifications::volume_control`) — ce que l'hôte persiste
+    /// (`config::OverlayConfig::set_alert_volumes`) et pose sur le module audio
+    /// (`alert_sound::set_volumes`).
+    pub volumes: AlertVolumes,
     /// La durée d'affichage de la carte de décompte et sa fermeture manuelle
     /// (`panels::suivi_tab::CountdownToastSettings`) — ce que l'hôte persiste
     /// (`config::OverlayConfig::set_countdown_toast`) et transmet au thread Engine
@@ -700,6 +748,10 @@ pub struct OptionsCommit {
     /// Ce que devient un suivi complété — même trajet que `countdown_toast` : enregistré dans la
     /// config locale (`config::OverlayConfig::set_completion`) et gardé en vigueur par l'hôte.
     pub completion: suivi_tab::CompletionSettings,
+    /// État de la case « Activer les groupes » — ce que l'hôte persiste
+    /// (`config::OverlayConfig::suivi_groups_enabled`). Les groupes eux-mêmes partent par
+    /// `main.rs::commit_suivi`, avec la liste suivie.
+    pub suivi_groups_enabled: bool,
     /// La reprise de la session du Récap ([`crate::recap_session::ResumeSettings`]) — ce que
     /// l'hôte persiste (`config::OverlayConfig::set_recap_resume`) et pose sur sa session
     /// (`recap_session::RecapSession::set_resume_settings`).
@@ -870,6 +922,14 @@ pub fn show(
             let mut vide = Vec::new();
             let availability = state.suivi_availability;
             let entries = state.suivi_draft.as_mut().unwrap_or(&mut vide);
+            // Groupes désactivés dans le brouillon : l'onglet revient au groupe par défaut, le seul
+            // qu'il montre alors — voir la case « Activer les groupes ».
+            if !state.suivi_groups_enabled {
+                state
+                    .suivi_groups
+                    .select(0, entries, &mut state.suivi.retirees);
+                state.suivi.group_row = Default::default();
+            }
             suivi_action = suivi_tab::show(
                 ui,
                 panel,
@@ -882,6 +942,9 @@ pub fn show(
                     icons: ctx.icons,
                     availability,
                     enabled: &mut state.features.suivi,
+                    groups: state
+                        .suivi_groups_enabled
+                        .then_some(&mut state.suivi_groups),
                 },
             );
             return;
@@ -1262,13 +1325,11 @@ pub fn show(
                     .log_name("options-notification-de-tour-sans-son"),
                 );
                 ui.add_space(notifications::CONTROL_GAP);
-                if notifications::test_sound_button(
-                    ui,
-                    "combat",
-                    state.turn_notification && !state.turn_notification_muted,
-                ) {
-                    action = OptionsModalAction::TestTurnSound;
+                let audible = state.turn_notification && !state.turn_notification_muted;
+                if notifications::test_sound_button(ui, "combat", audible) {
+                    action = OptionsModalAction::TestTurnSound(state.volumes.turn);
                 }
+                notifications::volume_control(ui, "combat", &mut state.volumes.turn, audible);
             },
             );
 
@@ -1311,6 +1372,7 @@ pub fn show(
                     log_prefix: "suivi",
                     enabled: state.features.suivi,
                     muted: Some(&mut state.mutes.suivi),
+                    volume: &mut state.volumes.suivi,
                     // `available: true` sans condition, contrairement aux deux sections
                     // suivantes : ce réglage est LOCAL (`config::OverlayConfig`), il n'y a aucun
                     // brouillon de compte à attendre et donc jamais de ligne grisée.
@@ -1322,7 +1384,7 @@ pub fn show(
                     }),
                 },
             ) {
-                action = OptionsModalAction::TestCountdownSound;
+                action = OptionsModalAction::TestCountdownSound(state.volumes.suivi);
             }
 
             // **Ce que devient un suivi qui vient d'aboutir** (2026-09-17, demande utilisateur).
@@ -1373,6 +1435,21 @@ pub fn show(
                     .log_name("options-suivi-animation"),
                 );
             });
+            // **Les groupes d'éléments suivis** (2026-09-30, demande utilisateur) : une option,
+            // décochée par défaut. Cochée, l'onglet Suivi gagne sa ligne « Groupe » ; décochée, il
+            // n'édite que le groupe par défaut et les autres groupes sont conservés tels quels.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.add(
+                design::checkbox(&mut state.suivi_groups_enabled, "Activer les groupes")
+                    .enabled(state.features.suivi)
+                    .tooltip(
+                        "Permet de préparer plusieurs listes d'éléments suivis et de passer de \
+                         l'une à l'autre depuis l'onglet Suivi, sans perdre les compteurs. \
+                         Décochée, seul le groupe par défaut est affiché ; les autres groupes \
+                         sont conservés.",
+                    )
+                    .log_name("options-suivi-groupes"),
+            );
 
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Alertes"));
@@ -1390,6 +1467,7 @@ pub fn show(
                     log_prefix: "alertes",
                     enabled: state.features.alerts,
                     muted: None,
+                    volume: &mut state.volumes.alertes,
                     auto_close: Some(notifications::AutoClose {
                         available: alertes_prêtes,
                         label: notifications::AUTO_CLOSE_LABEL,
@@ -1398,7 +1476,7 @@ pub fn show(
                     }),
                 },
             ) {
-                action = OptionsModalAction::TestAlertSound;
+                action = OptionsModalAction::TestAlertSound(state.volumes.alertes);
             }
 
             ui.add_space(SECTION_GAP);
@@ -1413,6 +1491,7 @@ pub fn show(
                     log_prefix: "chat",
                     enabled: state.features.chat,
                     muted: Some(&mut state.mutes.chat),
+                    volume: &mut state.volumes.chat,
                     auto_close: Some(notifications::AutoClose {
                         available: chat_prêt,
                         label: notifications::AUTO_CLOSE_LABEL,
@@ -1421,7 +1500,7 @@ pub fn show(
                     }),
                 },
             ) {
-                action = OptionsModalAction::TestChatSound;
+                action = OptionsModalAction::TestChatSound(state.volumes.chat);
             }
 
             // **Section « Démarrage » (2026-09-16)** — une seule case : ce que l'overlay fait
@@ -1914,8 +1993,10 @@ mod tests {
                 turn_notification_muted: false,
                 features: FeatureToggles::default(),
                 mutes: AlertMutes::default(),
+                volumes: AlertVolumes::default(),
                 countdown_toast: suivi_tab::CountdownToastSettings::default(),
                 completion: suivi_tab::CompletionSettings::default(),
+                suivi_groups_enabled: false,
                 recap_resume: ResumeSettings::default(),
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,
@@ -1975,6 +2056,23 @@ mod tests {
             !state.is_dirty(),
             "décocher ramène la fenêtre à son état d'ouverture"
         );
+    }
+
+    /// **Un volume est un brouillon** comme les sourdines : le bouger ouvre la garde de
+    /// fermeture, « Valider » l'emporte, et le ramener à sa valeur d'ouverture la referme.
+    #[test]
+    fn un_volume_modifie_est_un_brouillon() {
+        let mut state = fenetre_ouverte("/jeu/wakfu.log", false);
+        state.volumes.chat = 40;
+        assert!(state.is_dirty());
+        let commit = state.commit();
+        assert_eq!(commit.volumes.chat, 40, "« Valider » l'emporte");
+        assert_eq!(
+            commit.volumes.turn, 100,
+            "les autres sections gardent le leur"
+        );
+        state.volumes.chat = 100;
+        assert!(!state.is_dirty());
     }
 
     /// La case « Couper le son des notifications » est un brouillon comme sa voisine, et se

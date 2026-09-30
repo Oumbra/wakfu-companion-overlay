@@ -78,6 +78,20 @@
 //! > le contrôle : « la largeur est décidée contrôle par contrôle ». Le composant n'impose donc
 //! > aucune largeur par défaut autre que la place disponible, comme `design::input`.
 //!
+//! ## La recherche dans la liste (2026-09-30)
+//!
+//! Une liste longue se parcourt mal au défilement : à partir d'un seuil d'entrées
+//! ([`Select::searchable_from`]), la liste dépliée porte en tête un champ de recherche — le
+//! [`design::input`](super::input) au gabarit de la barre de recherche du jeu, loupe comprise. La
+//! saisie filtre les entrées sans tenir compte de la casse, n'importe où dans le libellé ; `Entrée`
+//! choisit la première entrée restante, `Échap` referme la liste. Le champ prend le focus à
+//! l'ouverture et se vide à la fermeture. Au-delà de [`tokens::SELECT_SEARCH_MAX_ROWS`] entrées, la
+//! liste défile.
+//!
+//! Rien de tout cela n'a de référence dans le jeu : c'est une demande utilisateur (groupes
+//! d'éléments suivis), bâtie uniquement de pièces déjà relevées — le champ, la liste, sa mise en
+//! avant.
+//!
 //! ## Ce qui n'a PAS de référence, et est donc inventé
 //!
 //! - **La distinction entre « survolée » et « valeur courante ».** Une seule capture montre une
@@ -135,6 +149,12 @@ pub struct Select<'a, T> {
     forced_open: Option<bool>,
     /// Force l'entrée peinte en survol — voir [`Select::preview_hovered`].
     forced_hover: Option<usize>,
+    /// Seuil d'apparition du champ de recherche — voir [`Select::searchable_from`].
+    search_from: Option<usize>,
+    search_placeholder: Option<String>,
+    empty_text: Option<String>,
+    /// Force la saisie du champ de recherche — voir [`Select::preview_query`].
+    forced_query: Option<String>,
 }
 
 impl<'a, T: PartialEq + Clone> Select<'a, T> {
@@ -150,6 +170,10 @@ impl<'a, T: PartialEq + Clone> Select<'a, T> {
             forced_state: None,
             forced_open: None,
             forced_hover: None,
+            search_from: None,
+            search_placeholder: None,
+            empty_text: None,
+            forced_query: None,
         }
     }
 
@@ -188,6 +212,32 @@ impl<'a, T: PartialEq + Clone> Select<'a, T> {
     /// Nom d'instance pour la journalisation (défaut : `"select"`).
     pub fn log_name(mut self, name: impl Into<String>) -> Self {
         self.log_name = Some(name.into());
+        self
+    }
+
+    /// **Champ de recherche en tête de la liste dépliée, dès `min_entries` entrées** — voir « La
+    /// recherche dans la liste » dans la doc de module. En dessous du seuil, la liste est celle de
+    /// toujours.
+    pub fn searchable_from(mut self, min_entries: usize) -> Self {
+        self.search_from = Some(min_entries);
+        self
+    }
+
+    /// Texte d'attente du champ de recherche (défaut : « Rechercher… »).
+    pub fn search_placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.search_placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// Ligne affichée quand la recherche n'a rien trouvé (défaut : « Aucun résultat »).
+    pub fn empty_text(mut self, text: impl Into<String>) -> Self {
+        self.empty_text = Some(text.into());
+        self
+    }
+
+    /// Force la saisie du champ de recherche — galerie et captures uniquement.
+    pub fn preview_query(mut self, query: impl Into<String>) -> Self {
+        self.forced_query = Some(query.into());
         self
     }
 
@@ -338,12 +388,48 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
                 );
         }
 
+        let query_id = response.id.with("ds-select-query");
         if open && self.enabled && !self.options.is_empty() {
-            let list_height = tokens::SELECT_ROW_HEIGHT * self.options.len() as f32;
+            let searchable = self
+                .search_from
+                .is_some_and(|min| self.options.len() >= min);
+            let just_opened = response.clicked();
+            let mut query = self
+                .forced_query
+                .clone()
+                .unwrap_or_else(|| ui.data(|d| d.get_temp::<String>(query_id).unwrap_or_default()));
+            let needle = query.trim().to_lowercase();
+            let visible: Vec<usize> = (0..self.options.len())
+                .filter(|&index| {
+                    !searchable
+                        || needle.is_empty()
+                        || self.options[index].1.to_lowercase().contains(&needle)
+                })
+                .collect();
+            let search_height = if searchable {
+                tokens::SELECT_SEARCH_ROW_HEIGHT
+            } else {
+                0.0
+            };
+            let shown_rows = if searchable {
+                visible.len().clamp(1, tokens::SELECT_SEARCH_MAX_ROWS)
+            } else {
+                visible.len()
+            };
+            let scrolls = searchable && visible.len() > tokens::SELECT_SEARCH_MAX_ROWS;
+            let list_height = search_height + tokens::SELECT_ROW_HEIGHT * shown_rows as f32;
             let list_rect = egui::Rect::from_min_size(
                 egui::pos2(rect.left(), rect.bottom()),
                 Vec2::new(width, list_height),
             );
+            let search_placeholder = self
+                .search_placeholder
+                .clone()
+                .unwrap_or_else(|| "Rechercher…".to_owned());
+            let empty_text = self
+                .empty_text
+                .clone()
+                .unwrap_or_else(|| "Aucun résultat".to_owned());
             // `Area` au premier plan : la liste sort du flux, donc ni le widget suivant ne la
             // recouvre, ni son ouverture ne décale la mise en page. `Order::Foreground` la place
             // au-dessus du panneau sans passer devant les infobulles.
@@ -366,73 +452,139 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
                     ui.painter()
                         .rect_filled(list_rect, list_radius, tokens::SELECT_LIST_FILL);
 
-                    let last = self.options.len() - 1;
                     let mut clicked = None;
-                    for (index, (_, label)) in self.options.iter().enumerate() {
-                        let row = egui::Rect::from_min_size(
-                            egui::pos2(
-                                list_rect.left(),
-                                list_rect.top() + tokens::SELECT_ROW_HEIGHT * index as f32,
-                            ),
-                            Vec2::new(width, tokens::SELECT_ROW_HEIGHT),
+                    if searchable {
+                        let search_rect = egui::Rect::from_min_size(
+                            list_rect.min,
+                            Vec2::new(width, search_height),
+                        )
+                        .shrink2(tokens::SELECT_SEARCH_INSET);
+                        let field = ui.put(
+                            search_rect,
+                            crate::design::input(&mut query)
+                                .size(crate::design::InputSize::Search)
+                                .leading_icon(DsIcon::Search)
+                                .placeholder(search_placeholder)
+                                .width(search_rect.width())
+                                .request_focus(just_opened)
+                                .log_name(format!("{name}.recherche")),
                         );
-                        let row_response = ui.interact(
-                            row,
-                            response.id.with(("ds-select-row", index)),
-                            Sense::click(),
-                        );
-                        let checked = self.is_checked(&self.options[index].0);
-                        // Survolée et « valeur courante » partagent le même fond : c'est le seul
-                        // fond de mise en avant relevé, et rien ne dit qu'il en existe un second.
-                        let highlighted = self.forced_hover == Some(index)
-                            || row_response.hovered()
-                            || (!self.is_multiple() && checked);
-                        if highlighted {
-                            // La mise en avant épouse le conteneur. Carrée, elle sortait par les
-                            // coins arrondis en première et en dernière position — le défaut que
-                            // la capture du 2026-09-14 montrait sur l'entrée du haut.
-                            let highlight_radius = egui::CornerRadius {
-                                nw: if index == 0 { list_radius.nw } else { 0 },
-                                ne: if index == 0 { list_radius.ne } else { 0 },
-                                sw: if index == last { list_radius.sw } else { 0 },
-                                se: if index == last { list_radius.se } else { 0 },
-                            };
-                            ui.painter().rect_filled(
-                                row,
-                                highlight_radius,
-                                tokens::SELECT_ROW_HIGHLIGHT,
-                            );
+                        if field.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            clicked = visible.first().copied();
                         }
-                        let mut text_x = row.left() + tokens::SELECT_ROW_PADDING_X;
-                        if self.is_multiple() {
-                            let box_rect = egui::Rect::from_min_size(
+                        if visible.is_empty() {
+                            let row = egui::Rect::from_min_size(
+                                egui::pos2(list_rect.left(), list_rect.top() + search_height),
+                                Vec2::new(width, tokens::SELECT_ROW_HEIGHT),
+                            );
+                            ui.painter().text(
                                 egui::pos2(
-                                    text_x,
-                                    (row.center().y - tokens::CHECKBOX_SIZE / 2.0).round(),
+                                    row.left() + tokens::SELECT_ROW_PADDING_X,
+                                    row.center().y,
                                 ),
-                                Vec2::splat(tokens::CHECKBOX_SIZE),
-                            );
-                            let texture = if checked {
-                                DsTexture::CheckboxChecked
-                            } else {
-                                DsTexture::CheckboxUnchecked
-                            };
-                            design.paint(ui.painter(), box_rect, texture, egui::Color32::WHITE);
-                            text_x = box_rect.right() + tokens::CHECKBOX_LABEL_GAP;
-                        }
-                        ui.painter()
-                            .with_clip_rect(row.intersect(ui.clip_rect()))
-                            .text(
-                                egui::pos2(text_x, row.center().y),
                                 Align2::LEFT_CENTER,
-                                label,
+                                empty_text,
                                 font.clone(),
-                                tokens::SELECT_TEXT,
+                                tokens::SELECT_EMPTY_TEXT,
                             );
-                        if row_response.clicked() {
-                            clicked = Some(index);
                         }
                     }
+
+                    // Les entrées, allouées l'une sous l'autre sans gouttière : une zone qui
+                    // défile quand la recherche en laisse trop, un `Ui` simple sinon.
+                    let rows_rect = egui::Rect::from_min_size(
+                        egui::pos2(list_rect.left(), list_rect.top() + search_height),
+                        Vec2::new(width, tokens::SELECT_ROW_HEIGHT * shown_rows as f32),
+                    );
+                    let mut rows_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(rows_rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    rows_ui.spacing_mut().item_spacing = Vec2::ZERO;
+                    let paint_rows = |ui: &mut Ui| {
+                        let last = visible.len().saturating_sub(1);
+                        let mut row_clicked = None;
+                        for (pos, &index) in visible.iter().enumerate() {
+                            let label = &self.options[index].1;
+                            let (row, _) = ui.allocate_exact_size(
+                                Vec2::new(width, tokens::SELECT_ROW_HEIGHT),
+                                Sense::hover(),
+                            );
+                            let row_response = ui.interact(
+                                row,
+                                response.id.with(("ds-select-row", index)),
+                                Sense::click(),
+                            );
+                            let checked = self.is_checked(&self.options[index].0);
+                            // Survolée et « valeur courante » partagent le même fond : c'est le seul
+                            // fond de mise en avant relevé, et rien ne dit qu'il en existe un second.
+                            let highlighted = self.forced_hover == Some(index)
+                                || row_response.hovered()
+                                || (!self.is_multiple() && checked);
+                            if highlighted {
+                                // La mise en avant épouse le conteneur. Carrée, elle sortait par
+                                // les coins arrondis en première et en dernière position — le
+                                // défaut que la capture du 2026-09-14 montrait sur l'entrée du
+                                // haut. Sous un champ de recherche, la première entrée n'est plus
+                                // au bord : elle reste carrée.
+                                let top = pos == 0 && !searchable;
+                                let bottom = pos == last && !scrolls;
+                                let highlight_radius = egui::CornerRadius {
+                                    nw: if top { list_radius.nw } else { 0 },
+                                    ne: if top { list_radius.ne } else { 0 },
+                                    sw: if bottom { list_radius.sw } else { 0 },
+                                    se: if bottom { list_radius.se } else { 0 },
+                                };
+                                ui.painter().rect_filled(
+                                    row,
+                                    highlight_radius,
+                                    tokens::SELECT_ROW_HIGHLIGHT,
+                                );
+                            }
+                            let mut text_x = row.left() + tokens::SELECT_ROW_PADDING_X;
+                            if self.is_multiple() {
+                                let box_rect = egui::Rect::from_min_size(
+                                    egui::pos2(
+                                        text_x,
+                                        (row.center().y - tokens::CHECKBOX_SIZE / 2.0).round(),
+                                    ),
+                                    Vec2::splat(tokens::CHECKBOX_SIZE),
+                                );
+                                let texture = if checked {
+                                    DsTexture::CheckboxChecked
+                                } else {
+                                    DsTexture::CheckboxUnchecked
+                                };
+                                design.paint(ui.painter(), box_rect, texture, egui::Color32::WHITE);
+                                text_x = box_rect.right() + tokens::CHECKBOX_LABEL_GAP;
+                            }
+                            ui.painter()
+                                .with_clip_rect(row.intersect(ui.clip_rect()))
+                                .text(
+                                    egui::pos2(text_x, row.center().y),
+                                    Align2::LEFT_CENTER,
+                                    label,
+                                    font.clone(),
+                                    tokens::SELECT_TEXT,
+                                );
+                            if row_response.clicked() {
+                                row_clicked = Some(index);
+                            }
+                        }
+                        row_clicked
+                    };
+                    let row_clicked = if scrolls {
+                        egui::ScrollArea::vertical()
+                            .id_salt(response.id.with("ds-select-scroll"))
+                            .max_height(rows_rect.height())
+                            .auto_shrink([false, false])
+                            .show(&mut rows_ui, paint_rows)
+                            .inner
+                    } else {
+                        paint_rows(&mut rows_ui)
+                    };
+                    clicked = clicked.or(row_clicked);
 
                     // Liseré et bord EN DERNIER, par-dessus les entrées. Peints avant, la mise en
                     // avant de la première entrée mangeait le liseré et celle de la dernière
@@ -460,6 +612,9 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
                         0,
                         tokens::SELECT_LIST_TOP_LINE,
                     );
+                    if searchable && self.forced_query.is_none() {
+                        ui.data_mut(|d| d.insert_temp(query_id, query.clone()));
+                    }
                     clicked
                 });
 
@@ -483,6 +638,10 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
 
         if self.forced_open.is_none() {
             ui.data_mut(|d| d.insert_temp(open_id, open));
+        }
+        // La recherche ne survit pas à la fermeture : rouvrir la liste la montre entière.
+        if !open {
+            ui.data_mut(|d| d.remove::<String>(query_id));
         }
         if self.enabled {
             response.on_hover_cursor(egui::CursorIcon::PointingHand)
