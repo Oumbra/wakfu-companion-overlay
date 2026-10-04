@@ -228,12 +228,13 @@ L'échec de détection n'est **pas** une erreur fatale : l'overlay démarre et a
 - `notify::RecommendedWatcher` sur le **répertoire** (pas le fichier : la rotation détruit l'inode
   surveillé), + `PollWatcher` à 1 s en repli et sur montage réseau.
 - Debounce 100 ms : le client Java écrit par rafales.
-- Lecture depuis `offset`, découpe sur `\n`, **conservation du reliquat** (ligne partielle) jusqu'au
-  prochain événement — jamais de parsing d'une demi-ligne.
+- Lecture de la fin du fichier depuis la dernière ligne complète connue, découpe sur `\n` — jamais
+  de parsing d'une demi-ligne (elle est relue entière au tour suivant). Relecture complète
+  comparée ligne à ligne à cadence bornée : voir « Fichier partagé par plusieurs clients » plus bas.
 - Décodage UTF-8 strict avec remplacement (`String::from_utf8_lossy`) : une ligne corrompue ne doit
   jamais tuer l'ingestion.
-- **Détection de rotation/troncature** : si `len < offset` → repartir de 0 ; comparer aussi
-  l'identité du fichier (Linux `st_dev`/`st_ino`, Windows `FILE_ID_INFO` via
+- **Détection de rotation** (remplacée le 2026-10-04 pour la troncature, voir plus bas : une
+  troncature en place n'est plus une rotation) : comparer l'identité du fichier (Linux `st_dev`/`st_ino`, Windows `FILE_ID_INFO` via
   `GetFileInformationByHandleEx`) pour repérer un remplacement à taille croissante. Implémenté et
   testé dans `crates/overlay-ingest/` (L1). Le répertoire de logs réel observé (§5.1) confirme une
   rotation par **renommage** (`wakfu.log` → `wakfu.log.0` → `.1` → `.2`, un nouveau `wakfu.log`
@@ -262,6 +263,32 @@ L'échec de détection n'est **pas** une erreur fatale : l'overlay démarre et a
 > dans `tailer::tests::rotation_nouveau_fichier_meme_chemin_relit_depuis_zero`, qui passe
 > indépendamment de ce que dit `FileIdentity`. Les deux tests précédemment exclus de la CI
 > (`--skip`) y sont donc revenus normalement.
+
+> **Fichier partagé par plusieurs clients — lecture ligne à ligne (2026-10-04, retour
+> utilisateur).** Symptôme : en multi-compte, les compteurs de suivi ne bougeaient plus pendant
+> des combats en parallèle (même bug sur le site). Cause, établie sur le `wakfu.log` fourni (trois
+> clients : deux sur Excarnus, un sur un combat Troolk en parallèle) : chaque client Wakfu écrit
+> `wakfu.log` à SON propre pointeur en écrasant ce qui s'y trouve ; le dernier lancé tronque le
+> fichier et réécrit depuis l'octet 0, les autres continuent plus loin (trou d'octets nuls entre
+> les deux). Le fichier final juxtapose des blocs de clients (horodatages qui reculent de
+> plusieurs minutes, ligne coupée à chaque jonction — même motif dans `tests/wakfu.log`). En
+> direct, une lecture « depuis `offset` » ne voit que le client en tête : les autres réécrivent
+> DERRIÈRE l'offset, leurs lignes n'étaient jamais lues — et l'ancienne règle « préfixe changé ⇒
+> rotation » prenait le lancement d'un client pour une rotation (rattrapage complet, parser
+> réinitialisé en plein combat des autres clients).
+>
+> **Correctif** (`crates/overlay-ingest/src/tailer.rs`, miroir du `LogLineTracker` du dépôt web) :
+> chaque ligne complète lue est mémorisée par (début, longueur, empreinte FNV-1a), 16 octets par
+> ligne. Une relecture complète (au plus une par seconde jusqu'à 4 Mo, puis une toutes les
+> `taille / 4 Mo` secondes, lue par tranches de 4 Mo) émet toute ligne absente de la table à sa
+> position — ajoutée en fin ou réécrite par un client en retard — et rien d'autre. Le reste d'une
+> ancienne ligne qu'un client en retard vient de recouvrir (fragment sans en-tête juste avant une
+> ligne inchangée) n'est pas émis. Un octet nul sépare les lignes comme un `\n`. Entre deux
+> relectures, `poll()` ne lit que la fin, après avoir vérifié que le `\n` de la dernière ligne
+> connue est intact. Seul un changement d'identité reste une rotation (rattrapage) ; une troncature
+> en place est du direct. `Tailer::rescan()` force la relecture (tests). Côté parser, le
+> dédoublonnage multi-compte compare l'écart **absolu** : la copie d'un 2ᵉ client arrive après la
+> première tout en pouvant porter une heure antérieure.
 
 ### 5.3 Sémantique `isInitialLoad` (parité obligatoire)
 
@@ -296,7 +323,7 @@ fidèlement un état qui, lui, ne bouge plus. C'est la publication qui s'est arr
 deux endroits où elle peut s'arrêter :
 
 1. **le tailer ne livre plus** — plus aucun lot n'arrive sur le canal alors que le jeu écrit
-   (handle perdu, rotation mal vue, inode réutilisé malgré le garde-fou de préfixe du §5.2) ;
+   (handle perdu, rotation mal vue) ;
 2. **le parser rejette tout** — les lots arrivent mais `Engine::ingest_batch` échoue à chaque fois
    (contexte QuickJS en échec durable) ; la boucle d'ingestion abandonne alors les lignes SANS
    publier, et le tailer a déjà avancé son offset : elles sont perdues.

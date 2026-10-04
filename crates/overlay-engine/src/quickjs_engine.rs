@@ -628,10 +628,12 @@ mod tests {
                 }
             }
         }
-        assert_eq!(nombre, 108);
+        // 111 répercussions dans le fichier, dont 9 copies d'un second client dédoublonnées — 6
+        // portent une heure antérieure à la copie déjà lue (écart absolu, voir `isDuplicate`).
+        assert_eq!(nombre, 102);
         let attendu: std::collections::BTreeMap<String, i64> = [
-            ("Anonyme-Roublard1", 177_799),
-            ("Anonyme-Sram1", 133_513),
+            ("Anonyme-Roublard1", 169_742),
+            ("Anonyme-Sram1", 110_747),
             ("Anonyme-Pandawa1", 3_380),
             ("Anonyme-Ecaflip1", 1_063),
             ("Anonyme-Feca1", 452),

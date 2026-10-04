@@ -887,7 +887,7 @@
       this.recentSignatures.set(signature, nowMs);
       if (this.recentSignatures.size > 500) this.pruneSignatures(nowMs);
       const windowMs = entry.kind === "spell-cast" ? SPELL_CAST_DEDUPE_WINDOW_MS : DEDUPE_WINDOW_MS;
-      return previous !== void 0 && nowMs - previous >= 0 && nowMs - previous <= windowMs;
+      return previous !== void 0 && Math.abs(nowMs - previous) <= windowMs;
     }
     pruneSignatures(nowMs) {
       for (const [key, seenAt] of this.recentSignatures) {
