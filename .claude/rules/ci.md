@@ -51,3 +51,14 @@ Le workflow reste sobre par principe (durée d'attente du verdict, pas seulement
 `assets/**` : ces fichiers sont embarqués par `include_bytes!` (`design/assets.rs`,
 `design/fonts.rs`, `ui_icons.rs`…) et peuvent casser la compilation comme les snapshots
 d'`overlay-testkit`.
+
+## Pas de CI `pull_request` sur les PR de release (2026-10-04)
+
+La PR `release-*` vers `main`, ouverte par `release-pr.yml` avec le `GITHUB_TOKEN`, déclenchait en
+plus un run `pull_request` de `ci.yml` (acteur `github-actions[bot]`) : **zéro job créé, ~10 min
+d'attente, conclusion `failure`** à la fusion, à chaque release (runs 494, 496, 498, 500). Il
+n'apportait rien : le job `ci` de `release-pr.yml` joue déjà `ci.yml` en entier (`workflow_call`)
+sur le même commit, et c'est lui qui conditionne la fusion. `ci.yml` filtre donc
+`pull_request: branches-ignore: [main]` (filtre sur la branche **cible**). Ne pas le retirer pour
+« avoir un CI sur la PR de release » : le verdict de la release est le run `Release PR`. Les PR de
+Dependabot visent `dev` et gardent leur CI.
