@@ -49,6 +49,11 @@ porté À L'IDENTIQUE du commit 76dc9bc de `claude/dev` — plusieurs porteurs d
 d'un effet porté par un tiers crédité à l'applicateur, statut d'un joueur propagé entre monstres
 crédité au joueur. Pas une divergence : le web porte le même code.
 
+2026-10-04 log-parser.ts : dédoublonnage multi-compte sur l'écart ABSOLU (`isDuplicate`), porté À
+L'IDENTIQUE du commit b37f79e de `claude/dev` — la copie d'un 2ᵉ client, lue après la première
+(fichier partagé, voir docs/plan-architecture.md §5.2), peut porter une heure antérieure. Pas une
+divergence : le web porte le même code.
+
 `src/entry.ts` n'est pas vendu : c'est la façade QuickJS propre à l'overlay. Toute méthode
 publique de `LogParser` qu'elle expose (`parseLine`, `flush`, `reset`, `closeFight`) doit y être
 republiée sur `globalThis.wakfuEngine`, sans quoi l'hôte Rust ne peut pas l'appeler.

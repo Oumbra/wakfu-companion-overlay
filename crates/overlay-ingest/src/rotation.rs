@@ -5,14 +5,13 @@
 //! **Limite connue, pas garantie par POSIX (2026-09-04, voir §5.2 du plan)** : après un `rm` suivi
 //! d'un `create` au même chemin, RIEN ne garantit que l'OS alloue un inode différent de celui tout
 //! juste libéré — constaté empiriquement ici (démontré non déterministe : reproductible seul,
-//! disparaît selon quelle autre activité fichier a eu lieu juste avant dans le même process). C'est
-//! pour ça que [`crate::tailer::Tailer`] ne s'appuie JAMAIS sur `FileIdentity` seule pour détecter
-//! une rotation — voir son champ `identity_prefix` et son test d'intégration
-//! `rotation_nouveau_fichier_meme_chemin_relit_depuis_zero`, qui couvrent ce cas précis avec un
-//! second signal fiable (le contenu d'un fichier ne se réécrit jamais rétroactivement). Un ancien
-//! test unitaire ici affirmait `assert_ne!` sur les identités après un tel remplacement — retiré
-//! (2026-09-04) car il encodait cette hypothèse justement fausse, pas un comportement de notre
-//! code ; voir git blame pour son contenu d'origine si besoin.
+//! disparaît selon quelle autre activité fichier a eu lieu juste avant dans le même process). Sans
+//! conséquence depuis le 2026-10-04 : [`crate::tailer::Tailer`] compare le contenu ligne à ligne à
+//! chaque relecture complète, un nouveau fichier qui garderait l'inode de l'ancien est donc lu
+//! quand même (en direct plutôt qu'en rattrapage) — voir le test d'intégration
+//! `rotation_nouveau_fichier_meme_chemin_relit_depuis_zero`. Un ancien test unitaire ici affirmait
+//! `assert_ne!` sur les identités après un tel remplacement — retiré (2026-09-04) car il encodait
+//! cette hypothèse justement fausse, pas un comportement de notre code.
 
 use std::fs::File;
 use std::io;
