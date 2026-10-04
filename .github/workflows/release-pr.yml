@@ -19,7 +19,9 @@
 #   du commit poussé.
 #
 # Tout passe par le GITHUB_TOKEN, sans GitHub App ni PAT. Une PR créée ou fusionnée par ce jeton ne
-# déclenche aucun workflow : ni CI sur `pull_request` (d'où le job `ci` ci-dessus), ni `release.yml`
+# déclenche aucun workflow utile : le CI sur `pull_request` créait bien un run, mais sans aucun job,
+# rouge à la fusion à chaque release — `ci.yml` ignore donc les PR vers `main` (le job `ci`
+# ci-dessus est le seul verdict). Pas de `release.yml` non plus
 # sur le push vers `main` que produit la fusion — d'où le `gh workflow run` explicite
 # (`workflow_dispatch` est l'exception que le GITHUB_TOKEN a le droit de déclencher ; `release.yml`
 # refuse toute autre ref que `main` et reste idempotent si le tag `v{version}` existe déjà).
