@@ -345,6 +345,10 @@ pub struct OptionsModalState {
     /// (2026-09-30) — brouillon, comme les autres cases : pris en compte à « Valider ». Décochée,
     /// l'onglet Suivi ne montre que le groupe par défaut.
     pub suivi_groups_enabled: bool,
+    /// **Case « Activer le suivi des éléments récupérés de l'hôtel de vente »** de la même section
+    /// (2026-10-05) — brouillon, pris en compte à « Valider ». Décochée, récupérer un objet qu'on
+    /// avait mis en vente ne fait pas monter son compteur.
+    pub suivi_track_hdv_retrievals: bool,
     /// Ce que l'onglet « Raccourcis » garde entre deux frames — recherche, case en écoute, dernier
     /// refus. **Pas les combinaisons** : celles-ci sont le brouillon ci-dessous.
     pub raccourcis: raccourcis_tab::RaccourcisTabState,
@@ -465,6 +469,8 @@ pub struct OptionsInitial {
     pub suivi_groups: (Vec<crate::panels::suivi_groups::GroupDraft>, usize),
     /// La case « Activer les groupes » telle qu'elle était à l'ouverture.
     pub suivi_groups_enabled: bool,
+    /// La case du suivi des objets récupérés de l'HDV telle qu'elle était à l'ouverture.
+    pub suivi_track_hdv_retrievals: bool,
     pub chat: Option<ChatDraft>,
     /// Le roster tel qu'il était à l'ouverture — c'est lui que « Annuler » abandonne, et sa
     /// comparaison au brouillon qui décide si la garde de fermeture s'ouvre.
@@ -531,6 +537,7 @@ impl OptionsModalState {
             countdown_toast: self.countdown_toast,
             completion: self.completion,
             suivi_groups_enabled: self.suivi_groups_enabled,
+            suivi_track_hdv_retrievals: self.suivi_track_hdv_retrievals,
             recap_resume: self.recap_resume,
             shortcuts: self.shortcuts.clone(),
             auto_update: self.auto_update,
@@ -593,6 +600,7 @@ impl OptionsModalState {
             || self.alerts_draft != self.initial.alerts
             || self.suivi_draft != self.initial.suivi
             || self.suivi_groups_enabled != self.initial.suivi_groups_enabled
+            || self.suivi_track_hdv_retrievals != self.initial.suivi_track_hdv_retrievals
             || self.suivi_groups_changed()
             || self.chat_draft != self.initial.chat
             || self.personnages_draft != self.initial.personnages
@@ -752,6 +760,10 @@ pub struct OptionsCommit {
     /// (`config::OverlayConfig::suivi_groups_enabled`). Les groupes eux-mêmes partent par
     /// `main.rs::commit_suivi`, avec la liste suivie.
     pub suivi_groups_enabled: bool,
+    /// État de la case « Activer le suivi des éléments récupérés de l'hôtel de vente » — ce que
+    /// l'hôte persiste (`config::OverlayConfig::suivi_track_hdv_retrievals`) et transmet au thread
+    /// Engine (`engine_thread::EngineCommand::SetTrackHdvRetrievals`).
+    pub suivi_track_hdv_retrievals: bool,
     /// La reprise de la session du Récap ([`crate::recap_session::ResumeSettings`]) — ce que
     /// l'hôte persiste (`config::OverlayConfig::set_recap_resume`) et pose sur sa session
     /// (`recap_session::RecapSession::set_resume_settings`).
@@ -1450,6 +1462,24 @@ pub fn show(
                     )
                     .log_name("options-suivi-groupes"),
             );
+            // **Les objets récupérés de l'Hôtel de vente** (2026-10-05, retour utilisateur) : une
+            // option, décochée par défaut. Récupérer un objet qu'on avait soi-même mis en vente
+            // faisait monter son compteur comme un objet obtenu. Le moteur reconnaît ce retrait
+            // (`overlay_engine::Engine::set_track_hdv_retrievals`) ; un achat compte toujours.
+            ui.add_space(design::tokens::CHECKBOX_ROW_GAP);
+            ui.add(
+                design::checkbox(
+                    &mut state.suivi_track_hdv_retrievals,
+                    "Activer le suivi des éléments récupérés de l'hôtel de vente",
+                )
+                .enabled(state.features.suivi)
+                .tooltip(
+                    "Compte aussi les objets que vous récupérez à l'hôtel de vente après les \
+                     avoir mis en vente vous-même. Décochée, ils ne font pas avancer les \
+                     compteurs ; un objet acheté les fait toujours avancer.",
+                )
+                .log_name("options-suivi-retrait-hdv"),
+            );
 
             ui.add_space(SECTION_GAP);
             ui.add(design::heading("Alertes"));
@@ -1997,6 +2027,7 @@ mod tests {
                 countdown_toast: suivi_tab::CountdownToastSettings::default(),
                 completion: suivi_tab::CompletionSettings::default(),
                 suivi_groups_enabled: false,
+                suivi_track_hdv_retrievals: false,
                 recap_resume: ResumeSettings::default(),
                 shortcuts: ShortcutBindings::default(),
                 auto_update: false,

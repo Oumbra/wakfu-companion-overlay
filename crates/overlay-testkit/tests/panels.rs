@@ -2939,6 +2939,8 @@ fn modale_options_echap_annule_et_entree_valide() {
                 // jamais touchées, donc emportées actives — le défaut demandé.
                 completion: overlay_ui::panels::suivi_tab::CompletionSettings::default(),
                 suivi_groups_enabled: false,
+                // Idem pour la case du suivi des objets récupérés de l'HDV (2026-10-05) : décochée.
+                suivi_track_hdv_retrievals: false,
                 // Idem pour la ligne « Reprendre la session après une pause » de la section
                 // « Recap » (2026-09-17).
                 recap_resume: overlay_ui::recap_session::ResumeSettings::default(),

@@ -188,6 +188,13 @@ pub enum EngineCommand {
     /// l'alerte concernée, et continue d'afficher sa carte par-dessus le jeu. C'est là toute la
     /// différence avec [`Self::SetFeatures`], qui coupe les deux canaux à la fois.
     SetAlertMutes(AlertMutes),
+    /// **Compter au Suivi les objets récupérés de l'Hôtel de vente** — case « Activer le suivi des
+    /// éléments récupérés de l'hôtel de vente » de la section « Suivi » des Paramètres
+    /// (2026-10-05). Locale à la machine comme `SetFeatures`, envoyée au démarrage puis à chaque
+    /// validation de la fenêtre Options. Contrairement aux interrupteurs, elle agit sur le MOTEUR
+    /// (`overlay_engine::Engine::set_track_hdv_retrievals`) : un retrait ignoré ne fait pas
+    /// bouger le compteur, il n'est pas seulement passé sous silence.
+    SetTrackHdvRetrievals(bool),
 }
 
 /// **Chien de garde de l'ingestion** (2026-09-17) — ce qui décide qu'un panneau Combat figé doit
@@ -722,6 +729,13 @@ pub fn spawn_engine_thread(
                                 "[options] réglages de la carte de chat appliqués"
                             );
                             chat_toast = settings;
+                        }
+                        EngineCommand::SetTrackHdvRetrievals(track) => {
+                            tracing::info!(
+                                track,
+                                "[options] suivi des objets récupérés de l'HDV appliqué"
+                            );
+                            engine.set_track_hdv_retrievals(track);
                         }
                         EngineCommand::SetCountdownToast(settings) => {
                             tracing::info!(

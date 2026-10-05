@@ -452,6 +452,17 @@ pub struct OverlayConfig {
     /// groupes sont conservés dans [`Self::watchlist_groups`] et retrouvés en la recochant.
     #[serde(default)]
     pub suivi_groups_enabled: bool,
+    /// **Compter au Suivi les objets récupérés de l'Hôtel de vente** — case « Activer le suivi des
+    /// éléments récupérés de l'hôtel de vente » de la section « Suivi » de l'onglet
+    /// « Paramètres » (retour utilisateur, 2026-10-05). Transmise au thread Engine
+    /// (`engine_thread::EngineCommand::SetTrackHdvRetrievals`), voir
+    /// `overlay_engine::Engine::set_track_hdv_retrievals`.
+    ///
+    /// Décochée — le défaut — récupérer un objet qu'on avait soi-même mis en vente ne fait plus
+    /// monter son compteur ; un achat, lui, compte toujours. Locale et non au compte : le site n'a
+    /// pas cette option, et le serveur n'accepte que des clés connues.
+    #[serde(default)]
+    pub suivi_track_hdv_retrievals: bool,
     /// Table `[watchlist_groups]` — les groupes d'éléments suivis et le dernier groupe affiché, voir
     /// [`WatchlistGroupsConfig`].
     ///
@@ -678,6 +689,7 @@ impl Default for OverlayConfig {
             verbose_log: false,
             multiaccount_shortcuts: false,
             suivi_groups_enabled: false,
+            suivi_track_hdv_retrievals: false,
             watchlist_groups: WatchlistGroupsConfig::default(),
             shortcuts: BTreeMap::new(),
         }
@@ -1495,6 +1507,8 @@ mod tests {
     fn groupes_de_suivi_absents_d_une_config_ancienne() {
         let relu: OverlayConfig = toml::from_str("combat_always_visible = true\n").unwrap();
         assert!(!relu.suivi_groups_enabled);
+        // Le retrait HDV (2026-10-05) non plus : une config ancienne ne le compte pas.
+        assert!(!relu.suivi_track_hdv_retrievals);
         assert!(relu.watchlist_groups.groups.is_empty());
         assert_eq!(
             relu.watchlist_groups.effective_active(true),

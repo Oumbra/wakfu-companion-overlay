@@ -268,6 +268,9 @@ mod linux_main {
         watchlist_groups: config::WatchlistGroupsConfig,
         /// Voir `main.rs::App::suivi_groups_enabled`.
         suivi_groups_enabled: bool,
+        /// La case « Activer le suivi des éléments récupérés de l'hôtel de vente » EN VIGUEUR —
+        /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
+        suivi_track_hdv_retrievals: bool,
         /// Voir `main.rs::App::watchlist_reset_pending` — l'entrée dont la réinitialisation attend
         /// confirmation (2026-09-18).
         watchlist_reset_pending: Option<WatchlistEntry>,
@@ -636,6 +639,9 @@ mod linux_main {
         watchlist_groups: config::WatchlistGroupsConfig,
         /// Voir `App::suivi_groups_enabled` — lue de la config au démarrage.
         suivi_groups_enabled: bool,
+        /// La case « Activer le suivi des éléments récupérés de l'hôtel de vente » EN VIGUEUR —
+        /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
+        suivi_track_hdv_retrievals: bool,
         /// La session du Récap relue du disque — voir `main.rs::AppState::recap_session`.
         recap_session: RecapSession,
         /// La position de la bande Récap relue de la config — voir `App::recap_position`.
@@ -696,6 +702,7 @@ mod linux_main {
                 watchlist_definitions_rx,
                 watchlist_groups,
                 suivi_groups_enabled,
+                suivi_track_hdv_retrievals,
                 recap_session,
                 recap_position,
                 click_through_position,
@@ -736,6 +743,7 @@ mod linux_main {
                 watchlist_definitions_rx,
                 watchlist_groups,
                 suivi_groups_enabled,
+                suivi_track_hdv_retrievals,
                 watchlist_reset_pending: None,
                 interactive: true,
                 snapshot,
@@ -2064,6 +2072,7 @@ mod linux_main {
                     suivi: suivi_draft.clone(),
                     suivi_groups: suivi_groups_initial,
                     suivi_groups_enabled: self.suivi_groups_enabled,
+                    suivi_track_hdv_retrievals: self.suivi_track_hdv_retrievals,
                     chat: chat_draft.clone(),
                     personnages: personnages_draft.clone(),
                     combat_always_visible: self.combat_always_visible,
@@ -2096,6 +2105,7 @@ mod linux_main {
                 suivi_availability,
                 suivi_groups,
                 suivi_groups_enabled: self.suivi_groups_enabled,
+                suivi_track_hdv_retrievals: self.suivi_track_hdv_retrievals,
             });
             overlay.window.request_redraw();
             self.windows.insert(overlay.window.id(), overlay);
@@ -2671,6 +2681,7 @@ mod linux_main {
             saved.set_alert_mutes(self.alert_mutes);
             saved.set_alert_volumes(self.alert_volumes);
             saved.suivi_groups_enabled = self.suivi_groups_enabled;
+            saved.suivi_track_hdv_retrievals = self.suivi_track_hdv_retrievals;
             saved.watchlist_groups = self.watchlist_groups.clone();
             config::save(&saved);
         }
@@ -2955,6 +2966,20 @@ mod linux_main {
                     // thread Engine, contrairement à la fermeture ci-dessus : le moteur ne sait rien
                     // de la célébration ni du retrait, c'est l'hôte qui les décide à réception de la
                     // complétion (voir `about_to_wait`).
+                    // **Le suivi des objets récupérés de l'HDV (2026-10-05)** — part au thread Engine :
+                    // c'est le moteur qui décide si un retrait fait monter le compteur.
+                    let hdv_retrievals_changed =
+                        commit.suivi_track_hdv_retrievals != self.suivi_track_hdv_retrievals;
+                    if hdv_retrievals_changed {
+                        self.suivi_track_hdv_retrievals = commit.suivi_track_hdv_retrievals;
+                        tracing::info!(
+                            track = self.suivi_track_hdv_retrievals,
+                            "[options] suivi des objets récupérés de l'HDV mis à jour"
+                        );
+                        let _ = self.settings_tx.send(EngineCommand::SetTrackHdvRetrievals(
+                            self.suivi_track_hdv_retrievals,
+                        ));
+                    }
                     if commit.completion != self.completion {
                         self.completion = commit.completion;
                         tracing::info!(
@@ -3022,6 +3047,7 @@ mod linux_main {
                         || features_changed
                         || mutes_changed
                         || countdown_toast_changed
+                        || hdv_retrievals_changed
                         || recap_resume_changed
                         || auto_update_changed
                         || verbose_log_changed
@@ -4625,6 +4651,11 @@ mod linux_main {
         let _ = settings_tx.send(EngineCommand::SetFeatures(saved_config.features()));
         // Les sourdines de même — voir `main.rs`.
         let _ = settings_tx.send(EngineCommand::SetAlertMutes(saved_config.alert_mutes()));
+        // Le suivi des objets récupérés de l'HDV aussi : sans cet envoi, le moteur partirait sur
+        // son défaut (décoché) malgré une case cochée à la session précédente.
+        let _ = settings_tx.send(EngineCommand::SetTrackHdvRetrievals(
+            saved_config.suivi_track_hdv_retrievals,
+        ));
         // Les volumes — voir `main.rs`.
         overlay_ui::alert_sound::set_volumes(saved_config.alert_volumes());
 
@@ -4648,6 +4679,7 @@ mod linux_main {
             watchlist_definitions_rx,
             watchlist_groups: saved_config.watchlist_groups.clone(),
             suivi_groups_enabled: saved_config.suivi_groups_enabled,
+            suivi_track_hdv_retrievals: saved_config.suivi_track_hdv_retrievals,
             // Voir `main.rs` : à côté des combats en cours.
             recap_session: RecapSession::load(
                 overlay_engine::fight_store::default_store_dir().join(recap_session::FILE_NAME),

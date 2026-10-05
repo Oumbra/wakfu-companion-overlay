@@ -693,6 +693,9 @@ struct App {
     watchlist_groups: config::WatchlistGroupsConfig,
     /// La case « Activer les groupes » EN VIGUEUR — voir `config::OverlayConfig::suivi_groups_enabled`.
     suivi_groups_enabled: bool,
+    /// La case « Activer le suivi des éléments récupérés de l'hôtel de vente » EN VIGUEUR —
+    /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
+    suivi_track_hdv_retrievals: bool,
     /// **L'entrée dont la réinitialisation attend confirmation** (2026-09-18) — posée à
     /// l'ouverture de `OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)`, reprise à la
     /// réponse. Ici et non dans la cible : `OverlayKind` est `Copy` (voir
@@ -1037,6 +1040,9 @@ struct AppState {
     watchlist_groups: config::WatchlistGroupsConfig,
     /// Voir `App::suivi_groups_enabled` — lue de la config au démarrage.
     suivi_groups_enabled: bool,
+    /// La case « Activer le suivi des éléments récupérés de l'hôtel de vente » EN VIGUEUR —
+    /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
+    suivi_track_hdv_retrievals: bool,
     /// Voir `App::recap_session` — relue du disque au démarrage, avec le réglage de la config.
     recap_session: RecapSession,
     /// Voir `App::recap_position` — relue du disque au démarrage (`config::OverlayConfig::
@@ -1098,6 +1104,7 @@ impl App {
             watchlist_definitions_rx,
             watchlist_groups,
             suivi_groups_enabled,
+            suivi_track_hdv_retrievals,
             recap_session,
             recap_position,
             click_through_position,
@@ -1141,6 +1148,7 @@ impl App {
             watchlist_definitions_rx,
             watchlist_groups,
             suivi_groups_enabled,
+            suivi_track_hdv_retrievals,
             watchlist_reset_pending: None,
             watchlist_toast,
             alert_profile,
@@ -3487,6 +3495,7 @@ impl App {
                 suivi: suivi_draft.clone(),
                 suivi_groups: suivi_groups_initial,
                 suivi_groups_enabled: self.suivi_groups_enabled,
+                suivi_track_hdv_retrievals: self.suivi_track_hdv_retrievals,
                 chat: chat_draft.clone(),
                 personnages: personnages_draft.clone(),
                 combat_always_visible: self.combat_always_visible,
@@ -3521,6 +3530,7 @@ impl App {
             suivi_availability,
             suivi_groups,
             suivi_groups_enabled: self.suivi_groups_enabled,
+            suivi_track_hdv_retrievals: self.suivi_track_hdv_retrievals,
         });
         overlay.next_redraw_at = Some(std::time::Instant::now());
         self.windows.insert(overlay.window.id(), overlay);
@@ -4179,6 +4189,7 @@ impl App {
         saved.set_alert_mutes(self.alert_mutes);
         saved.set_alert_volumes(self.alert_volumes);
         saved.suivi_groups_enabled = self.suivi_groups_enabled;
+        saved.suivi_track_hdv_retrievals = self.suivi_track_hdv_retrievals;
         saved.watchlist_groups = self.watchlist_groups.clone();
         config::save(&saved);
     }
@@ -4469,6 +4480,20 @@ impl App {
                 // thread Engine, contrairement à la fermeture ci-dessus : le moteur ne sait rien
                 // de la célébration ni du retrait, c'est l'hôte qui les décide à réception de la
                 // complétion (voir `about_to_wait`).
+                // **Le suivi des objets récupérés de l'HDV (2026-10-05)** — part au thread Engine :
+                // c'est le moteur qui décide si un retrait fait monter le compteur.
+                let hdv_retrievals_changed =
+                    commit.suivi_track_hdv_retrievals != self.suivi_track_hdv_retrievals;
+                if hdv_retrievals_changed {
+                    self.suivi_track_hdv_retrievals = commit.suivi_track_hdv_retrievals;
+                    tracing::info!(
+                        track = self.suivi_track_hdv_retrievals,
+                        "[options] suivi des objets récupérés de l'HDV mis à jour"
+                    );
+                    let _ = self.settings_tx.send(EngineCommand::SetTrackHdvRetrievals(
+                        self.suivi_track_hdv_retrievals,
+                    ));
+                }
                 if commit.completion != self.completion {
                     self.completion = commit.completion;
                     tracing::info!(
@@ -4545,6 +4570,7 @@ impl App {
                     || features_changed
                     || mutes_changed
                     || countdown_toast_changed
+                    || hdv_retrievals_changed
                     || recap_resume_changed
                     || auto_update_changed
                     || verbose_log_changed
@@ -6326,6 +6352,11 @@ fn main() {
     // Les sourdines de même : sans cet envoi, la première alerte d'une session sonnerait malgré
     // une case cochée à la session précédente.
     let _ = settings_tx.send(EngineCommand::SetAlertMutes(saved_config.alert_mutes()));
+    // Le suivi des objets récupérés de l'HDV aussi : sans cet envoi, le moteur partirait sur
+    // son défaut (décoché) malgré une case cochée à la session précédente.
+    let _ = settings_tx.send(EngineCommand::SetTrackHdvRetrievals(
+        saved_config.suivi_track_hdv_retrievals,
+    ));
     // Les volumes, eux, vivent dans le module audio que tous les threads partagent.
     alert_sound::set_volumes(saved_config.alert_volumes());
 
@@ -6357,6 +6388,7 @@ fn main() {
         watchlist_definitions_rx,
         watchlist_groups: saved_config.watchlist_groups.clone(),
         suivi_groups_enabled: saved_config.suivi_groups_enabled,
+        suivi_track_hdv_retrievals: saved_config.suivi_track_hdv_retrievals,
         // À côté des combats en cours (`fight-*.json`) — voir la doc de module de
         // `recap_session` pour ce qui y est écrit et quand.
         recap_session: RecapSession::load(
