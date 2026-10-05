@@ -693,11 +693,14 @@ struct App {
     watchlist_groups: config::WatchlistGroupsConfig,
     /// La case « Activer les groupes » EN VIGUEUR — voir `config::OverlayConfig::suivi_groups_enabled`.
     suivi_groups_enabled: bool,
-    /// **L'entrée dont la réinitialisation attend confirmation** (2026-09-18) — posée à
-    /// l'ouverture de `OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)`, reprise à la
-    /// réponse. Ici et non dans la cible : `OverlayKind` est `Copy` (voir
-    /// `ResetTarget::WatchlistCounter`). Prêtée au rendu de la confirmation, qui nomme l'objet.
-    watchlist_reset_pending: Option<WatchlistEntry>,
+    /// La case « Activer la prise en compte des invendus de l'hôtel de vente » EN VIGUEUR —
+    /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
+    suivi_track_hdv_retrievals: bool,
+    /// **Le brouillon de la modale d'édition d'un compteur** (2026-10-05) — posé à l'ouverture de
+    /// `OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)`, repris à la réponse. Ici et non
+    /// dans la cible : `OverlayKind` est `Copy` (voir `ResetTarget::WatchlistCounter`). Prêté au
+    /// rendu de la modale, qui le modifie ; sa valeur n'est lue qu'à « Valider ».
+    watchlist_counter_edit: Option<panels::counter_edit::CounterEditState>,
     /// Publié par le thread Engine à chaque décompte de suivi qui vient d'atteindre 0 (voir
     /// `overlay_engine::WatchlistAlert`, §9 du plan « Alertes de drop ») — `None` initialement et
     /// après expiration (voir `WatchlistToast::hide_at`, comparé à `Instant::now()` au rendu).
@@ -1037,6 +1040,9 @@ struct AppState {
     watchlist_groups: config::WatchlistGroupsConfig,
     /// Voir `App::suivi_groups_enabled` — lue de la config au démarrage.
     suivi_groups_enabled: bool,
+    /// La case « Activer la prise en compte des invendus de l'hôtel de vente » EN VIGUEUR —
+    /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
+    suivi_track_hdv_retrievals: bool,
     /// Voir `App::recap_session` — relue du disque au démarrage, avec le réglage de la config.
     recap_session: RecapSession,
     /// Voir `App::recap_position` — relue du disque au démarrage (`config::OverlayConfig::
@@ -1098,6 +1104,7 @@ impl App {
             watchlist_definitions_rx,
             watchlist_groups,
             suivi_groups_enabled,
+            suivi_track_hdv_retrievals,
             recap_session,
             recap_position,
             click_through_position,
@@ -1141,7 +1148,8 @@ impl App {
             watchlist_definitions_rx,
             watchlist_groups,
             suivi_groups_enabled,
-            watchlist_reset_pending: None,
+            suivi_track_hdv_retrievals,
+            watchlist_counter_edit: None,
             watchlist_toast,
             alert_profile,
             chat_filters,
@@ -3487,6 +3495,7 @@ impl App {
                 suivi: suivi_draft.clone(),
                 suivi_groups: suivi_groups_initial,
                 suivi_groups_enabled: self.suivi_groups_enabled,
+                suivi_track_hdv_retrievals: self.suivi_track_hdv_retrievals,
                 chat: chat_draft.clone(),
                 personnages: personnages_draft.clone(),
                 combat_always_visible: self.combat_always_visible,
@@ -3521,6 +3530,7 @@ impl App {
             suivi_availability,
             suivi_groups,
             suivi_groups_enabled: self.suivi_groups_enabled,
+            suivi_track_hdv_retrievals: self.suivi_track_hdv_retrievals,
         });
         overlay.next_redraw_at = Some(std::time::Instant::now());
         self.windows.insert(overlay.window.id(), overlay);
@@ -3922,26 +3932,34 @@ impl App {
             ResetTarget::WatchlistCounter => {
                 tracing::info!(
                     name = self
-                        .watchlist_reset_pending
+                        .watchlist_counter_edit
                         .as_ref()
-                        .map(|e| e.name.as_str()),
-                    "[suivi] confirmation de réinitialisation du compteur ouverte."
+                        .map(|e| e.entry.name.as_str()),
+                    "[suivi] modale d'édition du compteur ouverte."
                 )
             }
         }
     }
 
-    /// **Le bouton de réinitialisation d'une tuile du bandeau** (2026-09-18) : retenir l'entrée,
-    /// puis ouvrir la même confirmation que le Récap — voir `ResetTarget::WatchlistCounter` sur
-    /// pourquoi l'entrée est retenue ici plutôt que portée par la cible.
-    fn open_watchlist_reset_confirm(
+    /// **Le crayon d'une tuile du bandeau** (2026-10-05) : poser le brouillon, puis ouvrir la
+    /// modale d'édition dans la fenêtre voilée des confirmations — voir
+    /// `ResetTarget::WatchlistCounter` sur pourquoi le brouillon est tenu ici plutôt que porté par
+    /// la cible. Une fenêtre voilée déjà ouverte garde la main, et son brouillon avec elle.
+    fn open_watchlist_counter_edit(
         &mut self,
         event_loop: &ActiveEventLoop,
         game_hwnd: HWND,
         rect: GameRect,
         entry: WatchlistEntry,
     ) {
-        self.watchlist_reset_pending = Some(entry);
+        if self
+            .windows
+            .values()
+            .any(|w| matches!(w.kind, OverlayKind::ResetConfirm(_)))
+        {
+            return;
+        }
+        self.watchlist_counter_edit = Some(panels::counter_edit::CounterEditState::new(entry));
         self.open_reset_confirm(event_loop, game_hwnd, rect, ResetTarget::WatchlistCounter);
     }
 
@@ -4034,24 +4052,24 @@ impl App {
             (ResetTarget::CombatPosition, false) => {
                 tracing::info!("[combat] replacement annulé.")
             }
-            // **Le compteur repart** : c'est le moteur qui le remet (il seul tient les compteurs
-            // vivants), republie la liste et réplique au compte — même chemin qu'un ramassage.
-            // L'entrée est désignée par son identité : la liste a pu bouger entre-temps.
-            (ResetTarget::WatchlistCounter, true) => match self.watchlist_reset_pending.take() {
-                Some(entry) => {
-                    tracing::info!(name = %entry.name, "[suivi] réinitialisation du compteur confirmée.");
-                    let _ = self.settings_tx.send(EngineCommand::ResetWatchlistCounter {
-                        name: entry.name,
-                        kind: entry.kind,
-                    });
+            // **« Valider »** : le moteur pose la valeur (il seul tient les compteurs vivants),
+            // republie la liste et réplique au compte — même chemin qu'un ramassage. L'entrée est
+            // désignée par son identité : la liste a pu bouger entre-temps. Une valeur inchangée
+            // ne part pas : valider sans rien changer vaut annuler.
+            (ResetTarget::WatchlistCounter, true) => match self
+                .watchlist_counter_edit
+                .take()
+                .and_then(panels::counter_edit::CounterEditState::into_command)
+            {
+                Some(commande) => {
+                    tracing::info!("[suivi] édition du compteur validée.");
+                    let _ = self.settings_tx.send(commande);
                 }
-                None => tracing::warn!(
-                    "[suivi] réinitialisation confirmée sans entrée retenue, rien fait."
-                ),
+                None => tracing::info!("[suivi] édition du compteur validée sans changement."),
             },
             (ResetTarget::WatchlistCounter, false) => {
-                self.watchlist_reset_pending = None;
-                tracing::info!("[suivi] réinitialisation du compteur annulée.")
+                self.watchlist_counter_edit = None;
+                tracing::info!("[suivi] édition du compteur annulée.")
             }
         }
     }
@@ -4179,6 +4197,7 @@ impl App {
         saved.set_alert_mutes(self.alert_mutes);
         saved.set_alert_volumes(self.alert_volumes);
         saved.suivi_groups_enabled = self.suivi_groups_enabled;
+        saved.suivi_track_hdv_retrievals = self.suivi_track_hdv_retrievals;
         saved.watchlist_groups = self.watchlist_groups.clone();
         config::save(&saved);
     }
@@ -4469,6 +4488,20 @@ impl App {
                 // thread Engine, contrairement à la fermeture ci-dessus : le moteur ne sait rien
                 // de la célébration ni du retrait, c'est l'hôte qui les décide à réception de la
                 // complétion (voir `about_to_wait`).
+                // **Le suivi des objets récupérés de l'HDV (2026-10-05)** — part au thread Engine :
+                // c'est le moteur qui décide si un retrait fait monter le compteur.
+                let hdv_retrievals_changed =
+                    commit.suivi_track_hdv_retrievals != self.suivi_track_hdv_retrievals;
+                if hdv_retrievals_changed {
+                    self.suivi_track_hdv_retrievals = commit.suivi_track_hdv_retrievals;
+                    tracing::info!(
+                        track = self.suivi_track_hdv_retrievals,
+                        "[options] suivi des objets récupérés de l'HDV mis à jour"
+                    );
+                    let _ = self.settings_tx.send(EngineCommand::SetTrackHdvRetrievals(
+                        self.suivi_track_hdv_retrievals,
+                    ));
+                }
                 if commit.completion != self.completion {
                     self.completion = commit.completion;
                     tracing::info!(
@@ -4545,6 +4578,7 @@ impl App {
                     || features_changed
                     || mutes_changed
                     || countdown_toast_changed
+                    || hdv_retrievals_changed
                     || recap_resume_changed
                     || auto_update_changed
                     || verbose_log_changed
@@ -4593,10 +4627,9 @@ enum PostRedraw {
     OpenResetConfirm(HWND, GameRect, ResetTarget),
     /// La confirmation a répondu — `true` pour « Oui » (voir `answer_reset_confirm`).
     AnswerResetConfirm(ResetTarget, bool),
-    /// Bouton de réinitialisation d'une tuile du bandeau cliqué : retenir l'entrée et ouvrir la
-    /// confirmation par-dessus CETTE fenêtre de jeu (2026-09-18, voir
-    /// `open_watchlist_reset_confirm`).
-    OpenWatchlistResetConfirm(HWND, GameRect, WatchlistEntry),
+    /// Crayon d'une tuile du bandeau cliqué : poser le brouillon et ouvrir la modale d'édition
+    /// par-dessus CETTE fenêtre de jeu (2026-10-05, voir `open_watchlist_counter_edit`).
+    OpenWatchlistCounterEdit(HWND, GameRect, WatchlistEntry),
     /// Le cadenas de la bande Récap vient d'être cliqué (voir `toggle_recap_lock`).
     ToggleRecapLock,
     /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
@@ -4950,7 +4983,7 @@ impl App {
                 combat_chrome,
                 watchlist_selection: &mut self.watchlist_selection,
                 watchlist_completions: &self.watchlist_completions,
-                watchlist_reset: self.watchlist_reset_pending.as_ref(),
+                watchlist_counter_edit: self.watchlist_counter_edit.as_mut(),
                 watchlist_toast,
                 catalog: &catalog,
                 catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
@@ -5440,11 +5473,11 @@ impl App {
         if let Some(url) = &outcome.open_url {
             let _ = open::that(url);
         }
-        // Le bouton de réinitialisation d'une tuile du bandeau (2026-09-18) : même confirmation
-        // que le Récap, par-dessus la fenêtre de jeu de CE bandeau, l'entrée retenue par l'hôte.
-        if let Some(entry) = outcome.watchlist_reset_requested {
+        // Le crayon d'une tuile du bandeau (2026-10-05) : la modale d'édition, dans la fenêtre
+        // voilée des confirmations, par-dessus la fenêtre de jeu de CE bandeau.
+        if let Some(entry) = outcome.watchlist_edit_requested {
             post_redraw =
-                PostRedraw::OpenWatchlistResetConfirm(this_game_hwnd, this_game_rect, entry);
+                PostRedraw::OpenWatchlistCounterEdit(this_game_hwnd, this_game_rect, entry);
         }
         // Le glyphe de remise à zéro du bloc Récap (2026-09-17) : la confirmation s'ouvre
         // par-dessus la fenêtre de jeu de CE bloc ; sa réponse, elle, arrive par la fenêtre de
@@ -5569,8 +5602,8 @@ impl App {
             PostRedraw::AnswerResetConfirm(target, confirmed) => {
                 self.answer_reset_confirm(id, target, confirmed)
             }
-            PostRedraw::OpenWatchlistResetConfirm(hwnd, rect, entry) => {
-                self.open_watchlist_reset_confirm(event_loop, hwnd, rect, entry)
+            PostRedraw::OpenWatchlistCounterEdit(hwnd, rect, entry) => {
+                self.open_watchlist_counter_edit(event_loop, hwnd, rect, entry)
             }
             PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
             PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),
@@ -6326,6 +6359,11 @@ fn main() {
     // Les sourdines de même : sans cet envoi, la première alerte d'une session sonnerait malgré
     // une case cochée à la session précédente.
     let _ = settings_tx.send(EngineCommand::SetAlertMutes(saved_config.alert_mutes()));
+    // Le suivi des objets récupérés de l'HDV aussi : sans cet envoi, le moteur partirait sur
+    // son défaut (décoché) malgré une case cochée à la session précédente.
+    let _ = settings_tx.send(EngineCommand::SetTrackHdvRetrievals(
+        saved_config.suivi_track_hdv_retrievals,
+    ));
     // Les volumes, eux, vivent dans le module audio que tous les threads partagent.
     alert_sound::set_volumes(saved_config.alert_volumes());
 
@@ -6357,6 +6395,7 @@ fn main() {
         watchlist_definitions_rx,
         watchlist_groups: saved_config.watchlist_groups.clone(),
         suivi_groups_enabled: saved_config.suivi_groups_enabled,
+        suivi_track_hdv_retrievals: saved_config.suivi_track_hdv_retrievals,
         // À côté des combats en cours (`fight-*.json`) — voir la doc de module de
         // `recap_session` pour ce qui y est écrit et quand.
         recap_session: RecapSession::load(

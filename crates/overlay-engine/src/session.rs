@@ -68,6 +68,13 @@ const PURCHASE_WINDOW_MS: i64 = 2_000;
 /// utilisateur (écarts de 30 à 80 s entre un WALKON et le premier ramassage qu'il corrèle).
 const PACT_EXTRACTION_WINDOW_MS: i64 = 3 * 60 * 1000;
 
+/// Inactivité, en ms, au-delà de laquelle une session marchand/HDV encore « ouverte » (voir
+/// `SessionState::in_market_occupation`) est considérée comme abandonnée — miroir exact de
+/// `MARKET_IDLE_MS` (`stats-store.service.ts`). Le jeu n'écrit pas toujours la fermeture : sur
+/// `tests/wakfu.log` (2026-08-04), l'ouverture de 20:33:04 n'en a jamais, et sans ce délai tout le
+/// butin de la soirée passerait pour des retraits HDV.
+const MARKET_IDLE_MS: i64 = 60_000;
+
 /// Résout `itemId`/`itemName`, mutuellement exclusifs — miroir exact d'`HistorySyncService.
 /// itemPayload` (`history-sync.service.ts`) : un id catalogue connu remplace TOUJOURS le nom brut
 /// (jamais les deux à la fois), et un objet non résolu (catalogue pas encore chargé, ou nom que le
@@ -768,9 +775,44 @@ struct SessionState {
     /// `fight_store` : `touched_fight_ids` ne connaît que les combats nommés par une entrée du
     /// lot, et un combat abandonné l'est précisément parce qu'aucune ligne ne le nomme plus.
     abandoned_fight_ids: Vec<i64>,
+    /// Vrai entre une ligne « Lancement de l'occupation MARKET » et son « On arrête/annule
+    /// l'occupation MARKET » (fenêtre de l'Hôtel de vente ouverte) — miroir d'`inMarketOccupation`
+    /// (`stats-store.service.ts`). Ne sert QU'À reconnaître un retrait HDV (voir
+    /// `last_loot_was_hdv_retrieval`) : le butin de combat et le pacte ne le consultent pas (voir
+    /// le cas `MarketOccupation` d'`apply`).
+    in_market_occupation: bool,
+    /// Heure du jour (ms) de la dernière activité marchand/HDV — ouverture, perte de kamas ou
+    /// ramassage pendant la session — miroir de `marketActivityAtMs`. Voir `MARKET_IDLE_MS`.
+    market_activity_at_ms: i64,
+    /// Le DERNIER `LogEntry::Loot` appliqué est-il la récupération d'un objet que le joueur avait
+    /// lui-même mis en vente à l'Hôtel de vente (retour utilisateur 2026-10-05, « Pierre
+    /// d'entourage ») ? Posé par `apply` à chaque ligne, lu par `Engine::apply_entry` pour décider
+    /// si la watchlist le compte (`Engine::set_track_hdv_retrievals`).
+    ///
+    /// Un retrait se distingue des autres ramassages par élimination, sur un vrai fichier : session
+    /// MARKET active (voir `is_market_occupation_active`), **aucune** perte de kamas juste avant
+    /// (sinon c'est un achat), et aucun combat résolu par le parser (`fight_id` vide). Les autres
+    /// ramassages hors combat (sac ouvert, démantèlement, pacte) ne surviennent pas pendant une
+    /// session MARKET — c'est elle qui les écarte, pas leur propre signature.
+    last_loot_was_hdv_retrieval: bool,
 }
 
 impl SessionState {
+    /// Session marchand/HDV ouverte ET active depuis moins de `MARKET_IDLE_MS` — miroir
+    /// d'`isMarketOccupationActive`. Une session restée muette trop longtemps (fermeture jamais
+    /// écrite) est refermée ici ; un écart négatif (passage de minuit) vaut abandon aussi.
+    fn is_market_occupation_active(&mut self, time: &str) -> bool {
+        if !self.in_market_occupation {
+            return false;
+        }
+        let idle = time_of_day_ms(time).map(|ms| ms - self.market_activity_at_ms);
+        if idle.is_some_and(|idle| (0..=MARKET_IDLE_MS).contains(&idle)) {
+            return true;
+        }
+        self.in_market_occupation = false;
+        false
+    }
+
     /// Termine un combat que le log ne terminera jamais — sans résultat (`result: None`, ni gagné
     /// ni perdu, donc aucun événement d'historique) et sans toucher à ses totaux.
     ///
@@ -901,6 +943,7 @@ impl SessionState {
         // ramassage, les suivants restent traités comme avant — écart de fidélité assumé, voir la
         // doc de module de `history.rs`).
         let mut purchase_loot = false;
+        self.last_loot_was_hdv_retrieval = false;
         if let LogEntry::Loot {
             item,
             quantity,
@@ -921,6 +964,15 @@ impl SessionState {
                             ctx,
                         ));
                     }
+                }
+            }
+            // Retrait HDV (voir `last_loot_was_hdv_retrieval`) : session MARKET active, pas
+            // d'achat, pas de combat. Tout ramassage pendant la session la garde en vie, comme
+            // côté web — un achat aussi.
+            if self.is_market_occupation_active(time) {
+                self.last_loot_was_hdv_retrieval = !purchase_loot && fight_id.is_none();
+                if let Some(time_ms) = time_of_day_ms(time) {
+                    self.market_activity_at_ms = time_ms;
                 }
             }
             // Un ramassage survenant pendant une fenêtre d'extraction de pacte ouverte (voir
@@ -1335,6 +1387,9 @@ impl SessionState {
             LogEntry::KamaLoss { amount, time } => {
                 self.totals.kamas_lost += amount;
                 self.pending_purchase = time_of_day_ms(time).map(|ms| (*amount, ms));
+                if let (true, Some((_, ms))) = (self.in_market_occupation, self.pending_purchase) {
+                    self.market_activity_at_ms = ms;
+                }
             }
             LogEntry::XpGain {
                 character,
@@ -1426,20 +1481,25 @@ impl SessionState {
                     sync_events.push(event);
                 }
             }
+            // `market-occupation` : suivi depuis le 2026-10-05 pour reconnaître un retrait HDV
+            // (voir `last_loot_was_hdv_retrieval`), et pour ça seulement — le butin de combat
+            // l'ignore toujours, contrairement au web (`isPurchaseLoot = priceKnown ||
+            // inMarketOccupation`) : sur `tests/wakfu.log` (2026-08-04), l'ouverture de 20:33:04
+            // n'est jamais refermée, et c'est `MARKET_IDLE_MS` seul qui l'éteint. Un retrait exige
+            // en plus un `fight_id` vide, ce qu'aucun butin de combat n'a.
+            LogEntry::MarketOccupation { time, active } => {
+                self.in_market_occupation = *active;
+                if let Some(time_ms) = time_of_day_ms(time) {
+                    self.market_activity_at_ms = time_ms;
+                }
+            }
             // `client-lifecycle` : la coupure du client est traitée EN AMONT du parseur, par
             // `Engine::ingest_batch` (voir `is_client_cut_line`, qui reconnaît aussi la perte de
-            // connexion et la bannière de démarrage) — rien à refaire ici.
-            //
-            // `market-occupation` : volontairement INEXPLOITÉ, contrairement au web
-            // (`isPurchaseLoot = priceKnown || this.inMarketOccupation`). Le drapeau n'est
-            // refermé que par « On arrête/annule l'occupation MARKET » ou un `client-lifecycle` ;
-            // sur `tests/wakfu.log` (vrai fichier, 2026-08-04), l'ouverture de 20:33:04 n'a JAMAIS
-            // aucune des deux — armer ce drapeau y requalifierait en achat HDV les 628 ramassages
-            // des 1 h 30 suivantes, c'est-à-dire tout le butin de tous les combats du fichier.
-            // Les logs récents (celui qui a servi à calibrer le web, 2026-09-15) portent bien la
-            // ligne de fermeture : le jour où un fichier récent le confirme ici aussi, câbler
-            // l'exclusion (le signal, lui, est déjà parsé et désérialisé).
-            //
+            // connexion et la bannière de démarrage). Reste la session MARKET, que le client
+            // arrêté ne refermera jamais.
+            LogEntry::ClientLifecycle { .. } => {
+                self.in_market_occupation = false;
+            }
             // Hors périmètre de ce premier slice (voir le commentaire de module) : chat,
             // combat-defeat-marker, combat-start (ne porte pas de fightId, voir le TS vendu),
             // et les variantes sans fightId (kamas/loot hors combat, dégâts non résolus,
@@ -2354,6 +2414,15 @@ pub struct Engine {
     /// même motif « drain » que `pending_loot_alerts`, file SÉPARÉE : un troisième déclencheur,
     /// un troisième son, une troisième carte.
     pending_chat_alerts: Vec<crate::chat_alert::ChatAlert>,
+    /// **Compter au suivi les objets récupérés de l'Hôtel de vente** — case « Activer la prise en compte des
+    /// invendus de l'hôtel de vente » des Paramètres (retour utilisateur 2026-10-05).
+    /// `false` par défaut : récupérer un objet qu'on avait soi-même mis en vente n'en fait pas un
+    /// objet obtenu, et le compteur ne doit pas bouger. Seule la watchlist le consulte — le
+    /// ramassage reste compté dans les totaux de session et peut toujours déclencher son alerte
+    /// de drop. Voir `SessionState::last_loot_was_hdv_retrieval` pour la détection.
+    ///
+    /// Écart voulu avec le web, qui compte tout ramassage (`registerLoot`) et n'a pas l'option.
+    track_hdv_retrievals: bool,
     /// Événements d'historique (combat/achat/échange) prêts à synchroniser, accumulés depuis le
     /// dernier `drain_sync_events` (L5, §7.1) — même motif « drain » que `pending_alerts`/
     /// `pending_loot_alerts`, file SÉPARÉE : l'hôte (`overlay-ui`) les relaie tels quels au thread
@@ -2433,6 +2502,7 @@ impl Engine {
             pending_loot_alerts: Vec::new(),
             chat_filters: Vec::new(),
             pending_chat_alerts: Vec::new(),
+            track_hdv_retrievals: false,
             pending_sync_events: Vec::new(),
             fight_store_dir,
         })
@@ -2627,13 +2697,13 @@ impl Engine {
         self.watchlist.drain_definitions_changed()
     }
 
-    /// **Remet le compteur d'une entrée suivie à sa valeur de départ** (2026-09-18) — le bouton
-    /// de réinitialisation d'une tuile du bandeau, après confirmation. Voir
-    /// [`WatchlistState::reset_counter`](crate::watchlist::WatchlistState::reset_counter) pour ce
-    /// que « départ » veut dire selon le mode, et pourquoi l'entrée est désignée par son identité
-    /// plutôt que par son rang. Renvoie `false` si aucune entrée ne correspond plus.
-    pub fn reset_watchlist_counter(&mut self, name: &str, kind: WatchlistKind) -> bool {
-        self.watchlist.reset_counter(name, kind)
+    /// **Pose le compteur d'une entrée suivie à la main** (2026-10-05) — la validation de la
+    /// modale d'édition d'une tuile du bandeau. Voir
+    /// [`WatchlistState::set_counter`](crate::watchlist::WatchlistState::set_counter) pour le
+    /// bornage à l'échelle du mode, et pourquoi l'entrée est désignée par son identité plutôt que
+    /// par son rang. Renvoie `false` si aucune entrée ne correspond plus.
+    pub fn set_watchlist_counter(&mut self, name: &str, kind: WatchlistKind, count: i64) -> bool {
+        self.watchlist.set_counter(name, kind, count)
     }
 
     /// Remplace la liste des objets à son activé au ramassage par celle renvoyée par le compte
@@ -2650,6 +2720,12 @@ impl Engine {
     /// même principe que `set_sound_items` : aucun état local, un remplacement suffit.
     pub fn set_chat_filters(&mut self, filters: Vec<crate::chat_alert::ChatFilter>) {
         self.chat_filters = filters;
+    }
+
+    /// Voir `Engine::track_hdv_retrievals` — réglage local, posé par l'hôte au démarrage puis à
+    /// chaque validation des Paramètres. Ne touche qu'aux ramassages À VENIR.
+    pub fn set_track_hdv_retrievals(&mut self, track: bool) {
+        self.track_hdv_retrievals = track;
     }
 
     pub fn chat_filters(&self) -> &[crate::chat_alert::ChatFilter] {
@@ -2863,8 +2939,15 @@ impl Engine {
         // Miroir du gating `currentBatchIsInitialLoad` de `registerLoot`/`registerDefeat` côté
         // web (voir `watchlist.rs`) : le contenu déjà présent dans le fichier au premier
         // chargement ne doit pas regonfler un compteur qui persiste d'une session à l'autre.
+        // Retrait d'un objet mis en vente par le joueur (voir `track_hdv_retrievals`) : la
+        // watchlist ne le voit pas, sauf si l'option le demande.
+        let skip_watchlist = self.state.last_loot_was_hdv_retrieval && !self.track_hdv_retrievals;
         if !is_initial_load {
-            self.pending_alerts.extend(self.watchlist.apply(entry));
+            if skip_watchlist {
+                tracing::debug!(time = entry.time(), "retrait HDV ignoré par le suivi");
+            } else {
+                self.pending_alerts.extend(self.watchlist.apply(entry));
+            }
             // Filet de rattrapage du dernier ennemi d'un combat (voir la doc de
             // `SessionState::apply`, cas `CombatEnd`) : crédité à la watchlist comme s'il
             // s'agissait d'autant de `LogEntry::EnemyDefeated` supplémentaires — même chemin,

@@ -105,6 +105,36 @@ pub struct WatchlistEntry {
     pub catalog_id: Option<i64>,
 }
 
+impl WatchlistEntry {
+    /// **La valeur dont part le compteur** : sa cible en décompte (il descend vers 0), 0 en
+    /// incrémental et en objectif (ils montent). C'est aussi ce que pose le bouton
+    /// « Réinitialiser » de la modale d'édition (2026-10-05).
+    pub fn starting_count(&self) -> i64 {
+        match self.mode {
+            WatchlistMode::Down => self.countdown_target,
+            WatchlistMode::Up | WatchlistMode::Goal => 0,
+        }
+    }
+
+    /// **Le plus grand compteur que l'échelle du mode admet** — la cible en décompte et en
+    /// objectif, aucune borne en incrémental.
+    pub fn max_count(&self) -> Option<i64> {
+        self.mode
+            .has_target()
+            .then_some(self.countdown_target.max(0))
+    }
+
+    /// `count` ramené dans l'échelle du mode : jamais négatif, jamais au-delà de la cible quand il
+    /// y en a une (voir [`WatchlistState::set_counter`]).
+    pub fn clamp_count(&self, count: i64) -> i64 {
+        let count = count.max(0);
+        match self.max_count() {
+            Some(max) => count.min(max),
+            None => count,
+        }
+    }
+}
+
 /// Nom d'app DISTINCT en test — même précaution que `overlay_sync::token_store` (2026-09-01) :
 /// un test qui écrirait dans le VRAI fichier de compteurs de l'utilisateur écraserait un suivi en
 /// cours à chaque `cargo test`.
@@ -547,18 +577,25 @@ impl WatchlistState {
         (changed, alerts)
     }
 
-    /// **Remet le compteur d'une entrée à sa valeur de départ** — le bouton de réinitialisation
-    /// d'une tuile du bandeau in-game (2026-09-18) : zéro en incrémental et en objectif, la cible
-    /// en décompte, exactement ce dont part une entrée neuve ([`compteur_de_depart`]).
+    /// **Pose le compteur d'une entrée à la main** — la modale d'édition d'une tuile du bandeau
+    /// in-game (2026-10-05, remontée utilisateur). Elle sert trois cas : corriger un compteur qu'un
+    /// bug a fait monter ou oublié de faire monter, reporter un suivi tenu avant d'activer
+    /// l'overlay, et la réinitialisation, qui n'est plus qu'une valeur de plus (la valeur de départ
+    /// de [`WatchlistEntry::starting_count`], posée dans la modale avant validation).
+    ///
+    /// La valeur est **bornée à l'échelle du mode** ([`WatchlistEntry::clamp_count`]) : jamais
+    /// négative, jamais au-delà de la cible en décompte ou en objectif — un « 60/50 » n'aurait pas
+    /// de sens à l'écran. Atteindre ainsi le bout de l'échelle **n'alerte pas** et ne célèbre rien :
+    /// seul un ramassage le fait (voir `increment`), comme une cible redéfinie sous le ramassé.
     ///
     /// L'entrée est désignée par ce qui fait son identité ([`meme_entree`] : nom insensible à la
-    /// casse et genre), pas par un rang — entre le clic et la confirmation, la liste a pu bouger
-    /// (retrait depuis le site, réordonnancement). Renvoie `true` si une entrée a été remise ;
-    /// `false` si aucune ne correspond plus, auquel cas rien n'est écrit ni répliqué.
+    /// casse et genre), pas par un rang — entre l'ouverture de la modale et sa validation, la liste a
+    /// pu bouger (retrait depuis le site, réordonnancement). Renvoie `true` si une entrée correspond ;
+    /// `false` sinon, auquel cas rien n'est écrit ni répliqué.
     ///
-    /// Persiste et marque `dirty` comme un ramassage : le compte doit voir le compteur repartir, sans
-    /// quoi le prochain `merge_config` le rattraperait à son ancienne valeur.
-    pub fn reset_counter(&mut self, name: &str, kind: WatchlistKind) -> bool {
+    /// Persiste et marque `dirty` comme un ramassage : le compte doit voir la nouvelle valeur, sans
+    /// quoi le prochain `merge_config` le rattraperait à l'ancienne.
+    pub fn set_counter(&mut self, name: &str, kind: WatchlistKind, count: i64) -> bool {
         let cible = WatchlistEntry {
             name: name.to_string(),
             kind,
@@ -570,7 +607,7 @@ impl WatchlistState {
         let mut changed = false;
         for entry in &mut self.entries {
             if meme_entree(entry, &cible) {
-                entry.count = compteur_de_depart(entry);
+                entry.count = entry.clamp_count(count);
                 changed = true;
             }
         }
@@ -646,13 +683,10 @@ fn compteur_reporte(existante: &WatchlistEntry, definition: &WatchlistEntry) -> 
     Some((definition.countdown_target - ramassees).max(0))
 }
 
-/// La valeur dont part une entrée neuve, ou une entrée dont le comptage vient d'être redéfini :
-/// sa cible en décompte (il descend vers 0), 0 en incrémental et en objectif (ils montent).
+/// La valeur dont part une entrée neuve, ou une entrée dont le comptage vient d'être redéfini —
+/// voir [`WatchlistEntry::starting_count`].
 fn compteur_de_depart(entry: &WatchlistEntry) -> i64 {
-    match entry.mode {
-        WatchlistMode::Down => entry.countdown_target,
-        WatchlistMode::Up | WatchlistMode::Goal => 0,
-    }
+    entry.starting_count()
 }
 
 /// Construit la liste des entrées suivies depuis `data["watchlist"]` de la réponse
@@ -1150,8 +1184,8 @@ mod definitions_tests {
     }
 
     #[test]
-    fn reinitialiser_un_compteur_le_ramene_a_sa_valeur_de_depart() {
-        let dir = std::env::temp_dir().join("wco-defs-reset.json");
+    fn poser_un_compteur_a_la_main_le_borne_a_l_echelle_du_mode() {
+        let dir = std::env::temp_dir().join("wco-defs-set.json");
         let mut state = WatchlistState::new(dir);
         state.apply_definitions(
             vec![
@@ -1161,24 +1195,35 @@ mod definitions_tests {
             ],
             &[],
         );
-        state.entries[0].count = 7;
-        state.entries[1].count = 12;
-        state.entries[2].count = 15;
         let _ = state.drain_pending_sync();
 
-        // Incrémental : zéro. Décompte : la cible. Objectif : zéro.
-        assert!(state.reset_counter("plume", WatchlistKind::Item));
-        assert!(state.reset_counter("Bouftou", WatchlistKind::Item));
-        assert!(state.reset_counter("Sel", WatchlistKind::Item));
-        assert_eq!(state.entries()[0].count, 0);
-        assert_eq!(state.entries()[1].count, 50);
-        assert_eq!(state.entries()[2].count, 0);
-        // Le compte doit voir les compteurs repartir.
+        // Une valeur dans l'échelle passe telle quelle — l'identité ignore la casse.
+        assert!(state.set_counter("plume", WatchlistKind::Item, 1234));
+        assert!(state.set_counter("Bouftou", WatchlistKind::Item, 12));
+        assert!(state.set_counter("Sel", WatchlistKind::Item, 15));
+        assert_eq!(state.entries()[0].count, 1234);
+        assert_eq!(state.entries()[1].count, 12);
+        assert_eq!(state.entries()[2].count, 15);
+        // Le compte doit voir la nouvelle valeur.
         assert!(state.drain_pending_sync().is_some());
 
+        // Hors échelle : jamais négatif, jamais au-delà de la cible.
+        assert!(state.set_counter("Plume", WatchlistKind::Item, -3));
+        assert!(state.set_counter("Bouftou", WatchlistKind::Item, 80));
+        assert!(state.set_counter("Sel", WatchlistKind::Item, 99));
+        assert_eq!(state.entries()[0].count, 0);
+        assert_eq!(state.entries()[1].count, 50);
+        assert_eq!(state.entries()[2].count, 20);
+
+        // La réinitialisation n'est qu'une valeur : celle de départ du mode.
+        assert_eq!(state.entries()[0].starting_count(), 0);
+        assert_eq!(state.entries()[1].starting_count(), 50);
+        assert_eq!(state.entries()[2].starting_count(), 0);
+        let _ = state.drain_pending_sync();
+
         // Une entrée qui n'existe plus (ou pas sous ce genre) : rien, et rien à répliquer.
-        assert!(!state.reset_counter("Plume", WatchlistKind::Enemy));
-        assert!(!state.reset_counter("Inconnu", WatchlistKind::Item));
+        assert!(!state.set_counter("Plume", WatchlistKind::Enemy, 3));
+        assert!(!state.set_counter("Inconnu", WatchlistKind::Item, 3));
         assert!(state.drain_pending_sync().is_none());
     }
 

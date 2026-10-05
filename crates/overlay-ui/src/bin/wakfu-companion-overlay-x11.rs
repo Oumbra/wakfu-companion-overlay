@@ -268,9 +268,12 @@ mod linux_main {
         watchlist_groups: config::WatchlistGroupsConfig,
         /// Voir `main.rs::App::suivi_groups_enabled`.
         suivi_groups_enabled: bool,
-        /// Voir `main.rs::App::watchlist_reset_pending` — l'entrée dont la réinitialisation attend
-        /// confirmation (2026-09-18).
-        watchlist_reset_pending: Option<WatchlistEntry>,
+        /// La case « Activer la prise en compte des invendus de l'hôtel de vente » EN VIGUEUR —
+        /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
+        suivi_track_hdv_retrievals: bool,
+        /// Voir `main.rs::App::watchlist_counter_edit` — le brouillon de la modale d'édition d'un
+        /// compteur (2026-10-05).
+        watchlist_counter_edit: Option<panels::counter_edit::CounterEditState>,
         catalog: Arc<ArcSwap<CatalogIndex>>,
         /// Voir `main.rs::App::catalog_stale` — indicateur « catalogue daté » de la zone Combat.
         catalog_stale: Arc<AtomicBool>,
@@ -636,6 +639,9 @@ mod linux_main {
         watchlist_groups: config::WatchlistGroupsConfig,
         /// Voir `App::suivi_groups_enabled` — lue de la config au démarrage.
         suivi_groups_enabled: bool,
+        /// La case « Activer la prise en compte des invendus de l'hôtel de vente » EN VIGUEUR —
+        /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
+        suivi_track_hdv_retrievals: bool,
         /// La session du Récap relue du disque — voir `main.rs::AppState::recap_session`.
         recap_session: RecapSession,
         /// La position de la bande Récap relue de la config — voir `App::recap_position`.
@@ -696,6 +702,7 @@ mod linux_main {
                 watchlist_definitions_rx,
                 watchlist_groups,
                 suivi_groups_enabled,
+                suivi_track_hdv_retrievals,
                 recap_session,
                 recap_position,
                 click_through_position,
@@ -736,7 +743,8 @@ mod linux_main {
                 watchlist_definitions_rx,
                 watchlist_groups,
                 suivi_groups_enabled,
-                watchlist_reset_pending: None,
+                suivi_track_hdv_retrievals,
+                watchlist_counter_edit: None,
                 interactive: true,
                 snapshot,
                 watchlist,
@@ -2064,6 +2072,7 @@ mod linux_main {
                     suivi: suivi_draft.clone(),
                     suivi_groups: suivi_groups_initial,
                     suivi_groups_enabled: self.suivi_groups_enabled,
+                    suivi_track_hdv_retrievals: self.suivi_track_hdv_retrievals,
                     chat: chat_draft.clone(),
                     personnages: personnages_draft.clone(),
                     combat_always_visible: self.combat_always_visible,
@@ -2096,6 +2105,7 @@ mod linux_main {
                 suivi_availability,
                 suivi_groups,
                 suivi_groups_enabled: self.suivi_groups_enabled,
+                suivi_track_hdv_retrievals: self.suivi_track_hdv_retrievals,
             });
             overlay.window.request_redraw();
             self.windows.insert(overlay.window.id(), overlay);
@@ -2336,24 +2346,31 @@ mod linux_main {
                 ResetTarget::WatchlistCounter => {
                     tracing::info!(
                         name = self
-                            .watchlist_reset_pending
+                            .watchlist_counter_edit
                             .as_ref()
-                            .map(|e| e.name.as_str()),
-                        "[suivi] confirmation de réinitialisation du compteur ouverte."
+                            .map(|e| e.entry.name.as_str()),
+                        "[suivi] modale d'édition du compteur ouverte."
                     )
                 }
             }
         }
 
-        /// Voir `main.rs::open_watchlist_reset_confirm`.
-        fn open_watchlist_reset_confirm(
+        /// Voir `main.rs::open_watchlist_counter_edit`.
+        fn open_watchlist_counter_edit(
             &mut self,
             event_loop: &ActiveEventLoop,
             game_window: u32,
             rect: GameRect,
             entry: WatchlistEntry,
         ) {
-            self.watchlist_reset_pending = Some(entry);
+            if self
+                .windows
+                .values()
+                .any(|w| matches!(w.kind, OverlayKind::ResetConfirm(_)))
+            {
+                return;
+            }
+            self.watchlist_counter_edit = Some(panels::counter_edit::CounterEditState::new(entry));
             self.open_reset_confirm(event_loop, game_window, rect, ResetTarget::WatchlistCounter);
         }
 
@@ -2434,26 +2451,23 @@ mod linux_main {
                 (ResetTarget::CombatPosition, false) => {
                     tracing::info!("[combat] replacement annulé.")
                 }
-                (ResetTarget::WatchlistCounter, true) => {
-                    match self.watchlist_reset_pending.take() {
-                        Some(entry) => {
-                            tracing::info!(
-                                name = %entry.name,
-                                "[suivi] réinitialisation du compteur confirmée."
-                            );
-                            let _ = self.settings_tx.send(EngineCommand::ResetWatchlistCounter {
-                                name: entry.name,
-                                kind: entry.kind,
-                            });
-                        }
-                        None => tracing::warn!(
-                            "[suivi] réinitialisation confirmée sans entrée retenue, rien fait."
-                        ),
+                // Voir `main.rs::answer_reset_confirm`.
+                (ResetTarget::WatchlistCounter, true) => match self
+                    .watchlist_counter_edit
+                    .take()
+                    .and_then(panels::counter_edit::CounterEditState::into_command)
+                {
+                    Some(commande) => {
+                        tracing::info!("[suivi] édition du compteur validée.");
+                        let _ = self.settings_tx.send(commande);
                     }
-                }
+                    None => {
+                        tracing::info!("[suivi] édition du compteur validée sans changement.")
+                    }
+                },
                 (ResetTarget::WatchlistCounter, false) => {
-                    self.watchlist_reset_pending = None;
-                    tracing::info!("[suivi] réinitialisation du compteur annulée.")
+                    self.watchlist_counter_edit = None;
+                    tracing::info!("[suivi] édition du compteur annulée.")
                 }
             }
         }
@@ -2671,6 +2685,7 @@ mod linux_main {
             saved.set_alert_mutes(self.alert_mutes);
             saved.set_alert_volumes(self.alert_volumes);
             saved.suivi_groups_enabled = self.suivi_groups_enabled;
+            saved.suivi_track_hdv_retrievals = self.suivi_track_hdv_retrievals;
             saved.watchlist_groups = self.watchlist_groups.clone();
             config::save(&saved);
         }
@@ -2955,6 +2970,20 @@ mod linux_main {
                     // thread Engine, contrairement à la fermeture ci-dessus : le moteur ne sait rien
                     // de la célébration ni du retrait, c'est l'hôte qui les décide à réception de la
                     // complétion (voir `about_to_wait`).
+                    // **Le suivi des objets récupérés de l'HDV (2026-10-05)** — part au thread Engine :
+                    // c'est le moteur qui décide si un retrait fait monter le compteur.
+                    let hdv_retrievals_changed =
+                        commit.suivi_track_hdv_retrievals != self.suivi_track_hdv_retrievals;
+                    if hdv_retrievals_changed {
+                        self.suivi_track_hdv_retrievals = commit.suivi_track_hdv_retrievals;
+                        tracing::info!(
+                            track = self.suivi_track_hdv_retrievals,
+                            "[options] suivi des objets récupérés de l'HDV mis à jour"
+                        );
+                        let _ = self.settings_tx.send(EngineCommand::SetTrackHdvRetrievals(
+                            self.suivi_track_hdv_retrievals,
+                        ));
+                    }
                     if commit.completion != self.completion {
                         self.completion = commit.completion;
                         tracing::info!(
@@ -3022,6 +3051,7 @@ mod linux_main {
                         || features_changed
                         || mutes_changed
                         || countdown_toast_changed
+                        || hdv_retrievals_changed
                         || recap_resume_changed
                         || auto_update_changed
                         || verbose_log_changed
@@ -3122,8 +3152,8 @@ mod linux_main {
                 OpenResetConfirm(u32, GameRect, ResetTarget),
                 /// La confirmation a répondu — voir `main.rs`.
                 AnswerResetConfirm(ResetTarget, bool),
-                /// Bouton de réinitialisation d'une tuile du bandeau cliqué — voir `main.rs`.
-                OpenWatchlistResetConfirm(u32, GameRect, WatchlistEntry),
+                /// Crayon d'une tuile du bandeau cliqué — voir `main.rs`.
+                OpenWatchlistCounterEdit(u32, GameRect, WatchlistEntry),
                 /// Le cadenas de la bande Récap vient d'être cliqué (voir `toggle_recap_lock`).
                 ToggleRecapLock,
                 /// Le cadenas du panneau Combat vient d'être cliqué (voir `toggle_combat_lock`).
@@ -3483,7 +3513,7 @@ mod linux_main {
                             combat_chrome,
                             watchlist_selection: &mut self.watchlist_selection,
                             watchlist_completions: &self.watchlist_completions,
-                            watchlist_reset: self.watchlist_reset_pending.as_ref(),
+                            watchlist_counter_edit: self.watchlist_counter_edit.as_mut(),
                             watchlist_toast,
                             catalog: &catalog,
                             catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
@@ -3955,9 +3985,9 @@ mod linux_main {
                     if let Some(url) = &outcome.open_url {
                         let _ = open::that(url);
                     }
-                    // Réinitialisation du compteur d'une tuile (2026-09-18) — voir `main.rs`.
-                    if let Some(entry) = outcome.watchlist_reset_requested {
-                        post_redraw = PostRedraw::OpenWatchlistResetConfirm(
+                    // Crayon d'une tuile (2026-10-05) — voir `main.rs`.
+                    if let Some(entry) = outcome.watchlist_edit_requested {
+                        post_redraw = PostRedraw::OpenWatchlistCounterEdit(
                             this_game_window,
                             this_game_rect,
                             entry,
@@ -4094,8 +4124,8 @@ mod linux_main {
                 PostRedraw::AnswerResetConfirm(target, confirmed) => {
                     self.answer_reset_confirm(id, target, confirmed)
                 }
-                PostRedraw::OpenWatchlistResetConfirm(window, rect, entry) => {
-                    self.open_watchlist_reset_confirm(event_loop, window, rect, entry)
+                PostRedraw::OpenWatchlistCounterEdit(window, rect, entry) => {
+                    self.open_watchlist_counter_edit(event_loop, window, rect, entry)
                 }
                 PostRedraw::ToggleRecapLock => self.toggle_recap_lock(),
                 PostRedraw::ToggleCombatLock => self.toggle_combat_lock(),
@@ -4625,6 +4655,11 @@ mod linux_main {
         let _ = settings_tx.send(EngineCommand::SetFeatures(saved_config.features()));
         // Les sourdines de même — voir `main.rs`.
         let _ = settings_tx.send(EngineCommand::SetAlertMutes(saved_config.alert_mutes()));
+        // Le suivi des objets récupérés de l'HDV aussi : sans cet envoi, le moteur partirait sur
+        // son défaut (décoché) malgré une case cochée à la session précédente.
+        let _ = settings_tx.send(EngineCommand::SetTrackHdvRetrievals(
+            saved_config.suivi_track_hdv_retrievals,
+        ));
         // Les volumes — voir `main.rs`.
         overlay_ui::alert_sound::set_volumes(saved_config.alert_volumes());
 
@@ -4648,6 +4683,7 @@ mod linux_main {
             watchlist_definitions_rx,
             watchlist_groups: saved_config.watchlist_groups.clone(),
             suivi_groups_enabled: saved_config.suivi_groups_enabled,
+            suivi_track_hdv_retrievals: saved_config.suivi_track_hdv_retrievals,
             // Voir `main.rs` : à côté des combats en cours.
             recap_session: RecapSession::load(
                 overlay_engine::fight_store::default_store_dir().join(recap_session::FILE_NAME),
