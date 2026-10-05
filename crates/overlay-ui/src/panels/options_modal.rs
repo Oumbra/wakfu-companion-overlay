@@ -1474,9 +1474,10 @@ pub fn show(
                 )
                 .enabled(state.features.suivi)
                 .tooltip(
-                    "Compte aussi les objets que vous récupérez à l'hôtel de vente après les \
-                     avoir mis en vente vous-même. Décochée, ils ne font pas avancer les \
-                     compteurs ; un objet acheté les fait toujours avancer.",
+                    "Les invendus sont les objets que vous avez vous-même mis en vente à \
+                     l'hôtel de vente, puis que vous y récupérez. Cochée, leur récupération \
+                     fait avancer les compteurs ; décochée, elle est ignorée. Un objet acheté \
+                     fait toujours avancer les compteurs.",
                 )
                 .log_name("options-suivi-retrait-hdv"),
             );
