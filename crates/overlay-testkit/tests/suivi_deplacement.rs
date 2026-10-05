@@ -163,7 +163,7 @@ fn harnais(
                     combat_on_right: false,
                     watchlist_selection: &mut selection,
                     watchlist_completions: &completions,
-                    watchlist_reset: None,
+                    watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,

@@ -16,6 +16,7 @@ pub mod combat_frame;
 pub mod combat_frame_scroll;
 mod combat_scrollbar;
 pub mod combat_spell_block;
+pub mod counter_edit;
 pub mod drag;
 pub mod feature_switch;
 pub mod hover_reveal;

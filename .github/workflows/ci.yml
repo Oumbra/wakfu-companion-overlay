@@ -53,6 +53,12 @@ on:
       - '**/*.md'
       - '.claude/**'
   pull_request:
+    # Une PR vers `main` n'est ouverte que par `release-pr.yml`, qui joue déjà ce CI complet sur
+    # le même commit (`workflow_call`, job `ci`). Le run `pull_request` qu'elle déclenchait en plus
+    # (par `github-actions[bot]`) ne créait aucun job et finissait rouge à la fusion, à chaque
+    # release (runs 494, 496, 498, 500) : un verdict toujours faux, retiré le 2026-10-04. Le filtre
+    # porte sur la branche CIBLE de la PR ; les PR de Dependabot visent `dev` et restent couvertes.
+    branches-ignore: [main]
     paths-ignore:
       - 'docs/**'
       - '**/*.md'

@@ -114,17 +114,18 @@ pub enum EngineCommand {
         /// `WatchlistState::apply_definitions`).
         retirees: Vec<WatchlistEntry>,
     },
-    /// **Remise à zéro du compteur d'une entrée suivie** (2026-09-18) — le bouton de
-    /// réinitialisation d'une tuile du bandeau, une fois la confirmation obtenue. Le compteur
-    /// repart de ce que son mode impose (voir `WatchlistState::reset_counter`) ; la définition ne
-    /// bouge pas.
+    /// **Compteur d'une entrée suivie posé à la main** (2026-10-05) — la validation de la modale
+    /// d'édition d'une tuile du bandeau (`panels::counter_edit`). Le moteur borne la valeur à
+    /// l'échelle du mode (voir `WatchlistState::set_counter`) ; la définition ne bouge pas. La
+    /// réinitialisation passe par là aussi : c'est la valeur de départ, posée dans la modale.
     ///
-    /// L'entrée est désignée par son identité (nom et genre), jamais par son rang : entre le clic et
-    /// la confirmation, la liste a pu changer. Une entrée qui n'existe plus ne fait rien. Comme un
-    /// ramassage, la nouvelle valeur part au compte par `SyncCommand::SyncWatchlist`.
-    ResetWatchlistCounter {
+    /// L'entrée est désignée par son identité (nom et genre), jamais par son rang : entre
+    /// l'ouverture et la validation, la liste a pu changer. Une entrée qui n'existe plus ne fait
+    /// rien. Comme un ramassage, la nouvelle valeur part au compte par `SyncCommand::SyncWatchlist`.
+    SetWatchlistCounter {
         name: String,
         kind: WatchlistKind,
+        count: i64,
     },
     /// **Bascule sur un autre groupe d'éléments suivis** (2026-09-30) — la validation de l'onglet
     /// Suivi quand le groupe affiché change, ou la case « Activer les groupes » décochée (retour au
@@ -188,6 +189,13 @@ pub enum EngineCommand {
     /// l'alerte concernée, et continue d'afficher sa carte par-dessus le jeu. C'est là toute la
     /// différence avec [`Self::SetFeatures`], qui coupe les deux canaux à la fois.
     SetAlertMutes(AlertMutes),
+    /// **Compter au Suivi les objets récupérés de l'Hôtel de vente** — case « Activer la prise en compte des
+    /// invendus de l'hôtel de vente » de la section « Suivi » des Paramètres
+    /// (2026-10-05). Locale à la machine comme `SetFeatures`, envoyée au démarrage puis à chaque
+    /// validation de la fenêtre Options. Contrairement aux interrupteurs, elle agit sur le MOTEUR
+    /// (`overlay_engine::Engine::set_track_hdv_retrievals`) : un retrait ignoré ne fait pas
+    /// bouger le compteur, il n'est pas seulement passé sous silence.
+    SetTrackHdvRetrievals(bool),
 }
 
 /// **Chien de garde de l'ingestion** (2026-09-17) — ce qui décide qu'un panneau Combat figé doit
@@ -723,6 +731,13 @@ pub fn spawn_engine_thread(
                             );
                             chat_toast = settings;
                         }
+                        EngineCommand::SetTrackHdvRetrievals(track) => {
+                            tracing::info!(
+                                track,
+                                "[options] suivi des objets récupérés de l'HDV appliqué"
+                            );
+                            engine.set_track_hdv_retrievals(track);
+                        }
                         EngineCommand::SetCountdownToast(settings) => {
                             tracing::info!(
                                 duration_seconds = settings.duration_seconds,
@@ -770,14 +785,14 @@ pub fn spawn_engine_thread(
                             tracing::info!(group = %group, "[suivi] groupe supprimé, compteurs oubliés");
                             engine.forget_watchlist_group(&group);
                         }
-                        EngineCommand::ResetWatchlistCounter { name, kind } => {
-                            if engine.reset_watchlist_counter(&name, kind) {
-                                tracing::info!(name = %name, ?kind, "[suivi] compteur réinitialisé");
+                        EngineCommand::SetWatchlistCounter { name, kind, count } => {
+                            if engine.set_watchlist_counter(&name, kind, count) {
+                                tracing::info!(name = %name, ?kind, count, "[suivi] compteur modifié à la main");
                             } else {
                                 tracing::warn!(
                                     name = %name,
                                     ?kind,
-                                    "[suivi] compteur à réinitialiser introuvable, rien fait"
+                                    "[suivi] compteur à modifier introuvable, rien fait"
                                 );
                             }
                         }
