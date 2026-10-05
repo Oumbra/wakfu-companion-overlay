@@ -452,8 +452,8 @@ pub struct OverlayConfig {
     /// groupes sont conservés dans [`Self::watchlist_groups`] et retrouvés en la recochant.
     #[serde(default)]
     pub suivi_groups_enabled: bool,
-    /// **Compter au Suivi les objets récupérés de l'Hôtel de vente** — case « Activer le suivi des
-    /// éléments récupérés de l'hôtel de vente » de la section « Suivi » de l'onglet
+    /// **Compter au Suivi les objets récupérés de l'Hôtel de vente** — case « Activer la prise en compte des
+    /// invendus de l'hôtel de vente » de la section « Suivi » de l'onglet
     /// « Paramètres » (retour utilisateur, 2026-10-05). Transmise au thread Engine
     /// (`engine_thread::EngineCommand::SetTrackHdvRetrievals`), voir
     /// `overlay_engine::Engine::set_track_hdv_retrievals`.

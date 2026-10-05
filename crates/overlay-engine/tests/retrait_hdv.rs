@@ -1,6 +1,6 @@
 //! Retour utilisateur (2026-10-05) : récupérer à l'Hôtel de vente un objet qu'on avait soi-même mis
 //! en vente faisait monter son compteur de Suivi, comme s'il avait été obtenu. Ce retrait ne compte
-//! plus, sauf si la case « Activer le suivi des éléments récupérés de l'hôtel de vente » est cochée
+//! plus, sauf si la case « Activer la prise en compte des invendus de l'hôtel de vente » est cochée
 //! (`Engine::set_track_hdv_retrievals`, `false` par défaut). Un ACHAT, lui, compte toujours.
 //!
 //! Lignes reprises du `wakfu.log` fourni avec le retour (« Pierre d'entourage » retirée à 11:54:04,

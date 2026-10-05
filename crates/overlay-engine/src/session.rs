@@ -2414,8 +2414,8 @@ pub struct Engine {
     /// même motif « drain » que `pending_loot_alerts`, file SÉPARÉE : un troisième déclencheur,
     /// un troisième son, une troisième carte.
     pending_chat_alerts: Vec<crate::chat_alert::ChatAlert>,
-    /// **Compter au suivi les objets récupérés de l'Hôtel de vente** — case « Activer le suivi des
-    /// éléments récupérés de l'hôtel de vente » des Paramètres (retour utilisateur 2026-10-05).
+    /// **Compter au suivi les objets récupérés de l'Hôtel de vente** — case « Activer la prise en compte des
+    /// invendus de l'hôtel de vente » des Paramètres (retour utilisateur 2026-10-05).
     /// `false` par défaut : récupérer un objet qu'on avait soi-même mis en vente n'en fait pas un
     /// objet obtenu, et le compteur ne doit pas bouger. Seule la watchlist le consulte — le
     /// ramassage reste compté dans les totaux de session et peut toujours déclencher son alerte

@@ -268,7 +268,7 @@ mod linux_main {
         watchlist_groups: config::WatchlistGroupsConfig,
         /// Voir `main.rs::App::suivi_groups_enabled`.
         suivi_groups_enabled: bool,
-        /// La case « Activer le suivi des éléments récupérés de l'hôtel de vente » EN VIGUEUR —
+        /// La case « Activer la prise en compte des invendus de l'hôtel de vente » EN VIGUEUR —
         /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
         suivi_track_hdv_retrievals: bool,
         /// Voir `main.rs::App::watchlist_counter_edit` — le brouillon de la modale d'édition d'un
@@ -639,7 +639,7 @@ mod linux_main {
         watchlist_groups: config::WatchlistGroupsConfig,
         /// Voir `App::suivi_groups_enabled` — lue de la config au démarrage.
         suivi_groups_enabled: bool,
-        /// La case « Activer le suivi des éléments récupérés de l'hôtel de vente » EN VIGUEUR —
+        /// La case « Activer la prise en compte des invendus de l'hôtel de vente » EN VIGUEUR —
         /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
         suivi_track_hdv_retrievals: bool,
         /// La session du Récap relue du disque — voir `main.rs::AppState::recap_session`.

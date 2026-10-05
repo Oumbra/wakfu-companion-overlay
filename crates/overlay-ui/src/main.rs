@@ -693,7 +693,7 @@ struct App {
     watchlist_groups: config::WatchlistGroupsConfig,
     /// La case « Activer les groupes » EN VIGUEUR — voir `config::OverlayConfig::suivi_groups_enabled`.
     suivi_groups_enabled: bool,
-    /// La case « Activer le suivi des éléments récupérés de l'hôtel de vente » EN VIGUEUR —
+    /// La case « Activer la prise en compte des invendus de l'hôtel de vente » EN VIGUEUR —
     /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
     suivi_track_hdv_retrievals: bool,
     /// **Le brouillon de la modale d'édition d'un compteur** (2026-10-05) — posé à l'ouverture de
@@ -1040,7 +1040,7 @@ struct AppState {
     watchlist_groups: config::WatchlistGroupsConfig,
     /// Voir `App::suivi_groups_enabled` — lue de la config au démarrage.
     suivi_groups_enabled: bool,
-    /// La case « Activer le suivi des éléments récupérés de l'hôtel de vente » EN VIGUEUR —
+    /// La case « Activer la prise en compte des invendus de l'hôtel de vente » EN VIGUEUR —
     /// voir `config::OverlayConfig::suivi_track_hdv_retrievals`.
     suivi_track_hdv_retrievals: bool,
     /// Voir `App::recap_session` — relue du disque au démarrage, avec le réglage de la config.

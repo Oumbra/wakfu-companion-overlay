@@ -189,8 +189,8 @@ pub enum EngineCommand {
     /// l'alerte concernée, et continue d'afficher sa carte par-dessus le jeu. C'est là toute la
     /// différence avec [`Self::SetFeatures`], qui coupe les deux canaux à la fois.
     SetAlertMutes(AlertMutes),
-    /// **Compter au Suivi les objets récupérés de l'Hôtel de vente** — case « Activer le suivi des
-    /// éléments récupérés de l'hôtel de vente » de la section « Suivi » des Paramètres
+    /// **Compter au Suivi les objets récupérés de l'Hôtel de vente** — case « Activer la prise en compte des
+    /// invendus de l'hôtel de vente » de la section « Suivi » des Paramètres
     /// (2026-10-05). Locale à la machine comme `SetFeatures`, envoyée au démarrage puis à chaque
     /// validation de la fenêtre Options. Contrairement aux interrupteurs, elle agit sur le MOTEUR
     /// (`overlay_engine::Engine::set_track_hdv_retrievals`) : un retrait ignoré ne fait pas

@@ -345,7 +345,7 @@ pub struct OptionsModalState {
     /// (2026-09-30) — brouillon, comme les autres cases : pris en compte à « Valider ». Décochée,
     /// l'onglet Suivi ne montre que le groupe par défaut.
     pub suivi_groups_enabled: bool,
-    /// **Case « Activer le suivi des éléments récupérés de l'hôtel de vente »** de la même section
+    /// **Case « Activer la prise en compte des invendus de l'hôtel de vente »** de la même section
     /// (2026-10-05) — brouillon, pris en compte à « Valider ». Décochée, récupérer un objet qu'on
     /// avait mis en vente ne fait pas monter son compteur.
     pub suivi_track_hdv_retrievals: bool,
@@ -760,7 +760,7 @@ pub struct OptionsCommit {
     /// (`config::OverlayConfig::suivi_groups_enabled`). Les groupes eux-mêmes partent par
     /// `main.rs::commit_suivi`, avec la liste suivie.
     pub suivi_groups_enabled: bool,
-    /// État de la case « Activer le suivi des éléments récupérés de l'hôtel de vente » — ce que
+    /// État de la case « Activer la prise en compte des invendus de l'hôtel de vente » — ce que
     /// l'hôte persiste (`config::OverlayConfig::suivi_track_hdv_retrievals`) et transmet au thread
     /// Engine (`engine_thread::EngineCommand::SetTrackHdvRetrievals`).
     pub suivi_track_hdv_retrievals: bool,
@@ -1470,7 +1470,7 @@ pub fn show(
             ui.add(
                 design::checkbox(
                     &mut state.suivi_track_hdv_retrievals,
-                    "Activer le suivi des éléments récupérés de l'hôtel de vente",
+                    "Activer la prise en compte des invendus de l'hôtel de vente",
                 )
                 .enabled(state.features.suivi)
                 .tooltip(
