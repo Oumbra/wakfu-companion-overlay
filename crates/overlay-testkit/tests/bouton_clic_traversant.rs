@@ -163,7 +163,7 @@ fn harness_complet(
                     combat_on_right: false,
                     watchlist_selection: &mut Default::default(),
                     watchlist_completions: &Default::default(),
-                    watchlist_reset: None,
+                    watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
                     catalog_stale: false,

@@ -2697,13 +2697,13 @@ impl Engine {
         self.watchlist.drain_definitions_changed()
     }
 
-    /// **Remet le compteur d'une entrée suivie à sa valeur de départ** (2026-09-18) — le bouton
-    /// de réinitialisation d'une tuile du bandeau, après confirmation. Voir
-    /// [`WatchlistState::reset_counter`](crate::watchlist::WatchlistState::reset_counter) pour ce
-    /// que « départ » veut dire selon le mode, et pourquoi l'entrée est désignée par son identité
-    /// plutôt que par son rang. Renvoie `false` si aucune entrée ne correspond plus.
-    pub fn reset_watchlist_counter(&mut self, name: &str, kind: WatchlistKind) -> bool {
-        self.watchlist.reset_counter(name, kind)
+    /// **Pose le compteur d'une entrée suivie à la main** (2026-10-05) — la validation de la
+    /// modale d'édition d'une tuile du bandeau. Voir
+    /// [`WatchlistState::set_counter`](crate::watchlist::WatchlistState::set_counter) pour le
+    /// bornage à l'échelle du mode, et pourquoi l'entrée est désignée par son identité plutôt que
+    /// par son rang. Renvoie `false` si aucune entrée ne correspond plus.
+    pub fn set_watchlist_counter(&mut self, name: &str, kind: WatchlistKind, count: i64) -> bool {
+        self.watchlist.set_counter(name, kind, count)
     }
 
     /// Remplace la liste des objets à son activé au ramassage par celle renvoyée par le compte

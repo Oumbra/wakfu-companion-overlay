@@ -113,7 +113,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 // multiple du bandeau (le temporaire vit jusqu'à la fin de l'instruction).
                 watchlist_selection: &mut Default::default(),
                 watchlist_completions: &Default::default(),
-                watchlist_reset: None,
+                watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
                 catalog_stale: false,

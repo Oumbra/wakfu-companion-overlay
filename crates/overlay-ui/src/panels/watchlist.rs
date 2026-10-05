@@ -1440,7 +1440,7 @@ pub fn show(
         gerbes,
         bascule_tuile,
         deplacement,
-        reset_counter,
+        edit_counter,
     } = harvest;
     let TileDeps {
         icons,
@@ -1567,7 +1567,7 @@ pub fn show(
         open_options,
         open_web_app,
         edit,
-        reset_counter,
+        edit_counter,
         drag: pill.drag,
         toggle_orientation: pill.toggle_orientation,
         restore_requested: pill.restore_requested,
@@ -1597,8 +1597,8 @@ struct TileHarvest {
     bascule_tuile: Option<String>,
     /// Le glisser-déposer : le rang pris et le rang visé, lus à la frame du dépôt.
     deplacement: Option<(usize, usize)>,
-    /// Le bouton de réinitialisation d'une tuile — l'entrée, pour l'hôte.
-    reset_counter: Option<WatchlistEntry>,
+    /// Le crayon d'une tuile — l'entrée, pour l'hôte.
+    edit_counter: Option<WatchlistEntry>,
 }
 
 /// Les tuiles du bandeau, l'une après l'autre dans le sens du `Ui` reçu — de gauche à droite
@@ -1653,8 +1653,8 @@ fn paint_entry_tiles(
         if let Some(depuis) = tuile.reorder.dropped {
             harvest.deplacement = Some((depuis, i));
         }
-        if tuile.reset_requested {
-            harvest.reset_counter = Some(entry.clone());
+        if tuile.edit_requested {
+            harvest.edit_counter = Some(entry.clone());
         }
     }
 }
@@ -1938,12 +1938,14 @@ pub struct WatchlistOutcome {
     /// **Ce que le bandeau demande d'écrire**, à la frame où le geste est fait — `None` le reste
     /// du temps. Voir [`WatchlistEdit`].
     pub edit: Option<WatchlistEdit>,
-    /// **L'entrée dont le bouton de réinitialisation vient d'être cliqué** (2026-09-18) — `None`
-    /// le reste du temps. Le bandeau ne remet rien lui-même : l'hôte ouvre la confirmation
-    /// (`OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)`) et, sur « Oui », envoie
-    /// `EngineCommand::ResetWatchlistCounter`. L'entrée entière plutôt qu'une clé : la question
-    /// posée nomme l'objet, et le moteur veut son nom et son genre.
-    pub reset_counter: Option<WatchlistEntry>,
+    /// **L'entrée dont le crayon vient d'être cliqué** (2026-10-05 ; le bouton de
+    /// réinitialisation du 2026-09-18 avant lui) — `None` le reste du temps. Le bandeau n'écrit
+    /// rien lui-même : l'hôte ouvre la modale d'édition
+    /// (`OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)`, `panels::counter_edit`) et, sur
+    /// « Valider » avec une valeur changée, envoie `EngineCommand::SetWatchlistCounter`. L'entrée
+    /// entière plutôt qu'une clé : la modale montre l'élément et part de son compteur, et le moteur
+    /// veut son nom et son genre.
+    pub edit_counter: Option<WatchlistEntry>,
     /// **Le geste de la poignée** (2026-09-28) — `PanelDrag::Started` porte le point de saisie
     /// depuis le coin haut-gauche du CONTENU du bandeau, c'est-à-dire de sa fenêtre de base :
     /// l'hôte pose la fenêtre sous le curseur et persiste la position au relâchement
@@ -2957,15 +2959,15 @@ fn control_button(
 struct Tile {
     response: egui::Response,
     reorder: crate::panels::tile_reorder::Gesture,
-    /// Le bouton de réinitialisation du compteur vient d'être cliqué — voir [`reset_button`].
-    reset_requested: bool,
+    /// Le crayon de la tuile vient d'être cliqué — voir [`edit_button`].
+    edit_requested: bool,
 }
 
 /// Ce qu'une tuile sait d'elle-même en plus de son entrée — les deux vont ensemble (ils décident du
 /// même geste) et tiennent `entry_tile` sous la limite de clippy, comme [`WatchlistAssets`] le fait
 /// pour `show` : un `#[allow(clippy::too_many_arguments)]` n'aurait fait que taire le compte.
 struct TileState {
-    /// Côté des infobulles de la tuile et de son bouton de réinitialisation — en dessous à
+    /// Côté des infobulles de la tuile et de son crayon — en dessous à
     /// l'horizontale, vers le centre du jeu à la verticale (2026-09-28).
     side: design::TooltipSide,
     /// Rang dans la bande — ce que le glisser-déposer déplace.
@@ -3081,18 +3083,18 @@ fn entry_tile(
     // conventions du composant ». La barre étant passée AU-DESSUS (voir `strip_scroll_area`), il
     // n'y a plus rien à éviter dessous. Tue pendant un déplacement : un nom affiché sous le
     // pointeur masquerait le liseré de la tuile visée, qu'on essaie justement de lire.
-    // **Le bouton de réinitialisation, au centre, révélé au survol** (2026-09-18) — voir
-    // [`reset_button`] pour ce qu'il est et quand il ne se montre pas.
-    let reset = (selection.is_none() && completion.is_none() && !reorder.in_flight())
-        .then(|| reset_button(ui, &response, rect, index, side))
+    // **Le crayon, au centre, révélé au survol** (2026-10-05 ; la flèche de réinitialisation du
+    // 2026-09-18 avant lui) — voir [`edit_button`] pour ce qu'il est et quand il ne se montre pas.
+    let edit = (selection.is_none() && completion.is_none() && !reorder.in_flight())
+        .then(|| edit_button(ui, &response, rect, index, side))
         .flatten();
-    let reset_requested = reset.as_ref().is_some_and(|bouton| bouton.clicked());
+    let edit_requested = edit.as_ref().is_some_and(|bouton| bouton.clicked());
     // **Le nom ne s'ouvre que si le bouton n'est pas visé** : deux infobulles à la fois se
-    // recouvriraient, et c'est « Réinitialiser » qu'on lit alors. Tue pendant un déplacement : un
+    // recouvriraient, et c'est « Modifier le compteur » qu'on lit alors. Tue pendant un déplacement : un
     // nom affiché sous le pointeur masquerait le liseré de la tuile visée, qu'on essaie justement
     // de lire.
     if !reorder.in_flight()
-        && !reset
+        && !edit
             .as_ref()
             .is_some_and(|bouton| bouton.contains_pointer())
     {
@@ -3103,20 +3105,20 @@ fn entry_tile(
     Tile {
         response,
         reorder,
-        reset_requested,
+        edit_requested,
     }
 }
 
-/// **Le bouton de réinitialisation d'une tuile** — la flèche `Undo` sur son disque, au centre de
-/// l'emplacement, révélée au survol : le même bouton, au même endroit, que le crayon de
-/// modification d'une carte de héros (`panels::tile_button`, demande du 2026-09-18 « avec le même
-/// design que l'icône bouton "modifier" »). `None` quand la tuile n'est pas survolée.
+/// **Le crayon d'une tuile** — le glyphe `Edit` sur son disque, au centre de l'emplacement,
+/// révélé au survol : le même bouton, au même endroit, que le crayon de modification d'une carte
+/// de héros (`panels::tile_button`). `None` quand la tuile n'est pas survolée.
 ///
-/// Ce qu'il fait, après confirmation par l'hôte : le compteur repart de ce que son mode impose —
-/// zéro en incrémental et en objectif, la cible en décompte (voir
-/// `WatchlistState::reset_counter`). La tuile, elle, ne dit rien de plus : le disque recouvre le
-/// centre de l'icône et laisse ses coins, où vivent le glyphe de mode et le compteur qu'on va
-/// remettre.
+/// Il ouvre, chez l'hôte, la **modale d'édition du compteur** (`panels::counter_edit`, demande du
+/// 2026-10-05) : corriger une valeur faussée par un bug, reporter un suivi tenu avant l'overlay,
+/// ou réinitialiser — la flèche `Undo` qui occupait cette place depuis le 2026-09-18, avec sa
+/// confirmation, est devenue un bouton de la modale. La tuile, elle, ne dit rien de plus : le
+/// disque recouvre le centre de l'icône et laisse ses coins, où vivent le glyphe de mode et le
+/// compteur qu'on va modifier.
 ///
 /// **Sans voile sur la tuile**, contrairement à la carte de héros : le voile y sert à détacher le
 /// crayon d'un buste clair ; ici l'icône est petite et le disque, presque opaque, se détache seul
@@ -3131,7 +3133,7 @@ fn entry_tile(
 /// est au-dessus ; la tuile, qui sent le glissement, reste dessous) — presser sur le disque et
 /// tirer déplace donc bien la tuile, comme sur la carte de héros. Le curseur, lui, est la main du
 /// bouton et non la croix de la tuile : posé après, il gagne.
-fn reset_button(
+fn edit_button(
     ui: &mut egui::Ui,
     tuile: &egui::Response,
     rect: egui::Rect,
@@ -3144,14 +3146,14 @@ fn reset_button(
     let bouton = crate::panels::tile_button::disc_button(
         ui,
         rect.center(),
-        DsIcon::Undo,
-        egui::Id::new(("suivi.reinitialiser", index)),
+        DsIcon::Edit,
+        egui::Id::new(("suivi.modifier", index)),
     );
     // En dessous, comme le nom de la tuile — c'est la règle du bandeau (voir `entry_tile`).
     design::tooltip(&bouton)
         .anchor(rect)
         .side(side)
-        .text("Réinitialiser le compteur");
+        .text("Modifier le compteur");
     Some(bouton)
 }
 

@@ -229,14 +229,17 @@ pub enum ResetTarget {
     /// Le CÔTÉ, lui, n'est jamais remis par là : c'est une case des Options, pas un geste — « pas
     /// en termes de droite-gauche, juste en termes de hauteur » (demande utilisateur).
     CombatPosition,
-    /// Le **compteur d'une entrée suivie** (2026-09-18) : il repart de ce que son mode impose —
-    /// zéro en incrémental et en objectif, la cible en décompte. Le glyphe `Undo` au centre d'une
-    /// tuile du bandeau, révélé au survol (`panels::watchlist::reset_button`).
+    /// Le **compteur d'une entrée suivie**, édité à la main (2026-10-05, remontée utilisateur ;
+    /// une simple réinitialisation confirmée depuis le 2026-09-18). Le crayon au centre d'une tuile
+    /// du bandeau, révélé au survol (`panels::watchlist::edit_button`), ouvre ici la **modale
+    /// d'édition** (`panels::counter_edit`) au lieu de la boîte à question : même fenêtre, même
+    /// voile, même réponse — « Oui » vaut « Valider ». La réinitialisation n'est plus qu'un bouton
+    /// de cette modale, qui pose la valeur de départ sans rien écrire avant validation.
     ///
-    /// **L'entrée n'est pas ici**, et c'est une contrainte assumée : `OverlayKind` est `Copy`, et
-    /// il l'est dans les deux hôtes à chaque tour de boucle. L'hôte la retient de son côté
-    /// (`App::watchlist_reset_pending`) et la prête au rendu par [`RenderContent::watchlist_reset`],
-    /// pour que la question la nomme.
+    /// **Le brouillon n'est pas ici**, et c'est une contrainte assumée : `OverlayKind` est `Copy`,
+    /// et il l'est dans les deux hôtes à chaque tour de boucle. L'hôte le tient de son côté
+    /// (`App::watchlist_counter_edit`) et le prête au rendu par
+    /// [`RenderContent::watchlist_counter_edit`].
     WatchlistCounter,
 }
 
@@ -396,11 +399,12 @@ pub struct RenderContent<'a> {
     /// retrait qu'elles déclenchent ne doit pas dépendre du rendu (voir
     /// `panels::watchlist::WatchlistCompletions`).
     pub watchlist_completions: &'a panels::watchlist::WatchlistCompletions,
-    /// **L'entrée dont la réinitialisation attend confirmation** (2026-09-18) — `Some` pour la
-    /// seule fenêtre `ResetConfirm(ResetTarget::WatchlistCounter)`, qui la nomme dans sa question ;
-    /// `None` partout ailleurs. Voir [`ResetTarget::WatchlistCounter`] sur pourquoi elle ne voyage
-    /// pas dans la cible elle-même.
-    pub watchlist_reset: Option<&'a WatchlistEntry>,
+    /// **Le brouillon de la modale d'édition d'un compteur** (2026-10-05) — `Some` pour la seule
+    /// fenêtre `ResetConfirm(ResetTarget::WatchlistCounter)`, qui le modifie (pas numérique,
+    /// bouton de réinitialisation) ; `None` partout ailleurs. L'hôte le tient de l'ouverture à la
+    /// réponse et ne lit sa valeur qu'à « Valider » — voir `panels::counter_edit`, et
+    /// [`ResetTarget::WatchlistCounter`] sur pourquoi il ne voyage pas dans la cible elle-même.
+    pub watchlist_counter_edit: Option<&'a mut panels::counter_edit::CounterEditState>,
     pub watchlist_toast: Option<&'a WatchlistToast>,
     pub catalog: &'a CatalogIndex,
     pub catalog_stale: bool,
@@ -517,11 +521,11 @@ pub struct RenderOutcome {
     /// (`EngineCommand::SetWatchlistDefinitions`), par le même chemin que la validation de l'onglet
     /// « Suivi » : voir `panels::watchlist::WatchlistOutcome::edit`.
     pub watchlist_edit: Option<panels::watchlist::WatchlistEdit>,
-    /// Le bouton de réinitialisation d'une tuile du bandeau vient d'être cliqué (`kind ==
-    /// Watchlist`, 2026-09-18) : l'entrée, pour que l'hôte ouvre la confirmation
-    /// `OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)` en la retenant. Voir
-    /// `panels::watchlist::WatchlistOutcome::reset_counter`.
-    pub watchlist_reset_requested: Option<WatchlistEntry>,
+    /// Le crayon d'une tuile du bandeau vient d'être cliqué (`kind == Watchlist`, 2026-10-05) :
+    /// l'entrée, pour que l'hôte ouvre la modale d'édition
+    /// `OverlayKind::ResetConfirm(ResetTarget::WatchlistCounter)` avec un brouillon qui en part.
+    /// Voir `panels::watchlist::WatchlistOutcome::edit_counter`.
+    pub watchlist_edit_requested: Option<WatchlistEntry>,
     /// URL que l'hôte doit ouvrir dans le navigateur, le cas échéant : clic sur "Détails" du
     /// panneau Suivi (la web app) ou sur "Ouvrir la page" de la carte d'appairage (l'URL de
     /// vérification).
@@ -708,7 +712,7 @@ pub fn build_ui(
                 combat_on_right: content.combat_on_right,
                 watchlist_selection: &mut *content.watchlist_selection,
                 watchlist_completions: content.watchlist_completions,
-                watchlist_reset: content.watchlist_reset,
+                watchlist_counter_edit: content.watchlist_counter_edit.as_deref_mut(),
                 watchlist_toast: content.watchlist_toast,
                 catalog: content.catalog,
                 catalog_stale: content.catalog_stale,
@@ -765,7 +769,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         combat_chrome,
         watchlist_selection,
         watchlist_completions,
-        watchlist_reset,
+        watchlist_counter_edit,
         watchlist_toast,
         catalog,
         catalog_stale,
@@ -985,7 +989,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     outcome.open_watchlist = watchlist_outcome.open_watchlist;
                     outcome.open_options = watchlist_outcome.open_options;
                     outcome.watchlist_edit = watchlist_outcome.edit;
-                    outcome.watchlist_reset_requested = watchlist_outcome.reset_counter;
+                    outcome.watchlist_edit_requested = watchlist_outcome.edit_counter;
                     if watchlist_outcome.open_web_app {
                         outcome.open_url = Some(overlay_sync::client::base_url().to_string());
                     }
@@ -1051,39 +1055,45 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // La confirmation de remise à zéro (2026-09-17) — voir `OverlayKind::ResetConfirm`.
                 // `over(max_rect)` : le voile couvre la fenêtre entière, qui est celle du jeu.
                 OverlayKind::ResetConfirm(target) => {
-                    let (question, log_name) = match target {
-                        ResetTarget::RecapSession => (
-                            "Remettre le récap de session à zéro ?".to_string(),
+                    let question = match target {
+                        ResetTarget::RecapSession => Some((
+                            "Remettre le récap de session à zéro ?",
                             "recap.remise-a-zero",
-                        ),
-                        ResetTarget::WatchlistPosition => (
-                            "Replacer le suivi à son emplacement d'origine ?".to_string(),
+                        )),
+                        ResetTarget::WatchlistPosition => Some((
+                            "Replacer le suivi à son emplacement d'origine ?",
                             "suivi.replacement",
-                        ),
+                        )),
                         // « Sa zone initiale » ne parle que de HAUTEUR : le côté reste celui que
                         // la case des Options a choisi, et la phrase ne doit pas laisser croire
                         // qu'un « Oui » ramènerait aussi le panneau à gauche.
-                        ResetTarget::CombatPosition => (
-                            "Replacer le panneau de combat à sa hauteur d'origine ?".to_string(),
+                        ResetTarget::CombatPosition => Some((
+                            "Replacer le panneau de combat à sa hauteur d'origine ?",
                             "combat.replacement",
-                        ),
-                        // La question nomme l'objet : « ce compteur » ne dirait pas lequel une
-                        // fois le voile posé sur le bandeau. Sans entrée prêtée par l'hôte (ne
-                        // devrait pas arriver), la question reste posable.
-                        ResetTarget::WatchlistCounter => (
-                            match watchlist_reset {
-                                Some(entry) => {
-                                    format!("Réinitialiser le compteur de « {} » ?", entry.name)
-                                }
-                                None => "Réinitialiser ce compteur ?".to_string(),
-                            },
-                            "suivi.reinitialisation",
-                        ),
+                        )),
+                        // Pas une question : la modale d'édition (2026-10-05).
+                        ResetTarget::WatchlistCounter => None,
                     };
-                    outcome.reset_choice = crate::design::confirm_dialog(question)
-                        .over(ui.max_rect())
-                        .log_name(log_name)
-                        .show(ui);
+                    outcome.reset_choice = match (question, watchlist_counter_edit) {
+                        (Some((question, log_name)), _) => crate::design::confirm_dialog(question)
+                            .over(ui.max_rect())
+                            .log_name(log_name)
+                            .show(ui),
+                        (None, Some(state)) => panels::counter_edit::show(
+                            ui,
+                            ui.max_rect(),
+                            state,
+                            &mut panels::counter_edit::CounterEditDeps {
+                                icons,
+                                catalog,
+                                remote_icons,
+                                remote_icon_textures,
+                            },
+                        ),
+                        // Sans brouillon prêté par l'hôte (ne devrait pas arriver), il n'y a rien
+                        // à éditer : la fenêtre se referme comme sur « Non ».
+                        (None, None) => crate::design::ConfirmChoice::No,
+                    };
                 }
                 OverlayKind::Options => {
                     if let Some(state) = options {
