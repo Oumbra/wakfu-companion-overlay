@@ -15,8 +15,9 @@
 //! ## Ce qu'elle montre
 //!
 //! Le titre « Suivi » dans la bannière ; en dessous, l'emplacement de l'élément suivi (son icône et
-//! son liseré de rareté, nom et mode en infobulle) avec, à sa droite, le bouton `Undo` qui pose la
-//! valeur de départ ; puis le pas numérique du design system (`design::stepper`), éditable au
+//! son liseré de rareté, nom et mode en infobulle) avec, à sa gauche, le mode et sa cible
+//! (« Décompte : » ou « Objectif : », la cible dessous ; rien en incrémental) et, à sa droite, le
+//! bouton `Undo` qui pose la valeur de départ ; puis le pas numérique du design system (`design::stepper`), éditable au
 //! clavier, borné à l'échelle du mode. Pied « Annuler / Valider ».
 //!
 //! ## Rien n'est écrit avant « Valider »
@@ -41,7 +42,7 @@
 use egui::{Rect, Vec2};
 use overlay_engine::{CatalogIndex, WatchlistEntry, WatchlistKind, WatchlistMode};
 
-use crate::design::{self, ConfirmChoice, DsIcon, IconContext, SlotFrame};
+use crate::design::{self, text, ConfirmChoice, DsIcon, IconContext, SlotFrame};
 use crate::rarity_bridge::to_slot_rarity;
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
 use crate::ui_icons::UiIcons;
@@ -59,6 +60,14 @@ const UNDO_GAP: f32 = 12.0;
 const STEPPER_GAP: f32 = 18.0;
 /// Largeur du champ du pas — sept chiffres y tiennent, au-delà de tout compteur observé.
 const FIELD_WIDTH: f32 = 120.0;
+/// Écart entre la colonne du mode (à gauche de l'emplacement) et l'emplacement.
+const MODE_GAP: f32 = 12.0;
+/// Le libellé du mode — « Objectif : », « Décompte : » — et la cible en dessous.
+const MODE_LABEL_SIZE: f32 = 14.0;
+const MODE_VALUE_SIZE: f32 = 18.0;
+const MODE_LINE_GAP: f32 = 2.0;
+/// Gris du libellé — `#b8b9ba`, le gris unique du jeu (celui de la fenêtre de recette).
+const MODE_LABEL_INK: egui::Color32 = egui::Color32::from_rgb(0xB8, 0xB9, 0xBA);
 /// Plafond du mode incrémental, qui n'a pas de cible : le champ doit bien s'arrêter quelque part.
 const UP_MAX: i64 = 9_999_999;
 
@@ -158,7 +167,8 @@ pub fn show(
     choix
 }
 
-/// L'emplacement et son bouton de réinitialisation, centrés ensemble, puis le pas centré dessous.
+/// L'emplacement entre son mode (à gauche) et son bouton de réinitialisation (à droite), puis le
+/// pas centré dessous.
 fn paint_body(
     ui: &mut egui::Ui,
     content: Rect,
@@ -204,6 +214,7 @@ fn paint_body(
             .log_name("suivi.edition.element"),
     );
     design::tooltip(&slot).text(crate::panels::watchlist::tile_tooltip(entry));
+    paint_mode(ui, content, slot_rect, entry);
 
     let depart = entry.starting_count();
     let undo_rect = Rect::from_center_size(
@@ -245,4 +256,40 @@ fn paint_body(
         Vec2::new(largeur, hauteur),
     );
     ui.put(pas_rect, pas);
+}
+
+/// **Le mode et sa cible**, à gauche de l'emplacement (demande du 2026-10-05) : « Décompte : » ou
+/// « Objectif : », et la cible en dessous — sans quoi le champ montre « 12 » sans dire s'il reste
+/// 12 à ramasser ou s'il en est déjà 12 de faits. Deux lignes centrées dans la colonne qui va du
+/// bord du contenu à l'emplacement, et centrées ensemble sur la hauteur de l'emplacement : le
+/// pendant, à gauche, du bouton de réinitialisation à droite. Rien en incrémental, qui n'a pas de
+/// cible.
+fn paint_mode(ui: &egui::Ui, content: Rect, slot_rect: Rect, entry: &WatchlistEntry) {
+    let libelle = match entry.mode {
+        WatchlistMode::Down => "Décompte :",
+        WatchlistMode::Goal => "Objectif :",
+        WatchlistMode::Up => return,
+    };
+    let colonne_x = (content.left() + slot_rect.left() - MODE_GAP) / 2.0;
+    let painter = ui.painter();
+    let libelle = painter.layout_no_wrap(
+        libelle.to_string(),
+        text::label_font(ui.ctx(), MODE_LABEL_SIZE),
+        MODE_LABEL_INK,
+    );
+    let cible = painter.layout_no_wrap(
+        // « 12 345 », l'usage français du panneau Combat : un grand nombre collé se lit mal.
+        crate::panels::combat::format_fr_thousands(entry.countdown_target),
+        text::label_strong_font(ui.ctx(), MODE_VALUE_SIZE),
+        design::tokens::TEXT_GOLD,
+    );
+    let hauteur = libelle.size().y + MODE_LINE_GAP + cible.size().y;
+    let haut = slot_rect.center().y - hauteur / 2.0;
+    let pos_libelle = egui::pos2(colonne_x - libelle.size().x / 2.0, haut);
+    let pos_cible = egui::pos2(
+        colonne_x - cible.size().x / 2.0,
+        haut + libelle.size().y + MODE_LINE_GAP,
+    );
+    painter.galley(pos_libelle, libelle, MODE_LABEL_INK);
+    painter.galley(pos_cible, cible, design::tokens::TEXT_GOLD);
 }

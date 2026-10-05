@@ -1016,6 +1016,19 @@ fn edition_d_un_compteur_reinitialise_selon_le_mode() {
     );
 }
 
+/// **Le mode et sa cible, à gauche de l'emplacement** (2026-10-05) : « Objectif : » et la cible
+/// dessous — le pendant de la capture en décompte (`suivi_edition_compteur`). Ici 30 faits sur 50.
+#[test]
+fn edition_d_un_compteur_en_objectif_nomme_son_mode() {
+    overlay_ui::build_info::freeze_for_snapshots();
+    let mut objectif = entree_en_decompte();
+    objectif.mode = WatchlistMode::Goal;
+    objectif.count = 30;
+    let (mut harness, _, _) = harnais_edition_compteur(objectif);
+    harness.run();
+    harness.snapshot("suivi_edition_compteur_objectif");
+}
+
 /// **Le pas numérique, au clavier et aux boutons** : « + » monte d'un, et une valeur tapée au-delà
 /// de la cible est ramenée à la cible — un « 60/50 » n'a pas de sens.
 #[test]
