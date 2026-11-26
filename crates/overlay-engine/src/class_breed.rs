@@ -10,9 +10,9 @@
 //! Voir `EntityClassifierService.registerFighterJoin` côté web pour la même règle. Id 17
 //! volontairement absent (aucune classe jouable ne l'utilise : `breed.17` du client est le
 //! « Désincarné », jamais un personnage). Id 20 = Bellaphone, classe ajoutée par la mise à jour
-//! du 26 nov. 2026 (`breed.20` des textes du client, sorts `tIE = 20` du heap dump) — pas encore
-//! dans la table du site : ses portraits et bustes (`gui.jar`, `breeds/illustrations/circle` et
-//! `portrait80`, `200`/`201`) sont en fin de liste, hors de la planche du site à 18 lignes.
+//! du 26 nov. 2026 (`breed.20` des textes du client, sorts `tIE = 20` du heap dump) ; ses
+//! portraits et bustes viennent de `gui.jar` (`breeds/illustrations/circle` et `portrait80`,
+//! `200` masculin, `201` féminin).
 
 /// Nom de classe (clé interne, ex. `"feca"`) pour un `breed` de combattant confirmé allié —
 /// `None` si `breed` ne correspond à aucune classe jouable connue.
@@ -43,8 +43,9 @@ pub fn class_for_breed(breed: i64) -> Option<&'static str> {
 
 /// Ordre RÉEL des lignes de la planche `class-avatars-sheet-*.png` — miroir exact de
 /// `CLASS_PORTRAIT_ORDER` (`class-portraits.data.ts`). Ne JAMAIS réordonner sans reconstruire la
-/// planche en conséquence. `bellaphone` (ajouté le 2026-11-26) est en dernier : la planche du site
-/// s'arrête à 18 lignes, et l'overlay ne s'en sert plus (textures par classe, voir `portraits`).
+/// planche en conséquence. `bellaphone` (ajouté le 2026-11-26) est en dernier, comme la 19ᵉ ligne
+/// ajoutée à la planche du site le même jour (`avatarIndex` 36 féminin, 37 masculin). L'overlay ne
+/// lit plus la planche (une texture par classe, voir `portraits`), seulement cet ordre.
 pub const CLASS_PORTRAIT_ORDER: [&str; 19] = [
     "cra",
     "ecaflip",
@@ -67,7 +68,7 @@ pub const CLASS_PORTRAIT_ORDER: [&str; 19] = [
     "bellaphone",
 ];
 
-/// Ligne (0-17) d'une classe dans la planche — miroir de `getClassPortraitRow`. `None` si
+/// Ligne (0-18) d'une classe dans la planche — miroir de `getClassPortraitRow`. `None` si
 /// `class_name` ne correspond à aucune classe connue (l'appelant décide du repli, contrairement au
 /// web qui replie silencieusement sur la ligne 0 — ici on préfère ne pas dessiner de portrait du
 /// tout plutôt qu'un portrait trompeur).
