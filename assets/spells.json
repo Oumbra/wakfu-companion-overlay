@@ -2306,10 +2306,10 @@
       },
       {
         "id": 5030,
-        "fr": "Furie sanguinaire",
-        "en": "Bloodthirsty Fury",
-        "es": "Furia Sanguinaria",
-        "pt": "Fúria Sanguinária",
+        "fr": "Attirance",
+        "en": "Attraction",
+        "es": "Atracción",
+        "pt": "Atração",
         "picture": "spells/887.png"
       },
       {
@@ -2346,11 +2346,11 @@
       },
       {
         "id": 5041,
-        "fr": "Projection",
-        "en": "Projection",
-        "es": "Proyección",
-        "pt": "Projeção",
-        "picture": "spells/883.png"
+        "fr": "Cinétose",
+        "en": "Motion Sickness",
+        "es": "Cinetosis",
+        "pt": "Cinetose",
+        "picture": "spells/2100.png"
       },
       {
         "id": 5040,
@@ -2418,22 +2418,6 @@
       },
       {
         "id": 5043,
-        "fr": "Attirance",
-        "en": "Attraction",
-        "es": "Atracción",
-        "pt": "Atração",
-        "picture": "spells/844.png"
-      },
-      {
-        "id": 5045,
-        "fr": "Sacrifice",
-        "en": "Sacrifice",
-        "es": "Sacrificio",
-        "pt": "Sacrifício",
-        "picture": "spells/878.png"
-      },
-      {
-        "id": 5044,
         "fr": "Transposition",
         "en": "Transposition",
         "es": "Transposición",
@@ -2441,7 +2425,7 @@
         "picture": "spells/888.png"
       },
       {
-        "id": 5047,
+        "id": 5045,
         "fr": "Armure sanguine",
         "en": "Sanguine Armor",
         "es": "Armadura Sanguínea",
@@ -2449,12 +2433,28 @@
         "picture": "spells/2117.png"
       },
       {
+        "id": 5044,
+        "fr": "Sacrifice",
+        "en": "Sacrifice",
+        "es": "Sacrificio",
+        "pt": "Sacrifício",
+        "picture": "spells/878.png"
+      },
+      {
+        "id": 5047,
+        "fr": "Bain de sang",
+        "en": "Blood Bath",
+        "es": "Baño de Sangre",
+        "pt": "Banho de Sangue",
+        "picture": "spells/5047.png"
+      },
+      {
         "id": 7211,
-        "fr": "Entaille",
-        "en": "Gash",
-        "es": "Corte",
-        "pt": "Entalhe",
-        "picture": "spells/7211.png"
+        "fr": "Coagulation",
+        "en": "Coagulation",
+        "es": "Coagulación",
+        "pt": "Coagulação",
+        "picture": "spells/846.png"
       },
       {
         "id": 7212,
@@ -2465,20 +2465,36 @@
         "picture": "spells/7212.png"
       },
       {
+        "id": 6065,
+        "fr": "Coeur sanguin",
+        "en": "Hot-Blooded Heart",
+        "es": "Corazón Sanguíneo",
+        "pt": "Coração Sanguíneo",
+        "picture": "spells/6065.png"
+      },
+      {
+        "id": 8586,
+        "fr": "Entaille",
+        "en": "Gash",
+        "es": "Corte",
+        "pt": "Entalhe",
+        "picture": "spells/7211.png"
+      },
+      {
         "id": 5046,
-        "fr": "Châtiment osé",
-        "en": "Bold Punishment",
-        "es": "Castigo Osado",
-        "pt": "Castigo Ousado",
+        "fr": "Martyr",
+        "en": "Martyr",
+        "es": "Mártir",
+        "pt": "Mártir",
         "picture": "spells/879.png"
       },
       {
-        "id": 6065,
-        "fr": "Châtiment sanguin",
-        "en": "Bloodthirsty Punishment",
-        "es": "Castigo Sanguíneo",
-        "pt": "Castigo Sanguinário",
-        "picture": "spells/6065.png"
+        "id": 8587,
+        "fr": "Vengeance",
+        "en": "Revenge",
+        "es": "Venganza",
+        "pt": "Vingança",
+        "picture": "spells/8587.png"
       }
     ]
   },
@@ -2640,19 +2656,19 @@
       },
       {
         "id": 4720,
-        "fr": "Téléportono",
-        "en": "Barrelhop",
-        "es": "Toneportación",
-        "pt": "Teleportonel",
-        "picture": "spells/2209.png"
+        "fr": "Gueule de bois",
+        "en": "Worn-Out",
+        "es": "Resaca",
+        "pt": "Ressaca",
+        "picture": "spells/4720.png"
       },
       {
         "id": 6845,
-        "fr": "Ebriété",
-        "en": "Exhilaration",
-        "es": "Ebriedad",
-        "pt": "Sobriedade",
-        "picture": "spells/949.png"
+        "fr": "Pandanlku",
+        "en": "Pandiniuras",
+        "es": "Pandenkulo",
+        "pt": "Pandanku",
+        "picture": "spells/840.png"
       },
       {
         "id": 6847,
@@ -2677,6 +2693,22 @@
         "es": "Tonel",
         "pt": "Barril",
         "picture": "spells/2192.png"
+      },
+      {
+        "id": 8591,
+        "fr": "Téléportono",
+        "en": "Barrelhop",
+        "es": "Toneportación",
+        "pt": "Teleportonel",
+        "picture": "spells/2209.png"
+      },
+      {
+        "id": 8592,
+        "fr": "Ebriété",
+        "en": "Exhilaration",
+        "es": "Ebriedad",
+        "pt": "Sobriedade",
+        "picture": "spells/949.png"
       }
     ]
   },
@@ -2705,7 +2737,7 @@
         "fr": "Balle plombante",
         "en": "Encumbering Shot",
         "es": "Bala Emplomada",
-        "pt": "Bomba Paralisante",
+        "pt": "Bola Pesada",
         "picture": "spells/6470.png"
       },
       {
@@ -2737,7 +2769,7 @@
         "fr": "Tricherie",
         "en": "Cheating",
         "es": "Trampa",
-        "pt": "Costelas Grelhadas",
+        "pt": "Trapaçaria",
         "picture": "spells/2331.png"
       },
       {
@@ -2745,7 +2777,7 @@
         "fr": "Espingole",
         "en": "Carbine",
         "es": "Arcabuz",
-        "pt": "Gancho",
+        "pt": "Carabina",
         "picture": "spells/4824.png"
       },
       {
@@ -2761,7 +2793,7 @@
         "fr": "Oblitération",
         "en": "Obliteration",
         "es": "Obliteración",
-        "pt": "Bomba Asfixiante",
+        "pt": "Obliteração",
         "picture": "spells/6476.png"
       },
       {
@@ -2777,7 +2809,7 @@
         "fr": "Bombe collante",
         "en": "Sticky Bomb",
         "es": "Bomba Pegajosa",
-        "pt": "Bomba Ofuscante",
+        "pt": "Bomba Pegajosa",
         "picture": "spells/6464.png"
       },
       {
@@ -2793,7 +2825,7 @@
         "fr": "Croisement",
         "en": "Crosswise",
         "es": "Cruce",
-        "pt": "Tiro Cruzado",
+        "pt": "Cruzamento",
         "picture": "spells/6466.png"
       },
       {
@@ -2801,7 +2833,7 @@
         "fr": "Perforation",
         "en": "Perforation",
         "es": "Perforación",
-        "pt": "Tiro Penetrante",
+        "pt": "Perfuração",
         "picture": "spells/6467.png"
       },
       {
@@ -2825,7 +2857,7 @@
         "fr": "Grappin",
         "en": "Claw",
         "es": "Gancho",
-        "pt": "Ladinobot",
+        "pt": "Gancho",
         "picture": "spells/6475.png"
       },
       {
@@ -2833,7 +2865,7 @@
         "fr": "Evanescence",
         "en": "Evanescence",
         "es": "Evanescencia",
-        "pt": "Muro de Pólvora",
+        "pt": "Evanescência",
         "picture": "spells/1810.png"
       },
       {
@@ -2841,7 +2873,7 @@
         "fr": "Aimant",
         "en": "Magnet",
         "es": "Imán",
-        "pt": "Dinamite",
+        "pt": "Ímã",
         "picture": "spells/1824.png"
       },
       {
@@ -3929,6 +3961,156 @@
         "es": "Ciclo Elemental",
         "pt": "Ciclo Elementar",
         "picture": "spells/5578.png"
+      }
+    ]
+  },
+  {
+    "breedName": "bellaphone",
+    "breedId": 20,
+    "spells": [
+      {
+        "id": 8644,
+        "fr": "Candela",
+        "en": "Candela",
+        "es": "Candela",
+        "pt": "Candela",
+        "picture": "spells/8644.png"
+      },
+      {
+        "id": 8645,
+        "fr": "Furole",
+        "en": "Spooklight",
+        "es": "Luz Mala",
+        "pt": "Furola",
+        "picture": "spells/8645.png"
+      },
+      {
+        "id": 8646,
+        "fr": "Pyrolyse",
+        "en": "Pyrolysis",
+        "es": "Pirólisis",
+        "pt": "Pirólise",
+        "picture": "spells/8646.png"
+      },
+      {
+        "id": 8647,
+        "fr": "Ondée",
+        "en": "Drizzle",
+        "es": "Chubasco",
+        "pt": "Chuvarada",
+        "picture": "spells/8647.png"
+      },
+      {
+        "id": 8648,
+        "fr": "Lagune",
+        "en": "Lagoon",
+        "es": "Laguna",
+        "pt": "Laguna",
+        "picture": "spells/8648.png"
+      },
+      {
+        "id": 8649,
+        "fr": "Hydrolyse",
+        "en": "Hydrolysis",
+        "es": "Hidrólisis",
+        "pt": "Hidrólise",
+        "picture": "spells/8649.png"
+      },
+      {
+        "id": 8650,
+        "fr": "Isthme",
+        "en": "Isthmus",
+        "es": "Istmo",
+        "pt": "Istmo",
+        "picture": "spells/8650.png"
+      },
+      {
+        "id": 8651,
+        "fr": "Alios",
+        "en": "Ironstone",
+        "es": "Alios",
+        "pt": "Canga",
+        "picture": "spells/8651.png"
+      },
+      {
+        "id": 8652,
+        "fr": "Xylème",
+        "en": "Xylem",
+        "es": "Xilema",
+        "pt": "Xilema",
+        "picture": "spells/8652.png"
+      },
+      {
+        "id": 8653,
+        "fr": "Aquilon",
+        "en": "Chillgust",
+        "es": "Aquilón",
+        "pt": "Aquilão",
+        "picture": "spells/8653.png"
+      },
+      {
+        "id": 8654,
+        "fr": "Anima",
+        "en": "Anima",
+        "es": "Ánima",
+        "pt": "Anima",
+        "picture": "spells/8654.png"
+      },
+      {
+        "id": 8655,
+        "fr": "Zéphyr",
+        "en": "Zephyr",
+        "es": "Céfiro",
+        "pt": "Zéfiro",
+        "picture": "spells/8655.png"
+      },
+      {
+        "id": 8656,
+        "fr": "Aurora",
+        "en": "Aurora",
+        "es": "Aurora",
+        "pt": "Aurora",
+        "picture": "spells/8656.png"
+      },
+      {
+        "id": 8658,
+        "fr": "Lumen",
+        "en": "Lumen",
+        "es": "Lumen",
+        "pt": "Lúmen",
+        "picture": "spells/8658.png"
+      },
+      {
+        "id": 8657,
+        "fr": "Nascens",
+        "en": "Nascent",
+        "es": "Nascens",
+        "pt": "Nascens",
+        "picture": "spells/8657.png"
+      },
+      {
+        "id": 8661,
+        "fr": "Drosera",
+        "en": "Drosera",
+        "es": "Drosera",
+        "pt": "Drosera",
+        "picture": "spells/8660.png"
+      },
+      {
+        "id": 8659,
+        "fr": "Domoko",
+        "en": "Domoko",
+        "es": "Domoko",
+        "pt": "Domoko",
+        "picture": "spells/8661.png"
+      },
+      {
+        "id": 8660,
+        "fr": "Nogdra",
+        "en": "Nogdra",
+        "es": "Nogdra",
+        "pt": "Gãodra",
+        "picture": "spells/8659.png"
       }
     ]
   }

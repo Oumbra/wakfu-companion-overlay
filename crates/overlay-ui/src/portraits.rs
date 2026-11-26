@@ -34,7 +34,7 @@ pub const NATIVE_PORTRAIT_SIZE: f32 = 48.0;
 
 /// `include_bytes!` exige un chemin littéral au moment de la compilation : impossible de dériver
 /// dynamiquement cette liste depuis `CLASS_PORTRAIT_ORDER` (voir `overlay_engine::class_breed`,
-/// même 18 classes, même orthographe) malgré la redondance — un test de ce module vérifie que les
+/// mêmes 19 classes, même orthographe) malgré la redondance — un test de ce module vérifie que les
 /// deux restent synchronisées plutôt que de risquer une classe oubliée en silence.
 macro_rules! class_profile_asset {
     ($class:literal) => {
@@ -65,6 +65,7 @@ const CLASS_PROFILE_ASSETS: &[(&str, &[u8], &[u8])] = &[
     class_profile_asset!("osamodas"),
     class_profile_asset!("pandawa"),
     class_profile_asset!("rogue"),
+    class_profile_asset!("bellaphone"),
 ];
 
 /// Une texture par sexe — `HashMap<&'static str, GenderPair>` plutôt que `HashMap<(&'static str,
@@ -93,7 +94,7 @@ pub struct PortraitAtlas {
 }
 
 impl PortraitAtlas {
-    /// Décode et charge les 36 assets embarqués (18 classes × 2 sexes), une texture couleur et une
+    /// Décode et charge les 38 assets embarqués (19 classes × 2 sexes), une texture couleur et une
     /// texture grisée par portrait — appelé une seule fois, dès qu'un `egui::Context` existe (voir
     /// `main.rs::resumed`). Panique si un asset embarqué est corrompu : c'est un bug de build, pas
     /// un cas runtime à tolérer (contrairement à un flux réseau, voir `RemoteIconStore`).
