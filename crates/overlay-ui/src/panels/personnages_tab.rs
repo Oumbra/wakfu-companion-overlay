@@ -111,7 +111,7 @@ const BAND_FONT_SIZE: f32 = 12.5;
 const DESC: &str = "Déclarez les personnages de vos comptes : l'overlay les reconnaît dans le \
                     journal, les distingue des ennemis et rattache vos gains au bon compte.";
 
-/// Les 18 classes dans l'ordre du jeu, avec le nom que porte leur **infobulle**.
+/// Les 19 classes dans l'ordre du jeu, avec le nom que porte leur **infobulle**.
 ///
 /// Les clés sont celles du site (`class-icons.data.ts`) et des assets de bustes, les libellés ceux
 /// de `CLASS_NAMES.fr` — l'ordre, lui, est celui de l'écran de création de personnage du jeu, pas
@@ -135,6 +135,7 @@ const CLASSES: &[(&str, &str)] = &[
     ("eliotrope", "Éliotrope"),
     ("huppermage", "Huppermage"),
     ("ouginak", "Ouginak"),
+    ("bellaphone", "Bellaphone"),
 ];
 
 /// Minuscules **sans accents** — ce sur quoi la recherche de classe compare.
@@ -1011,7 +1012,10 @@ fn painted_ellipsed(
 
 /// Taille de la modale de personnage. **640 de large et non 600** : la largeur est commandée par la
 /// grille de classes (voir [`COLONNE`]), et il faut qu'elle tienne avec de la marge des deux côtés.
-const PERSO_MODALE: Vec2 = Vec2::new(640.0, 620.0);
+/// **710 de haut et non 620** depuis le Bellaphone (2026-11-26) : 19 classes, la 19ᵉ ouvre une
+/// 4ᵉ ligne de la grille (une tuile de 80 + un intervalle de 10). Choix de l'utilisateur : garder
+/// 6 colonnes plutôt que d'élargir la modale.
+const PERSO_MODALE: Vec2 = Vec2::new(640.0, 710.0);
 const CLASSE_COLS: usize = 6;
 const CLASSE_GAP: f32 = 10.0;
 

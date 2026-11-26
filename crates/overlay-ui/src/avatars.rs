@@ -10,10 +10,10 @@
 //! désaturer — il assombrit un buste coloré, il ne le rend jamais gris. C'est ce qui permet la
 //! grille de classes « tout gris, coloré sous le curseur » de la modale de personnage.
 //!
-//! **Chargé à la demande, jamais au démarrage** (voir `panels::personnages_tab`) : ces 36 textures
+//! **Chargé à la demande, jamais au démarrage** (voir `panels::personnages_tab`) : ces 38 textures
 //! ne servent qu'à une fenêtre de réglages, et les payer au lancement retarderait l'overlay pour
-//! un écran que l'utilisateur n'ouvrira peut-être pas de la session. 1,8 Mo de textures une fois
-//! les deux teintes chargées (36 × 2 × 80 × 80 × 4 octets), sur un budget de 300 Mo.
+//! un écran que l'utilisateur n'ouvrira peut-être pas de la session. 1,9 Mo de textures une fois
+//! les deux teintes chargées (38 × 2 × 80 × 80 × 4 octets), sur un budget de 300 Mo.
 
 use std::collections::HashMap;
 
@@ -57,6 +57,7 @@ const AVATAR_ASSETS: &[(&str, &[u8], &[u8])] = &[
     avatar_asset!("osamodas"),
     avatar_asset!("pandawa"),
     avatar_asset!("rogue"),
+    avatar_asset!("bellaphone"),
 ];
 
 /// Une texture par sexe — `HashMap<&'static str, _>` plutôt qu'une clé-tuple, pour la raison
@@ -81,7 +82,7 @@ pub struct AvatarAtlas {
 }
 
 impl AvatarAtlas {
-    /// Décode et charge les 72 textures (18 classes × 2 sexes × 2 teintes). Panique si un asset
+    /// Décode et charge les 76 textures (19 classes × 2 sexes × 2 teintes). Panique si un asset
     /// embarqué est corrompu : c'est un bug de build, pas un cas runtime à tolérer — même
     /// arbitrage que `portraits::PortraitAtlas::load`.
     pub fn load(ctx: &egui::Context) -> Self {

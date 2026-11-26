@@ -11,8 +11,8 @@
 //! volontairement absent (aucune classe jouable ne l'utilise : `breed.17` du client est le
 //! « Désincarné », jamais un personnage). Id 20 = Bellaphone, classe ajoutée par la mise à jour
 //! du 26 nov. 2026 (`breed.20` des textes du client, sorts `tIE = 20` du heap dump) — pas encore
-//! dans la table du site ni dans la planche de portraits : un allié Bellaphone est reconnu, son
-//! portrait reste le repli générique tant que ses images ne sont pas intégrées.
+//! dans la table du site : ses portraits et bustes (`gui.jar`, `breeds/illustrations/circle` et
+//! `portrait80`, `200`/`201`) sont en fin de liste, hors de la planche du site à 18 lignes.
 
 /// Nom de classe (clé interne, ex. `"feca"`) pour un `breed` de combattant confirmé allié —
 /// `None` si `breed` ne correspond à aucune classe jouable connue.
@@ -43,8 +43,9 @@ pub fn class_for_breed(breed: i64) -> Option<&'static str> {
 
 /// Ordre RÉEL des lignes de la planche `class-avatars-sheet-*.png` — miroir exact de
 /// `CLASS_PORTRAIT_ORDER` (`class-portraits.data.ts`). Ne JAMAIS réordonner sans reconstruire la
-/// planche en conséquence.
-pub const CLASS_PORTRAIT_ORDER: [&str; 18] = [
+/// planche en conséquence. `bellaphone` (ajouté le 2026-11-26) est en dernier : la planche du site
+/// s'arrête à 18 lignes, et l'overlay ne s'en sert plus (textures par classe, voir `portraits`).
+pub const CLASS_PORTRAIT_ORDER: [&str; 19] = [
     "cra",
     "ecaflip",
     "sacrier",
@@ -63,6 +64,7 @@ pub const CLASS_PORTRAIT_ORDER: [&str; 18] = [
     "osamodas",
     "pandawa",
     "rogue",
+    "bellaphone",
 ];
 
 /// Ligne (0-17) d'une classe dans la planche — miroir de `getClassPortraitRow`. `None` si
