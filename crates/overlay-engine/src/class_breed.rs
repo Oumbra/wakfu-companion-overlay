@@ -8,7 +8,11 @@
 //! (`isControlledByAI == false`) — un monstre peut porter un `breed` numériquement identique à un
 //! id de classe joueur (ex. "Bouftou" = breed 1, collision avec Féca) sans rapport avec sa classe.
 //! Voir `EntityClassifierService.registerFighterJoin` côté web pour la même règle. Id 17
-//! volontairement absent (aucune classe jouable ne l'utilise).
+//! volontairement absent (aucune classe jouable ne l'utilise : `breed.17` du client est le
+//! « Désincarné », jamais un personnage). Id 20 = Bellaphone, classe ajoutée par la mise à jour
+//! du 26 nov. 2026 (`breed.20` des textes du client, sorts `tIE = 20` du heap dump) — pas encore
+//! dans la table du site ni dans la planche de portraits : un allié Bellaphone est reconnu, son
+//! portrait reste le repli générique tant que ses images ne sont pas intégrées.
 
 /// Nom de classe (clé interne, ex. `"feca"`) pour un `breed` de combattant confirmé allié —
 /// `None` si `breed` ne correspond à aucune classe jouable connue.
@@ -32,6 +36,7 @@ pub fn class_for_breed(breed: i64) -> Option<&'static str> {
         16 => Some("foggernaut"),
         18 => Some("eliotrope"),
         19 => Some("huppermage"),
+        20 => Some("bellaphone"),
         _ => None,
     }
 }
@@ -73,8 +78,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mappe_tous_les_breeds_1_a_19_sauf_17() {
-        for breed in 1..=19 {
+    fn mappe_tous_les_breeds_1_a_20_sauf_17() {
+        for breed in 1..=20 {
             if breed == 17 {
                 assert_eq!(class_for_breed(breed), None, "breed 17 doit rester absent");
             } else {
@@ -89,7 +94,7 @@ mod tests {
     #[test]
     fn rejette_un_breed_hors_plage() {
         assert_eq!(class_for_breed(0), None);
-        assert_eq!(class_for_breed(20), None);
+        assert_eq!(class_for_breed(21), None);
         assert_eq!(class_for_breed(-1), None);
     }
 
