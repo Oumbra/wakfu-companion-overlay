@@ -220,7 +220,7 @@ static COMPTE_PRINCIPAL: &[Perso] = &[
     p("Arbovenenum", "sadida", Gender::M),
 ];
 
-/// Les 18 classes dans l'ordre du jeu, avec le nom que porte leur **infobulle**.
+/// Les 19 classes dans l'ordre du jeu, avec le nom que porte leur **infobulle**.
 const CLASSES: &[(&str, &str)] = &[
     ("feca", "Féca"),
     ("osamodas", "Osamodas"),
@@ -240,6 +240,7 @@ const CLASSES: &[(&str, &str)] = &[
     ("eliotrope", "Éliotrope"),
     ("huppermage", "Huppermage"),
     ("ouginak", "Ouginak"),
+    ("bellaphone", "Bellaphone"),
 ];
 
 /// Minuscules **sans accents** — ce sur quoi la recherche de classe compare.

@@ -8,12 +8,13 @@
 //!
 //! **Les deux fichiers sont maintenus à la main par l'utilisateur.**
 //!
-//! - `spells.json` : 18 classes plus une pseudo-classe `common` de `breedId` −2 pour les sorts
-//!   communs à tout le monde (Maîtrise d'Armes, Charme de Masse, Os à Moelle) ; une entrée par sort
-//!   avec ses noms localisés et le chemin de son image sur le CDN `wakassets`, relatif à sa racine
-//!   (`spells/2282.png` — voir [`picture_icon`]). Depuis la mise à jour du
-//!   12 sept. 2026 il couvre aussi les mécaniques de classe (Proie, Karcham/Chamrak, Bond du
-//!   félin…), fusionnées dans `spells` avec les sorts de panneau.
+//! - `spells.json` : 19 classes (Bellaphone ajouté le 26 nov. 2026) plus une pseudo-classe
+//!   `common` de `breedId` −2 pour les sorts communs à tout le monde (Maîtrise d'Armes, Charme
+//!   de Masse, Os à Moelle) ; une entrée par sort avec ses noms localisés et le chemin de son
+//!   image sur le CDN `wakassets`, relatif à sa racine (`spells/2282.png` — voir
+//!   [`picture_icon`]). Depuis la mise à jour du 12 sept. 2026 il couvre aussi les mécaniques
+//!   de classe (Proie, Karcham/Chamrak, Bond du félin…), fusionnées dans `spells` avec les sorts
+//!   de panneau.
 //! - `monster-spells.json` (ajouté le 13 sept. 2026) : un tableau `{ breedId, spells }` par
 //!   monstre, où `breedId` est **l'identifiant que la ligne de jointure du log donne à chaque
 //!   monstre** (`[_FL_] … Grokoko breed : 4728 […] isControlledByAI=true` ↔ `breedId: 4728`) —

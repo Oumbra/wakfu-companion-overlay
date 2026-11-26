@@ -8,7 +8,11 @@
 //! (`isControlledByAI == false`) — un monstre peut porter un `breed` numériquement identique à un
 //! id de classe joueur (ex. "Bouftou" = breed 1, collision avec Féca) sans rapport avec sa classe.
 //! Voir `EntityClassifierService.registerFighterJoin` côté web pour la même règle. Id 17
-//! volontairement absent (aucune classe jouable ne l'utilise).
+//! volontairement absent (aucune classe jouable ne l'utilise : `breed.17` du client est le
+//! « Désincarné », jamais un personnage). Id 20 = Bellaphone, classe ajoutée par la mise à jour
+//! du 26 nov. 2026 (`breed.20` des textes du client, sorts `tIE = 20` du heap dump) ; ses
+//! portraits et bustes viennent de `gui.jar` (`breeds/illustrations/circle` et `portrait80`,
+//! `200` masculin, `201` féminin).
 
 /// Nom de classe (clé interne, ex. `"feca"`) pour un `breed` de combattant confirmé allié —
 /// `None` si `breed` ne correspond à aucune classe jouable connue.
@@ -32,14 +36,17 @@ pub fn class_for_breed(breed: i64) -> Option<&'static str> {
         16 => Some("foggernaut"),
         18 => Some("eliotrope"),
         19 => Some("huppermage"),
+        20 => Some("bellaphone"),
         _ => None,
     }
 }
 
 /// Ordre RÉEL des lignes de la planche `class-avatars-sheet-*.png` — miroir exact de
 /// `CLASS_PORTRAIT_ORDER` (`class-portraits.data.ts`). Ne JAMAIS réordonner sans reconstruire la
-/// planche en conséquence.
-pub const CLASS_PORTRAIT_ORDER: [&str; 18] = [
+/// planche en conséquence. `bellaphone` (ajouté le 2026-11-26) est en dernier, comme la 19ᵉ ligne
+/// ajoutée à la planche du site le même jour (`avatarIndex` 36 féminin, 37 masculin). L'overlay ne
+/// lit plus la planche (une texture par classe, voir `portraits`), seulement cet ordre.
+pub const CLASS_PORTRAIT_ORDER: [&str; 19] = [
     "cra",
     "ecaflip",
     "sacrier",
@@ -58,9 +65,10 @@ pub const CLASS_PORTRAIT_ORDER: [&str; 18] = [
     "osamodas",
     "pandawa",
     "rogue",
+    "bellaphone",
 ];
 
-/// Ligne (0-17) d'une classe dans la planche — miroir de `getClassPortraitRow`. `None` si
+/// Ligne (0-18) d'une classe dans la planche — miroir de `getClassPortraitRow`. `None` si
 /// `class_name` ne correspond à aucune classe connue (l'appelant décide du repli, contrairement au
 /// web qui replie silencieusement sur la ligne 0 — ici on préfère ne pas dessiner de portrait du
 /// tout plutôt qu'un portrait trompeur).
@@ -73,8 +81,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mappe_tous_les_breeds_1_a_19_sauf_17() {
-        for breed in 1..=19 {
+    fn mappe_tous_les_breeds_1_a_20_sauf_17() {
+        for breed in 1..=20 {
             if breed == 17 {
                 assert_eq!(class_for_breed(breed), None, "breed 17 doit rester absent");
             } else {
@@ -89,7 +97,7 @@ mod tests {
     #[test]
     fn rejette_un_breed_hors_plage() {
         assert_eq!(class_for_breed(0), None);
-        assert_eq!(class_for_breed(20), None);
+        assert_eq!(class_for_breed(21), None);
         assert_eq!(class_for_breed(-1), None);
     }
 
