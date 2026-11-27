@@ -31,7 +31,7 @@
 | Images du jeu | **wakassets + un petit CDN sur le dépôt GitHub de l'overlay** pour ce que wakassets n'a pas (§5). |
 | Interface d'historique | **Une vraie fenêtre autonome**, distincte des fenêtres overlay, navigable comme une application. |
 | Périmètre porté | Uniquement ce que l'overlay n'a pas : **historique des combats, récaps, achats, échanges, pactes**. Le suivi, les alertes sonores, les personnages, les alertes de chat existent déjà dans l'overlay et ne sont pas repris du site. |
-| « À propos » | Quitte la modale d'options de l'overlay et devient une page de la fenêtre autonome. |
+| « À propos » | **Reste dans les Options de l'overlay** (décision du 2026-11-27, qui remplace la précédente) : la fenêtre d'historique n'a pas d'onglet « À propos », et les pages légales sont au menu de l'icône de notification. |
 | Pages légales | **Restent sur le site** `wakfu-companion.com` (réécrites pour le nouveau contexte) ; l'application y renvoie par des liens. |
 | Site `wakfu-companion.com` | Conservé, réduit à **une page de présentation statique en français**, sans base ni API, hormis la Function de téléchargement (§10). |
 | Historique déjà en ligne | **Importé une fois** dans la base locale avant l'arrêt des serveurs (§8). |
@@ -128,8 +128,8 @@ d'historique et **aucune comparaison** entre périodes.
 **Pactes** (site : `features/pact/`)
 - Recherche (date, objet), tri, groupes par jour ; chaque extraction : nombre d'objets et liste.
 
-**À propos** : version, mise à jour, liens (site, code source, CGU d'Ankama, pages légales du site),
-soit le contenu actuel de `panels/a_propos_tab.rs`.
+**À propos** : pas dans la fenêtre d'historique (décision du 2026-11-27) — il reste dans les Options
+de l'overlay (`panels/a_propos_tab.rs`), les pages légales au menu de l'icône de notification.
 
 ### 3.2 Non portés
 
@@ -316,11 +316,11 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
   taille et position mémorisées. **Dans son propre processus** (décision du 2026-11-27, voir
   ci-dessous), pas à côté des fenêtres overlay.
 - Ouverte depuis la modale d'options, le menu de la zone de notification et un raccourci. Un
-  paramètre de page (`Combats`, `Récap`, `Achats`, `Échanges`, `Pactes`, `À propos`) permet à
-  l'overlay de l'ouvrir directement au bon endroit.
-- Navigation par onglets en haut ; pied de page avec liens vers les pages légales du site et la
-  mention imposée par la licence des données Ankama : « WAKFU MMORPG : © 2012-[année en cours]
-  Ankama Studio. Tous droits réservés. », année calculée.
+  paramètre de page (`Récap`, `Combats`, `Achats`, `Échanges`, `Pactes` — l'ordre de la barre,
+  Récap par défaut, décision du 2026-11-27) permet à l'overlay de l'ouvrir directement au bon
+  endroit.
+- Navigation par onglets en haut. Pas de pied de page de liens légaux : ils sont au menu de l'icône
+  de notification et dans l'« À propos » des Options (décision du 2026-11-27).
 - **Deux hôtes à câbler** : `main.rs` (Windows) et `bin/wakfu-companion-overlay-x11.rs` (Linux).
 - Design system de l'overlay, complété par cinq composants (skill `ui-component`) :
   1. interrupteur segmenté à icônes (le `.icon-switch` du site) ;
@@ -356,26 +356,39 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
   briques communes aux trois listes (barre de recherche et tri, en-tête de jour, ligne d'objet avec
   icône et rareté) sont dans `panels/history/items.rs`.
 - **Combats** : lecture des combats avec combattants et butin (`HistoryStore::fights`, sans le JSON
-  des sorts). Recherche sur les combattants et le butin, groupes par jour, « Tout replier », runs de
-  donjon réunis par leur clé de run, résumé (illustration : boss > archimonstre > dominant > plus
-  gros dégâts ; Victoire / Défaite ; tours et durée) et détail déplié : alliés et ennemis en dégâts,
-  armure ou soins avec barres proportionnelles, butin, XP. **Écart voulu** : le détail est propre à
-  la fenêtre, pas celui du panneau Combat (taillé pour une colonne étroite posée sur le jeu).
-- **Récap**, mode cumulé : jour, mois ou année dans le calendrier local, précédent / suivant, bande
-  kamas nets / XP / combats / challenges (dessinée pour la fenêtre, pas celle du bandeau Récap),
-  détail des kamas, XP par personnage, butin et pacte (`HistoryStore::period_stats`).
-- **À propos** : les sections d'information et leurs liens, partagées avec l'onglet des Options
-  (`a_propos_tab::show_sections`), sans mise à jour, redémarrage ni effacement.
+  des sorts). Recherche sur les combattants et le butin, groupes par jour ou « Donjons & familles »
+  (sections par type de donjon dans l'ordre du site, puis familles nommées par le référentiel),
+  « Tout replier », runs de donjon réunis par leur clé de run, résumé (illustration : boss >
+  archimonstre > dominant > plus gros dégâts ; Victoire / Défaite ; tours et durée) et détail
+  déplié : alliés (portrait de classe) et ennemis (icône du monstre) en dégâts, armure ou soins avec
+  barres proportionnelles, chaque combattant dépliable sur ses sorts (lus à la demande,
+  `HistoryStore::participant_spells`, part par élément en couleur), butin filtrable et trié (nom,
+  quantité, rareté), XP. **Écarts voulus** : le détail est propre à la fenêtre, pas celui du
+  panneau Combat (taillé pour une colonne étroite posée sur le jeu) ; pas de vue par tour (la base
+  ne garde pas les dégâts tour par tour) ; un reclic sur le tri actif n'inverse pas le sens.
+- **Récap** : jour, mois ou année dans le calendrier local, précédent / suivant, bande kamas nets /
+  XP / combats / challenges (dessinée pour la fenêtre, pas celle du bandeau Récap), puis trois
+  affichages : Cumulé (détail des kamas, XP par personnage, butin et pacte), Donjon & Famille (une
+  ligne par donjon sous son type, puis les familles) et Type (types de donjon fusionnés, vides
+  grisés, puis « Autres »), chaque ligne dépliable sur ses totaux, ses donjons, son XP et son butin
+  (`HistoryStore::period_stats`). **Écarts** : pas de granularité « session » (le récap de session
+  vit dans l'overlay, sur le jeu), pas de pierre de donjon épinglée en tête d'un type.
+- **Hôte Linux** : mode `--historique` et entrée « Historique » du menu de notification dans le
+  binaire X11 (vérifié par clippy seulement, pas à l'écran). Une seconde ouverture n'y ramène pas
+  la première au premier plan.
+- **Rafraîchissement** : toutes les 2 s, la fenêtre lit `PRAGMA data_version` ; si l'overlay a écrit
+  entre-temps, chaque vue relit ses données en gardant recherche, replis et pages chargées.
 - **Taille et position** retrouvées d'une ouverture à l'autre (`historique-fenetre.json`, à part de
   `config.toml` puisque deux processus tournent), ignorées si la bannière ne tombe plus sur un écran.
 - Le symbole ₭ manque dans la police du design system : un montant est toujours suivi de l'icône
   Kamas (`paint_amount`, `paint_amount_left`).
 - Reste :
-  - Combats : regroupement « Donjons & familles », vue par tour, ventilation par sort (relire le
-    JSON des sorts à la demande), portraits de classe des alliés, tri et recherche du butin ;
-  - Récap : granularité « session », sélecteur calendrier, modes par donjon et famille et par type ;
-  - hôte Linux : le binaire X11 n'a ni le mode `--historique` ni l'entrée de menu ;
-  - rafraîchir la fenêtre quand la base change (l'overlay écrit pendant qu'elle est ouverte).
+  - Récap : sélecteur calendrier ;
+  - **images des objets de pacte** : la plupart (costumes, équipements de boutique) n'ont ni id en
+    base ni entrée dans le référentiel — la source `repository/items.json` du site ne les contient
+    pas, le site ne les illustrait donc pas non plus. Il faudrait élargir la source du référentiel
+    (outil `tools/referentiel`, en amont) ;
+  - Linux : ramener une fenêtre déjà ouverte au premier plan ; essai à l'écran.
 
 ## 8. Import de l'historique en ligne
 
@@ -481,7 +494,7 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
 | **0 — Données** ✅ | Référentiel français embarqué (`tools/referentiel`) ; dossier `cdn/` + `pages.yml` ; résolution d'icônes wakassets puis CDN | L'overlay démarre et résout noms et icônes sans jeton ni API |
 | **1 — Stockage** ✅ | `history.sqlite3`, écriture depuis le moteur, recalcul runs de donjon et type de combat | Rejeu 10× du même log : aucun doublon ✅ ; totaux identiques au site sur un même log : vérifiés contre le moteur, la comparaison avec le site se fait sur un import réel (phase 2) |
 | **2 — Import** ✅ | Import de l'historique en ligne, automatique à la connexion ; bouton et progression dans la fenêtre (phase 3) | Historique d'un compte réel importé ✅ (1 562 entrées, 4,6 s, 3,2 Mo), totaux et lignes identiques au site ✅ |
-| **3 — Fenêtre** | Fenêtre application, 5 composants, vues Combats / Récap / Achats / Échanges / Pactes / À propos, Windows et X11 | Parité fonctionnelle avec le site sur le périmètre §3.1 ; captures de référence |
+| **3 — Fenêtre** | Fenêtre application, 5 composants, vues Récap / Combats / Achats / Échanges / Pactes, Windows et X11 | Parité fonctionnelle avec le site sur le périmètre §3.1 ; captures de référence |
 | **4 — Nettoyage** | Retrait compte et connexion (§9), du multilingue du catalogue, mise à jour de `plan-architecture.md` | Plus aucun appel à `wakfu-companion.com` hors liens ouverts dans le navigateur |
 | **5 — Site** | Page statique, pages légales réécrites, arrêt des Functions (sauf téléchargement) et de Neon | Coût d'hébergement nul hors domaine |
 | Plus tard | Sauvegarde chiffrée (§11) | — |
