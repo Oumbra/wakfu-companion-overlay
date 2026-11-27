@@ -137,6 +137,8 @@ pub enum Step {
     WaitReady,
     /// Clic gauche : survol et appui sur une frame, relâchement sur la suivante.
     Click { x: f32, y: f32, label: &'static str },
+    /// Clic droit, même déroulé (menu de correction d'un objet).
+    RightClick { x: f32, y: f32, label: &'static str },
     /// Texte tapé dans le champ qui a le focus.
     Type(&'static str),
     /// Molette au-dessus de `(x, y)`, en lignes (positif : vers le bas).
@@ -363,6 +365,19 @@ pub fn history_scenario() -> Vec<Step> {
         },
         Step::Type("Larme"),
         Step::Capture("achats-recherche"),
+        // Clic droit sur la Larme d'Ogrest (deux objets de ce nom) : le menu de correction, puis
+        // un clic à côté le referme sans rien changer.
+        Step::RightClick {
+            x: 400.0,
+            y: 238.0,
+            label: "larme d'ogrest",
+        },
+        Step::Capture("achats-correction"),
+        Step::Click {
+            x: 900.0,
+            y: 700.0,
+            label: "hors du menu",
+        },
         Step::Click {
             x: 1071.0,
             y: 28.0,
@@ -554,9 +569,14 @@ pub fn scroll_events(pos: egui::Pos2, lines: f32) -> Vec<Vec<egui::Event>> {
 /// Les événements egui d'un clic gauche à `pos` : la première frame survole et appuie, la
 /// seconde relâche — un clic egui se termine au relâchement, sur une frame distincte.
 pub fn click_events(pos: egui::Pos2) -> [Vec<egui::Event>; 2] {
+    button_events(pos, egui::PointerButton::Primary)
+}
+
+/// [`click_events`] avec un autre bouton.
+pub fn button_events(pos: egui::Pos2, button: egui::PointerButton) -> [Vec<egui::Event>; 2] {
     let button = |pressed| egui::Event::PointerButton {
         pos,
-        button: egui::PointerButton::Primary,
+        button,
         pressed,
         modifiers: egui::Modifiers::NONE,
     };
@@ -592,7 +612,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            24
+            25
         );
     }
 

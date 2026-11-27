@@ -312,7 +312,7 @@ impl HistoryStore {
             let mut stmt = conn.prepare_cached(
                 "SELECT l.fight_id, l.item_id, l.item_name, l.quantity
                  FROM fight_loot l JOIN fights f ON f.id = l.fight_id
-                 WHERE f.started_at >= ?1 AND f.started_at < ?2
+                 WHERE f.started_at >= ?1 AND f.started_at < ?2 AND l.quantity > 0
                  ORDER BY f.started_at, l.fight_id, l.line_index",
             )?;
             let mut rows = stmt.query(params![since_ms, until_ms])?;

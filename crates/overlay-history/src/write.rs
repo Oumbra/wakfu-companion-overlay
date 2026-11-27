@@ -199,7 +199,8 @@ fn write_fight(
          VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT (fight_id, line_index) DO UPDATE SET
             item_id = excluded.item_id, item_name = excluded.item_name,
-            quantity = excluded.quantity",
+            quantity = excluded.quantity
+         WHERE fight_loot.corrected = 0",
     )?;
     for (line_index, row) in fight.loot.iter().enumerate() {
         loot.execute(params![
@@ -229,7 +230,9 @@ fn write_purchase(
     };
     let key = account_key(tx, uid, "purchases", "purchase", signature)?;
     let updated = tx.execute(
-        "UPDATE purchases SET item_id = ?2, item_name = ?3,
+        "UPDATE purchases SET
+            item_id = CASE WHEN corrected = 1 THEN item_id ELSE ?2 END,
+            item_name = ?3,
             client_key = COALESCE(client_key, ?4)
          WHERE signature = ?1",
         params![signature, purchase.item_id, purchase.item_name, key],

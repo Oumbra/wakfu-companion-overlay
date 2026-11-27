@@ -1776,6 +1776,14 @@ impl App {
                 test.log(format!("clic : {label} ({x}, {y})"));
                 overlay_ui::autotest::click_events(egui::pos2(*x, *y)).to_vec()
             }
+            Step::RightClick { x, y, label } => {
+                test.log(format!("clic droit : {label} ({x}, {y})"));
+                overlay_ui::autotest::button_events(
+                    egui::pos2(*x, *y),
+                    egui::PointerButton::Secondary,
+                )
+                .to_vec()
+            }
             Step::Scroll { x, y, lines } => {
                 test.log(format!("molette : {lines} lignes en ({x}, {y})"));
                 overlay_ui::autotest::scroll_events(egui::pos2(*x, *y), *lines)
@@ -1812,7 +1820,11 @@ impl App {
         };
         let needs_window = matches!(
             step,
-            Step::Click { .. } | Step::Type(_) | Step::Scroll { .. } | Step::Capture(_)
+            Step::Click { .. }
+                | Step::RightClick { .. }
+                | Step::Type(_)
+                | Step::Scroll { .. }
+                | Step::Capture(_)
         );
         if needs_window && history_id.is_none() {
             test.fail(format!(

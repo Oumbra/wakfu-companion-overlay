@@ -150,6 +150,12 @@ pub(crate) const MIGRATIONS: &[&str] = &[
         value TEXT NOT NULL
     );
     ",
+    // Version 3 (2026-11-27) — corrections manuelles d'un objet (`correct`) : une ligne corrigée
+    // n'est plus réécrite par la relecture du log.
+    "
+    ALTER TABLE fight_loot ADD COLUMN corrected INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE purchases ADD COLUMN corrected INTEGER NOT NULL DEFAULT 0;
+    ",
 ];
 
 /// La version de schéma que ce binaire sait lire et écrire.

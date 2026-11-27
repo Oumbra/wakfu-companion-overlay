@@ -8,6 +8,7 @@
 pub mod achats;
 pub mod calendar;
 pub mod combats;
+pub mod corrections;
 pub mod echanges;
 pub mod format;
 pub mod items;
@@ -269,6 +270,8 @@ pub struct HistoryWindowState {
     pub recap: recap::RecapState,
     pub echanges: echanges::EchangesState,
     pub pactes: pactes::PactesState,
+    /// Le menu de correction d'un objet, s'il est ouvert.
+    pub corrections: corrections::CorrectionState,
 }
 
 impl HistoryWindowState {
@@ -555,6 +558,9 @@ pub fn show(
         HistoryTab::Echanges => echanges::show(ui, zones, &mut state.echanges, ctx, textures),
         HistoryTab::Pactes => pactes::show(ui, zones, &mut state.pactes, ctx, textures),
     });
+    if corrections::show(ui, &mut state.corrections, ctx, textures) {
+        state.invalidate();
+    }
     outcome.close = chrome.close;
     // Poignée de déplacement : la bannière, croix exceptée (elle garde ses clics).
     let close_reserve =

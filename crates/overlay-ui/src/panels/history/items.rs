@@ -312,6 +312,26 @@ pub fn paint_compact_item(
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
 ) {
+    paint_compact_item_with_fix(ui, painter, rect, line, dims, false, ctx, textures);
+}
+
+/// Largeur réservée à la quantité quand la ligne porte une clé plate : une colonne fixe, pour que
+/// la clé ne bouge pas d'une ligne à l'autre (`.loot-qty { min-width: 4ch }` du site).
+const QTY_COLUMN: f32 = 38.0;
+
+/// [`paint_compact_item`], avec la case de la clé plate avant la quantité si `fix_slot` : rend
+/// alors le centre de la clé (voir `corrections::row_trigger`).
+#[allow(clippy::too_many_arguments)]
+pub fn paint_compact_item_with_fix(
+    ui: &Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    line: &ItemLine,
+    dims: CompactRow,
+    fix_slot: bool,
+    ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
+) -> Option<egui::Pos2> {
     let name = item_name(line, ctx.catalog);
     paint_rarity_background(
         painter,
@@ -337,9 +357,20 @@ pub fn paint_compact_item(
         qty_font,
         Color32::WHITE,
     );
+    let fix = fix_slot.then(|| {
+        let column = qty.left().min(rect.right() - dims.pad_x - QTY_COLUMN);
+        egui::pos2(
+            column - dims.gap - super::corrections::FIX_SLOT / 2.0,
+            rect.center().y,
+        )
+    });
+    let name_right = match fix {
+        Some(center) => center.x - super::corrections::FIX_SLOT / 2.0,
+        None => qty.left(),
+    };
     let name_rect = Rect::from_min_max(
         egui::pos2(icon_rect.right() + dims.gap, rect.top()),
-        egui::pos2(qty.left() - dims.gap, rect.bottom()),
+        egui::pos2(name_right - dims.gap, rect.bottom()),
     );
     painter.with_clip_rect(name_rect.intersect(rect)).text(
         name_rect.left_center(),
@@ -348,6 +379,7 @@ pub fn paint_compact_item(
         text::label_font(ui.ctx(), dims.font_size),
         Color32::WHITE,
     );
+    fix
 }
 
 /// La ligne d'en-tête d'une entrée repliable (échange, extraction) : survol et clic sur toute la

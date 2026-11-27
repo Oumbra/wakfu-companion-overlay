@@ -422,6 +422,11 @@ pub struct CatalogIndex {
     /// Ingrédients de chaque objet craftable — `(id de l'ingrédient, quantité)`, dans l'ordre du
     /// référentiel. Remplace `GET /api/v1/items/{id}` (voir `recipe.rs`).
     recipes: HashMap<i64, Vec<(i64, i64)>>,
+    /// **Les objets homonymes**, par nom fr normalisé : seulement les noms portés par plusieurs
+    /// objets (raretés différentes, ou objets distincts du même nom — « Larme d'Ogrest »), ids
+    /// croissants. Sert la correction manuelle d'un objet dans l'historique
+    /// ([`CatalogIndex::item_homonyms`]) : la résolution par nom seul ne sait pas les départager.
+    item_homonyms: HashMap<String, Vec<i64>>,
 }
 
 /// Un objet tel que le champ d'ajout d'alerte le cherche — voir
@@ -509,6 +514,15 @@ impl CatalogIndex {
         index
             .searchable_items
             .sort_unstable_by(|a, b| a.normalized.cmp(&b.normalized));
+        for group in index
+            .searchable_items
+            .chunk_by(|a, b| a.normalized == b.normalized)
+            .filter(|group| group.len() > 1)
+        {
+            let mut ids: Vec<i64> = group.iter().map(|item| item.id).collect();
+            ids.sort_unstable();
+            index.item_homonyms.insert(group[0].normalized.clone(), ids);
+        }
 
         for row in rows("monsters").iter().filter_map(parse_monster_row) {
             let entry = MonsterEntry {
@@ -569,6 +583,16 @@ impl CatalogIndex {
     /// recette. Miroir du champ `recipe` de `GET /api/v1/items/{id}` côté web.
     pub fn recipe(&self, id: i64) -> &[(i64, i64)] {
         self.recipes.get(&id).map_or(&[], Vec::as_slice)
+    }
+
+    /// Les objets qui portent le nom `name` (comparaison normalisée), ids croissants — **vide**
+    /// quand il n'y en a qu'un : rien à départager. Miroir de
+    /// `CatalogService.findAllWakfuItemEntriesByName` (dépôt web), dont le site se sert pour
+    /// proposer la correction d'un objet du butin ou d'un achat.
+    pub fn item_homonyms(&self, name: &str) -> &[i64] {
+        self.item_homonyms
+            .get(&normalize_wakfu_name(name))
+            .map_or(&[], Vec::as_slice)
     }
 
     /// Nom fr d'un objet par id — `None` s'il n'est pas au référentiel.
@@ -799,6 +823,21 @@ mod tests {
                 [9001, [[24029, 2], [777, 1]]],
             ],
         })
+    }
+
+    #[test]
+    fn les_homonymes_d_un_objet_sont_listes_par_id() {
+        let mut data = sample();
+        data["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!([21602, "Larme d'Ogrest", 1235, 4, 0, 1]));
+        let index = CatalogIndex::from_json(&data);
+        assert_eq!(index.item_homonyms("LARME D'OGREST"), &[21602, 24029]);
+        assert!(
+            index.item_homonyms("Pain de Craqueleur").is_empty(),
+            "un nom porté par un seul objet n'a rien à départager"
+        );
     }
 
     #[test]

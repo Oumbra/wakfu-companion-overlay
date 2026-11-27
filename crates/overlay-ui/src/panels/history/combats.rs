@@ -1582,14 +1582,49 @@ fn loot_section(
     if lines.is_empty() {
         empty_line(ui, "Aucun objet ne correspond à cette recherche.");
     }
-    for line in lines {
+    for (index, line) in lines.into_iter().enumerate() {
         let (row, _) =
             ui.allocate_exact_size(egui::vec2(width, LOOT_ROW.height + 2.0), Sense::hover());
         let row = Rect::from_min_size(
             row.min + egui::vec2(12.0, 1.0),
             egui::vec2(inner_width, LOOT_ROW.height),
         );
-        items::paint_compact_item(ui, ui.painter(), row, line, LOOT_ROW, ctx, textures);
+        // Un objet aux homonymes se corrige : clé plate, ou clic droit sur la ligne
+        // (`LootListComponent.canInteract` du site).
+        let name = items::item_name(line, ctx.catalog);
+        let fixable = super::corrections::correctable(ctx, &name);
+        let fix = items::paint_compact_item_with_fix(
+            ui,
+            ui.painter(),
+            row,
+            line,
+            LOOT_ROW,
+            fixable,
+            ctx,
+            textures,
+        );
+        if let Some(pos) = fix.and_then(|fix| {
+            super::corrections::row_trigger(
+                ui,
+                row,
+                fix,
+                ui.id().with(("butin-correction", fight.id, index)),
+            )
+        }) {
+            super::corrections::open(
+                ui.ctx(),
+                super::corrections::Request {
+                    name,
+                    current_id: line.item_id,
+                    pos,
+                    target: super::corrections::Target::FightLoot {
+                        fight_id: fight.id,
+                        item_name: line.item_name.clone(),
+                        quantity: line.quantity,
+                    },
+                },
+            );
+        }
     }
 }
 

@@ -16,7 +16,7 @@ use overlay_history::HistoryStore;
 
 pub use super::items::SortOrder;
 use super::items::{self, DayTail, ListState};
-use super::{format, HistoryContext};
+use super::{corrections, format, HistoryContext};
 use crate::design::{self, text, tokens};
 use crate::rarity_bridge::rarity_color;
 use crate::remote_icons::RemoteIconTextures;
@@ -43,6 +43,8 @@ pub struct DayRow {
     pub quantity: i64,
     pub total_cost: i64,
     last_ms: i64,
+    /// Les achats cumulés sur la ligne — ce que la correction d'objet peut viser.
+    pub records: Vec<corrections::PurchaseRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,12 +101,19 @@ pub fn groups(
                     total_cost += record.total_cost;
                 }
                 let key = (name.clone(), record.item_id);
+                let reference = corrections::PurchaseRecord {
+                    id: record.id,
+                    occurred_at: record.occurred_at,
+                    quantity: record.quantity,
+                    total_cost: record.total_cost,
+                };
                 match index.get(&key) {
                     Some(&position) => {
                         let row = &mut rows[position];
                         row.quantity += record.quantity;
                         row.total_cost += record.total_cost;
                         row.last_ms = row.last_ms.max(record.occurred_at);
+                        row.records.push(reference);
                     }
                     None => {
                         index.insert(key, rows.len());
@@ -115,6 +124,7 @@ pub fn groups(
                             quantity: record.quantity,
                             total_cost: record.total_cost,
                             last_ms: record.occurred_at,
+                            records: vec![reference],
                         });
                     }
                 }
@@ -245,10 +255,42 @@ fn purchase_row(
     let font = text::label_font(ui.ctx(), FONT_SIZE);
     let cost_right = rect.right() - 15.0;
     let qty_right = cost_right - 130.0;
+    // Un objet aux homonymes se corrige (`PurchasesComponent.openInteractMenu`) — jamais une
+    // vente à l'HDV, qui n'est pas un objet.
+    let fixable = !row.is_hdv_sale && corrections::correctable(ctx, &row.name);
+    let fix = egui::pos2(qty_right - 60.0, rect.center().y);
     let name_rect = Rect::from_min_max(
         egui::pos2(icon_rect.right() + ROW_GAP, rect.top()),
-        egui::pos2(qty_right - 70.0, rect.max.y),
+        egui::pos2(
+            if fixable {
+                fix.x - corrections::FIX_SLOT / 2.0 - ROW_GAP
+            } else {
+                qty_right - 70.0
+            },
+            rect.max.y,
+        ),
     );
+    let trigger = fixable
+        .then(|| {
+            corrections::row_trigger(
+                ui,
+                rect,
+                fix,
+                ui.id().with(("achat-correction", row.last_ms, index)),
+            )
+        })
+        .flatten();
+    if let Some(pos) = trigger {
+        corrections::open(
+            ui.ctx(),
+            corrections::Request {
+                name: row.name.clone(),
+                current_id: row.item_id,
+                pos,
+                target: corrections::Target::Purchases(row.records.clone()),
+            },
+        );
+    }
     let cost = if row.is_hdv_sale {
         format!("+{}", format::thousands(row.total_cost))
     } else {

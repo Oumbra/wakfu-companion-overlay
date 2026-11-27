@@ -32,6 +32,15 @@ pub fn medium_date(day: NaiveDate) -> String {
 
 /// `27 nov. 2026, 14:03:12` — `formatDateTime` (`dateStyle` et `timeStyle` `medium`), en heure
 /// locale.
+/// L'heure locale d'un instant, `HH:MM` (`timeLabel` de la modale des achats du site).
+pub fn time_of_day(ms: i64) -> String {
+    Local
+        .timestamp_millis_opt(ms)
+        .earliest()
+        .map(|moment| moment.format("%H:%M").to_string())
+        .unwrap_or_default()
+}
+
 pub fn date_time(ms: i64) -> String {
     match Local.timestamp_millis_opt(ms).earliest() {
         Some(moment) => format!(

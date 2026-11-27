@@ -17,6 +17,7 @@
 //! l'utilisateur, comme le reste de l'overlay ; seule une future sauvegarde vers un tiers le sera.
 
 mod account;
+mod correct;
 mod derive;
 pub mod import;
 pub mod read;

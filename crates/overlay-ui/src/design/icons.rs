@@ -527,6 +527,11 @@ ds_icons! {
         /// du jeu, à la demande de l'utilisateur.
         CalendarLine => "icon-calendar-line", libre;
 
+        /// Clé plate au trait (`icons/icon-wrench.png`, 15 × 15) — symbole `wrench` du sprite du
+        /// site (trait 2), rastérisé à 16 px le 2026-11-27 : objet corrigeable du butin d'un
+        /// combat et des achats (`.loot-fix-btn`).
+        Wrench => "icon-wrench", libre;
+
         /// Brèche (`icons/icon-breach.png`, 40 × 37) — vignette du type « Brèche » du Récap.
         /// Fichier du dépôt web (`breach-74a8ca57.png`), rogné à son encre et ramené à 40 px.
         Breach => "icon-breach", couleur;

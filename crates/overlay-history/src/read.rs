@@ -178,6 +178,7 @@ impl HistoryStore {
         }
         let mut stmt = self.conn.prepare_cached(
             "SELECT fight_id, item_id, item_name, quantity FROM fight_loot
+             WHERE quantity > 0
              ORDER BY fight_id, line_index",
         )?;
         let mut rows = stmt.query(params![])?;
