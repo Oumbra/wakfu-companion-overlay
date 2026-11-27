@@ -207,6 +207,20 @@ pub fn history_scenario() -> Vec<Step> {
                 },
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("combats-deplie-2"),
+                Step::Click {
+                    x: 830.0,
+                    y: 165.0,
+                    label: "donjons et familles",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("combats-types"),
+                Step::Click {
+                    x: 975.0,
+                    y: 165.0,
+                    label: "tout replier",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("combats-types-replies"),
             ]);
         }
         if name == "recap" {
@@ -488,7 +502,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            14
+            16
         );
     }
 

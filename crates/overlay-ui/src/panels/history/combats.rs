@@ -9,12 +9,12 @@
 //! **Pas encore porté** : le regroupement « Donjons & familles », la vue par tour et la ventilation
 //! par sort (le JSON des sorts n'est pas relu), le tri et la recherche du butin.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use chrono::NaiveDate;
 use egui::{Align2, Color32, Rect, Sense, Ui};
 use overlay_engine::roster::normalize_wakfu_name;
-use overlay_engine::{CatalogIndex, DungeonIndex, IconRef};
+use overlay_engine::{CatalogIndex, DungeonIndex, IconRef, WakfuDungeonType};
 use overlay_history::read::{FightRow, ParticipantRow};
 use overlay_history::HistoryStore;
 
@@ -135,6 +135,168 @@ pub fn illustration<'a>(
     enemies.into_iter().max_by_key(|p| p.damage)
 }
 
+/// Le regroupement de la liste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GroupMode {
+    /// Par jour (Aujourd'hui, Hier, date).
+    #[default]
+    Day,
+    /// Par donjon, puis par famille de monstres (« Donjons & familles »).
+    Type,
+}
+
+/// Un groupe repliable de la liste.
+#[derive(Debug)]
+pub struct FightGroup<'e, 'a> {
+    /// Clé stable (état replié), propre au regroupement.
+    pub key: String,
+    pub label: String,
+    /// « 3 combats », « 2 donjons ».
+    pub count: String,
+    /// Titre de section à peindre AVANT ce groupe (premier groupe d'une section).
+    pub section: Option<String>,
+    pub entries: Vec<&'e Entry<'a>>,
+}
+
+fn fights_in(entries: &[&Entry]) -> usize {
+    entries.iter().map(|entry| entry.fights().len()).sum()
+}
+
+/// Groupes par jour local du combat représentatif.
+pub fn day_groups<'e, 'a>(entries: &[&'e Entry<'a>], today: NaiveDate) -> Vec<FightGroup<'e, 'a>> {
+    items::group_by_day(
+        entries.iter().copied(),
+        |entry| entry.representative().started_at,
+        items::SortOrder::Newest,
+    )
+    .into_iter()
+    .map(|(day, entries)| FightGroup {
+        key: format!("jour:{day}"),
+        label: format::relative_day(day, today),
+        count: fight_count(fights_in(&entries)),
+        section: None,
+        entries,
+    })
+    .collect()
+}
+
+/// Ordre des sections de donjon (`DUNGEON_TYPE_ORDER`) et leurs titres.
+const DUNGEON_SECTIONS: [(WakfuDungeonType, &str); 8] = [
+    (WakfuDungeonType::TwoRooms, "Donjon 2 salles"),
+    (WakfuDungeonType::ThreeRooms, "Donjon 3 salles"),
+    (WakfuDungeonType::FourRooms, "Donjon 4 salles"),
+    (WakfuDungeonType::ThreePlayers, "Donjon 3 joueurs"),
+    (WakfuDungeonType::UltimateBoss, "Boss ultime"),
+    (WakfuDungeonType::Breach, "Brèche"),
+    (WakfuDungeonType::UltimateBreach, "Brèche ultime"),
+    (WakfuDungeonType::Arcade, "Donjon arcade"),
+];
+
+/// Groupes « Donjons & familles » (`buildTypeGroups` du site) : un groupe par donjon, rangé sous
+/// la section de son type, dans l'ordre fixe du site ; puis, sous « Familles », un groupe par
+/// famille de monstres de l'illustration du combat. Dans une section, les groupes gardent l'ordre
+/// chronologique de leur première entrée.
+///
+/// **Écart** : le site nomme un groupe de famille par le nom de la famille ; la fenêtre n'a pas
+/// encore le référentiel des familles, et prend le repli du site — le monstre représentatif le
+/// plus fréquent du groupe.
+pub fn type_groups<'e, 'a>(
+    entries: &[&'e Entry<'a>],
+    catalog: &CatalogIndex,
+    dungeons: &DungeonIndex,
+) -> Vec<FightGroup<'e, 'a>> {
+    struct Bucket<'e, 'a> {
+        key: String,
+        dungeon: Option<(WakfuDungeonType, String)>,
+        names: Vec<(String, usize)>,
+        entries: Vec<&'e Entry<'a>>,
+    }
+    let mut buckets: Vec<Bucket> = Vec::new();
+    for entry in entries {
+        let dungeon_id = match entry {
+            Entry::Run { dungeon_id, .. } => *dungeon_id,
+            Entry::Single(fight) => fight.dungeon_id,
+        };
+        let dungeon = dungeon_id.and_then(|id| dungeons.find_by_id(id));
+        let face = illustration(entry.representative(), catalog, dungeons);
+        let key = match (dungeon, face) {
+            (Some(dungeon), _) => format!("donjon:{}", dungeon.id),
+            (None, Some(face)) => match catalog.find_monster_family_id(&face.name, face.monster_id)
+            {
+                Some(family) => format!("famille:{family}"),
+                None => format!("monstre:{}", face.name),
+            },
+            (None, None) => "autre".to_string(),
+        };
+        let position = match buckets.iter().position(|bucket| bucket.key == key) {
+            Some(position) => position,
+            None => {
+                buckets.push(Bucket {
+                    key,
+                    dungeon: dungeon.map(|d| (d.dungeon_type, d.fr.clone())),
+                    names: Vec::new(),
+                    entries: Vec::new(),
+                });
+                buckets.len() - 1
+            }
+        };
+        let bucket = &mut buckets[position];
+        bucket.entries.push(entry);
+        if let Some(face) = face {
+            match bucket.names.iter_mut().find(|(name, _)| *name == face.name) {
+                Some((_, count)) => *count += 1,
+                None => bucket.names.push((face.name.clone(), 1)),
+            }
+        }
+    }
+    let mut groups = Vec::new();
+    for (dungeon_type, title) in DUNGEON_SECTIONS {
+        let mut first = true;
+        for bucket in buckets
+            .iter()
+            .filter(|bucket| bucket.dungeon.as_ref().map(|(t, _)| *t) == Some(dungeon_type))
+        {
+            let count = bucket.entries.len();
+            groups.push(FightGroup {
+                key: format!("type:{}", bucket.key),
+                label: bucket
+                    .dungeon
+                    .as_ref()
+                    .map_or_else(String::new, |(_, name)| name.clone()),
+                count: if count == 1 {
+                    "1 donjon".to_string()
+                } else {
+                    format!("{count} donjons")
+                },
+                section: first.then(|| title.to_string()),
+                entries: bucket.entries.clone(),
+            });
+            first = false;
+        }
+    }
+    let mut first = true;
+    for bucket in buckets.iter().filter(|bucket| bucket.dungeon.is_none()) {
+        // Le premier nom le plus fréquent (ordre d'apparition à égalité).
+        let label = bucket
+            .names
+            .iter()
+            .fold(None::<&(String, usize)>, |best, candidate| match best {
+                Some(best) if best.1 >= candidate.1 => Some(best),
+                _ => Some(candidate),
+            })
+            .map_or_else(|| "Autres combats".to_string(), |(name, _)| name.clone());
+        groups.push(FightGroup {
+            key: format!("type:{}", bucket.key),
+            label,
+            count: fight_count(fights_in(&bucket.entries)),
+            section: first.then(|| "Familles".to_string()),
+            entries: bucket.entries.clone(),
+        });
+        first = false;
+    }
+    groups
+}
+
 /// `3 min 12sec.` — `formatDuration` du site.
 pub fn duration(ms: i64) -> String {
     let seconds = (ms.max(0) + 500) / 1000;
@@ -173,6 +335,10 @@ impl Metric {
 #[derive(Default)]
 pub struct CombatsState {
     pub list: ListState<FightRow>,
+    /// Regroupement choisi.
+    pub mode: GroupMode,
+    /// Groupes repliés (clé : [`FightGroup::key`]).
+    pub collapsed_groups: HashSet<String>,
     /// Combats dépliés.
     pub expanded: HashSet<i64>,
     /// Runs de donjon dépliés (clé : [`Entry::key`]).
@@ -184,6 +350,7 @@ pub struct CombatsState {
 const SUMMARY_HEIGHT: f32 = 40.0;
 const IMAGE_SIZE: f32 = 28.0;
 const TOGGLE_ALL_WIDTH: f32 = 140.0;
+const MODE_SWITCH_WIDTH: f32 = 300.0;
 /// Victoire / défaite (`.fight-badge.won`, `.lost`).
 const WON: Color32 = items::GAIN;
 const LOST: Color32 = items::LOSS;
@@ -209,13 +376,14 @@ pub fn show(
     state.list.load(ctx.store, HistoryStore::fights, "combats");
     let CombatsState {
         list,
+        mode,
+        collapsed_groups,
         expanded,
         expanded_runs,
         metric,
     } = state;
     let ListState {
         query: search,
-        collapsed: collapsed_days,
         rows,
         pager,
         ..
@@ -235,23 +403,30 @@ pub fn show(
                 .any(|fight| matches(fight, &query, ctx.catalog))
         })
         .collect();
-    let groups = items::group_by_day(
-        kept.iter().copied(),
-        |entry| entry.representative().started_at,
-        items::SortOrder::Newest,
-    );
-    let all_days: BTreeSet<NaiveDate> = groups.iter().map(|(day, _)| *day).collect();
+    let groups = match mode {
+        GroupMode::Day => day_groups(&kept, ctx.today),
+        GroupMode::Type => type_groups(&kept, ctx.catalog, ctx.dungeons),
+    };
 
-    // Recherche, puis « Tout replier » / « Tout déplier ».
+    // Recherche, regroupement, puis « Tout replier » / « Tout déplier ».
     ui.horizontal(|ui| {
         ui.add(
             design::input(search)
                 .placeholder("Rechercher un ennemi, un allié, un objet...")
                 .clearable(true)
-                .width(zones.inner.width() - TOGGLE_ALL_WIDTH - 12.0)
+                .width(zones.inner.width() - MODE_SWITCH_WIDTH - TOGGLE_ALL_WIDTH - 24.0)
                 .log_name("historique.combats.recherche"),
         );
-        let any_open = all_days.iter().any(|day| !collapsed_days.contains(day));
+        ui.add(
+            design::switch(mode)
+                .slot(GroupMode::Day, "Jour")
+                .slot(GroupMode::Type, "Donjons & familles")
+                .width(MODE_SWITCH_WIDTH)
+                .log_name("historique.combats.regroupement"),
+        );
+        let any_open = groups
+            .iter()
+            .any(|group| !collapsed_groups.contains(&group.key));
         if !groups.is_empty()
             && ui
                 .add(
@@ -267,9 +442,11 @@ pub fn show(
                 .clicked()
         {
             if any_open {
-                collapsed_days.extend(all_days.iter().copied());
+                collapsed_groups.extend(groups.iter().map(|group| group.key.clone()));
             } else {
-                collapsed_days.clear();
+                for group in &groups {
+                    collapsed_groups.remove(&group.key);
+                }
             }
         }
     });
@@ -286,22 +463,25 @@ pub fn show(
                     .color(tokens::TEXT_DISABLED),
             );
         }
-        for (day, day_entries) in &groups {
-            let collapsed = collapsed_days.contains(day);
-            let count: usize = day_entries.iter().map(|entry| entry.fights().len()).sum();
+        for group in &groups {
+            if let Some(section) = &group.section {
+                section_header(ui, width, section);
+            }
+            let collapsed = collapsed_groups.contains(&group.key);
             if items::day_header(
                 ui,
                 width,
-                &format::relative_day(*day, ctx.today),
-                DayTail::Text(&fight_count(count)),
+                &group.label,
+                DayTail::Text(&group.count),
                 !collapsed,
-            ) {
-                ListState::<FightRow>::toggle(collapsed_days, *day);
+            ) && !collapsed_groups.remove(&group.key)
+            {
+                collapsed_groups.insert(group.key.clone());
             }
             if collapsed {
                 continue;
             }
-            for entry in day_entries {
+            for entry in &group.entries {
                 match entry {
                     Entry::Single(fight) => {
                         fight_block(ui, width, fight, false, expanded, metric, ctx, textures);
@@ -330,6 +510,19 @@ pub fn show(
         }
         pager.footer(ui, width, &times, shown, "historique.combats");
     });
+}
+
+/// Titre d'une section du regroupement « Donjons & familles » (non cliquable).
+fn section_header(ui: &mut Ui, width: f32, title: &str) {
+    ui.add_space(6.0);
+    let (row, _) = ui.allocate_exact_size(egui::vec2(width, 24.0), Sense::hover());
+    ui.painter_at(row).text(
+        egui::pos2(row.left() + 4.0, row.center().y),
+        Align2::LEFT_CENTER,
+        title.to_uppercase(),
+        text::label_strong_font(ui.ctx(), 12.0),
+        tokens::OVERLAY_TEXT_MUTED,
+    );
 }
 
 /// Un combat : son résumé, et son détail s'il est déplié.
@@ -823,6 +1016,26 @@ mod tests {
         let lone = [fight(4, 4_000, Some("seul"), &[])];
         let refs: Vec<&FightRow> = lone.iter().collect();
         assert!(matches!(super::entries(&refs)[0], Entry::Single(_)));
+    }
+
+    #[test]
+    fn hors_donjon_les_combats_vont_sous_familles() {
+        let catalog = CatalogIndex::default();
+        let dungeons = DungeonIndex::default();
+        let fights = [
+            fight(3, 3_000, None, &[("Bouftou", 5), ("Bouftou", 5)]),
+            fight(2, 2_000, None, &[("Tofu", 5)]),
+            fight(1, 1_000, None, &[("Bouftou", 5), ("Bouftou", 9)]),
+        ];
+        let refs: Vec<&FightRow> = fights.iter().collect();
+        let all = entries(&refs);
+        let kept: Vec<&Entry> = all.iter().collect();
+        let groups = type_groups(&kept, &catalog, &dungeons);
+        let labels: Vec<&str> = groups.iter().map(|g| g.label.as_str()).collect();
+        assert_eq!(labels, vec!["Bouftou", "Tofu"]);
+        assert_eq!(groups[0].section.as_deref(), Some("Familles"));
+        assert_eq!(groups[1].section, None);
+        assert_eq!(groups[0].count, "2 combats");
     }
 
     #[test]
