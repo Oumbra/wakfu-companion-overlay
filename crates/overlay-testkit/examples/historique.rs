@@ -86,9 +86,14 @@ fn main() {
     for tab in tabs {
         let mut state = HistoryWindowState::new(tab);
         state.achats.query = query.clone();
+        // Sans réseau : les icônes d'objets restent vides ici (l'essai automatique de la vraie
+        // fenêtre, `--autotest`, les montre).
+        let remote_icons = overlay_ui::remote_icons::RemoteIconStore::empty();
+        let mut textures = overlay_ui::remote_icons::RemoteIconTextures::default();
         let ctx = HistoryContext {
             store: Some(&store),
             catalog: &referentiel.catalog,
+            remote_icons: &remote_icons,
             today,
         };
         let started = std::time::Instant::now();
@@ -96,7 +101,7 @@ fn main() {
             .with_size(egui::vec2(width, height))
             .build_ui(|ui| {
                 overlay_ui::style::apply(ui.ctx());
-                let _ = history::show(ui, &mut state, &ctx);
+                let _ = history::show(ui, &mut state, &ctx, &mut textures);
             });
         harness.run();
         let image = harness.render().expect("rendu de la fenêtre");

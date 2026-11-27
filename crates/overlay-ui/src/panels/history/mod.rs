@@ -13,6 +13,8 @@ use egui::{Sense, Ui};
 use overlay_engine::CatalogIndex;
 use overlay_history::HistoryStore;
 
+use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
+
 use crate::design::{self, DsIcon};
 
 /// Titre système de la fenêtre (barre des tâches, Alt+Tab) — aussi ce que cherche une seconde
@@ -141,6 +143,8 @@ pub struct HistoryContext<'a> {
     /// `None` : base absente ou illisible — les vues se montrent vides.
     pub store: Option<&'a HistoryStore>,
     pub catalog: &'a CatalogIndex,
+    /// Icônes d'objets (wakassets, puis le CDN de l'overlay), partagées par le processus.
+    pub remote_icons: &'a RemoteIconStore,
     /// Jour local courant (« Aujourd'hui », « Hier »…), fourni par l'hôte pour que les captures
     /// soient reproductibles.
     pub today: NaiveDate,
@@ -264,10 +268,31 @@ fn resize_edges(ui: &mut Ui, outcome: &mut HistoryOutcome) {
     }
 }
 
+/// Une icône distante peinte dans `rect` ; rien tant qu'elle n'est pas arrivée (le thread des
+/// icônes réveille la fenêtre quand elle l'est).
+pub(crate) fn paint_remote_icon(
+    ui: &Ui,
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    icon: &overlay_engine::IconRef,
+    store: &RemoteIconStore,
+    textures: &mut RemoteIconTextures,
+) {
+    if let Some(texture) = textures.resolve(ui.ctx(), store, icon) {
+        painter.image(
+            texture.id(),
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
+}
+
 pub fn show(
     ui: &mut Ui,
     state: &mut HistoryWindowState,
     ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
 ) -> HistoryOutcome {
     let mut outcome = HistoryOutcome::default();
     let window_rect = ui.max_rect();
@@ -288,14 +313,7 @@ pub fn show(
     }
     chrome.tabs(ui, tabs);
     design::panel().show(ui, chrome.content, |ui, zones| match state.tab {
-        HistoryTab::Achats => achats::show(
-            ui,
-            zones,
-            &mut state.achats,
-            ctx.store,
-            ctx.catalog,
-            ctx.today,
-        ),
+        HistoryTab::Achats => achats::show(ui, zones, &mut state.achats, ctx, textures),
         other => {
             ui.add(
                 design::label(format!("{} — à venir", other.label()))

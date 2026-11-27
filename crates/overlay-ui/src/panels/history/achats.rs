@@ -9,15 +9,26 @@ use std::collections::{BTreeSet, HashMap};
 use chrono::NaiveDate;
 use egui::{Align2, Color32, Rect, Sense, Ui};
 use overlay_engine::roster::normalize_wakfu_name;
-use overlay_engine::CatalogIndex;
+use overlay_engine::{CatalogIndex, IconKind, IconRef};
 use overlay_history::read::PurchaseRow;
 use overlay_history::stats::HDV_KAMAS_SALE_ITEM;
 
-use super::format;
+use super::{format, HistoryContext};
 use crate::design::{self, text, tokens, DsIcon};
+use crate::rarity_bridge::rarity_color;
+use crate::remote_icons::RemoteIconTextures;
 
 /// Libellé d'une récupération de kamas (`purchases.hdvSource`).
 pub const HDV_LABEL: &str = "Hôtel de vente";
+
+/// L'icône d'une récupération de kamas — `wakassets/itemTypes/614.png`, comme
+/// `WAKFU_HDV_KAMAS_ICON_URL` côté site.
+pub fn hdv_icon() -> IconRef {
+    IconRef {
+        kind: IconKind::ItemCategory,
+        gfx_id: "614".to_string(),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortOrder {
@@ -147,7 +158,16 @@ pub struct AchatsState {
     pub rows: Option<Vec<PurchaseRow>>,
 }
 
-const ROW_HEIGHT: f32 = 26.0;
+/// Hauteur d'une ligne : l'icône de 22 px et ses 6 px de marge haute et basse, comme le site.
+const ROW_HEIGHT: f32 = 34.0;
+/// Côté de l'icône d'objet (`app-item-icon [size]="22"`).
+const ICON_SIZE: f32 = 22.0;
+/// Retrait de la ligne (`padding-left: 30px` du site), liseré de rareté compris.
+const ROW_PAD_LEFT: f32 = 30.0;
+/// Écart entre l'icône et le nom (`gap: 10px`).
+const ROW_GAP: f32 = 10.0;
+/// Liseré gauche d'une ligne d'objet (`border-left: 3px`).
+const RARITY_EDGE: f32 = 3.0;
 const SORT_SWITCH_WIDTH: f32 = 180.0;
 const DAY_HEADER_HEIGHT: f32 = 30.0;
 const FONT_SIZE: f32 = 14.0;
@@ -158,12 +178,12 @@ pub fn show(
     ui: &mut Ui,
     zones: &design::PanelZones,
     state: &mut AchatsState,
-    store: Option<&overlay_history::HistoryStore>,
-    catalog: &CatalogIndex,
-    today: NaiveDate,
+    ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
 ) {
+    let (catalog, today) = (ctx.catalog, ctx.today);
     if state.rows.is_none() {
-        state.rows = Some(match store.map(|store| store.purchases()) {
+        state.rows = Some(match ctx.store.map(|store| store.purchases()) {
             Some(Ok(rows)) => rows,
             Some(Err(err)) => {
                 tracing::warn!(%err, "historique : achats illisibles");
@@ -219,7 +239,7 @@ pub fn show(
                 continue;
             }
             for (index, row) in group.rows.iter().enumerate() {
-                purchase_row(ui, width, row, index);
+                purchase_row(ui, width, row, index, ctx, textures);
             }
             ui.add_space(6.0);
         }
@@ -268,30 +288,91 @@ fn day_header(ui: &mut Ui, width: f32, day: &str, total: &str, open: bool) -> bo
     response.clicked()
 }
 
-fn purchase_row(ui: &mut Ui, width: f32, row: &DayRow, index: usize) {
+/// Fond d'une ligne d'objet, comme `.purchase-row[class*='rarity-']` du site : liseré gauche de
+/// la couleur de rareté, dégradé de cette couleur (35 %) vers le fond à 70 % de la largeur, et
+/// filet haut qui s'efface au même endroit.
+fn paint_rarity_background(painter: &egui::Painter, rect: Rect, rarity: Color32) {
+    let fade_x = rect.left() + rect.width() * 0.7;
+    let horizontal_fade = |top: f32, bottom: f32, from: Color32| {
+        let mut mesh = egui::Mesh::default();
+        let clear = Color32::TRANSPARENT;
+        for (x, color) in [(rect.left(), from), (fade_x, clear)] {
+            mesh.colored_vertex(egui::pos2(x, top), color);
+            mesh.colored_vertex(egui::pos2(x, bottom), color);
+        }
+        mesh.add_triangle(0, 1, 2);
+        mesh.add_triangle(1, 3, 2);
+        mesh
+    };
+    painter.add(horizontal_fade(
+        rect.top(),
+        rect.bottom(),
+        rarity.gamma_multiply(0.35),
+    ));
+    painter.add(horizontal_fade(rect.top(), rect.top() + 1.0, rarity));
+    painter.rect_filled(
+        Rect::from_min_max(
+            rect.min,
+            egui::pos2(rect.left() + RARITY_EDGE, rect.bottom()),
+        ),
+        0.0,
+        rarity,
+    );
+}
+
+fn purchase_row(
+    ui: &mut Ui,
+    width: f32,
+    row: &DayRow,
+    index: usize,
+    ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
+) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, ROW_HEIGHT), Sense::hover());
     let painter = ui.painter_at(rect);
     if index % 2 == 1 {
         painter.rect_filled(rect, 0.0, tokens::TABLE_ROW_STRIPE);
     }
+    // L'icône : celle de l'objet (catalogue), ou celle de l'Hôtel de vente.
+    let icon = if row.is_hdv_sale {
+        Some(hdv_icon())
+    } else {
+        paint_rarity_background(
+            &painter,
+            rect,
+            rarity_color(ctx.catalog.find_item_rarity(&row.name, row.item_id)),
+        );
+        ctx.catalog.find_item_icon(&row.name, row.item_id)
+    };
+    let icon_rect = Rect::from_center_size(
+        egui::pos2(
+            rect.left() + ROW_PAD_LEFT + ICON_SIZE / 2.0,
+            rect.center().y,
+        ),
+        egui::vec2(ICON_SIZE, ICON_SIZE),
+    );
+    if let Some(icon) = &icon {
+        super::paint_remote_icon(ui, &painter, icon_rect, icon, ctx.remote_icons, textures);
+    }
+    let name_font = text::label_strong_font(ui.ctx(), FONT_SIZE);
     let font = text::label_font(ui.ctx(), FONT_SIZE);
-    let cost_right = rect.right() - 10.0;
+    let cost_right = rect.right() - 15.0;
     let qty_right = cost_right - 130.0;
     let name_rect = Rect::from_min_max(
-        rect.min + egui::vec2(10.0, 0.0),
+        egui::pos2(icon_rect.right() + ROW_GAP, rect.top()),
         egui::pos2(qty_right - 70.0, rect.max.y),
     );
-    let (name_color, cost) = if row.is_hdv_sale {
-        (HDV_GAIN, format!("+{}", format::thousands(row.total_cost)))
+    let cost = if row.is_hdv_sale {
+        format!("+{}", format::thousands(row.total_cost))
     } else {
-        (Color32::WHITE, format::thousands(row.total_cost))
+        format::thousands(row.total_cost)
     };
     painter.with_clip_rect(name_rect).text(
         name_rect.left_center(),
         Align2::LEFT_CENTER,
         &row.name,
-        font.clone(),
-        name_color,
+        name_font,
+        Color32::WHITE,
     );
     if !row.is_hdv_sale {
         painter.text(

@@ -16,6 +16,21 @@ use overlay_engine::WakfuRarity;
 
 use crate::design::ItemRarity;
 
+/// `--rarity-color` du site (`styles.css`, `.rarity-xxx`) — liseré et dégradé des lignes d'objets
+/// (vue Achats de l'historique). Une ancienne rareté (`Old`) se peint comme une commune, comme
+/// sa bordure ([`to_slot_rarity`]).
+pub fn rarity_color(rarity: WakfuRarity) -> egui::Color32 {
+    match rarity {
+        WakfuRarity::Old | WakfuRarity::Common => egui::Color32::from_rgb(0xC8, 0xC8, 0xC8),
+        WakfuRarity::Rare => egui::Color32::from_rgb(0x1D, 0xD1, 0x5F),
+        WakfuRarity::Mythical => egui::Color32::from_rgb(0xD9, 0x7A, 0x00),
+        WakfuRarity::Legendary => egui::Color32::from_rgb(0xC7, 0xD4, 0x00),
+        WakfuRarity::Memory => egui::Color32::from_rgb(0x1F, 0x97, 0xE0),
+        WakfuRarity::Epic => egui::Color32::from_rgb(0xD8, 0x4F, 0xA0),
+        WakfuRarity::Relic => egui::Color32::from_rgb(0x94, 0x50, 0xD9),
+    }
+}
+
 /// La bordure à peindre pour une rareté du catalogue.
 ///
 /// **`Old` retombe sur `Common`** : le jeu n'a pas de bordure « ancien », et cette rareté n'est de

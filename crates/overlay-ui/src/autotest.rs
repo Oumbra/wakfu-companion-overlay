@@ -168,7 +168,13 @@ const TAB_Y: f32 = 92.0;
 /// Le scénario de la fenêtre d'historique : chaque onglet, une recherche dans les achats, puis
 /// la croix.
 pub fn history_scenario() -> Vec<Step> {
-    let mut steps = vec![Step::WaitReady, Step::Capture("00-ouverture")];
+    // La frame de `WaitReady` demande les icônes d'objets : la pause leur laisse le temps
+    // d'arriver (cache disque, sinon réseau) avant la première capture.
+    let mut steps = vec![
+        Step::WaitReady,
+        Step::Pause(Duration::from_secs(3)),
+        Step::Capture("00-ouverture"),
+    ];
     for (x, name) in TAB_CENTERS {
         steps.push(Step::Click {
             x,
