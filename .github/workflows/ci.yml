@@ -140,7 +140,7 @@ jobs:
           workspaces: |
             . -> target
             xtask -> target
-      - run: cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform --all-targets -- -D warnings
+      - run: cargo clippy -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-history -p overlay-platform --all-targets -- -D warnings
       - run: cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay-x11 -- -D warnings
       - run: cargo clippy -p overlay-testkit --all-targets -- -D warnings
       - run: cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
@@ -179,7 +179,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: . -> target
-      - run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-platform
+      - run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-history -p overlay-platform
       - run: cargo test --no-fail-fast -p overlay-ui --lib
       - name: binaire Linux/X11 — compile (pas de tests unitaires, voir son fichier)
         run: cargo build -p overlay-ui --bin wakfu-companion-overlay-x11
@@ -245,7 +245,7 @@ jobs:
       # sans qu'aucune ne soit tenue à un verdict que l'autre n'applique pas.
       - run: cargo clippy -p overlay-ui --lib --bin wakfu-companion-overlay -- -D warnings
       - name: tests purs (sans GPU) — overlay-testkit/overlay-ui restent couverts côté Linux (lavapipe)
-        run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync
+        run: cargo test --no-fail-fast -p overlay-engine -p overlay-ingest -p overlay-sync -p overlay-history
 
   mem-budget:
     runs-on: ubuntu-24.04
