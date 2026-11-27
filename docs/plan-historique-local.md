@@ -1,0 +1,337 @@
+# Plan — historique local, overlay autonome, fin du site applicatif
+
+> Décision du mainteneur du **2026-11-27**. Ce document décrit le virage « tout sur le poste » :
+> l'overlay devient l'unique outil, il conserve et affiche lui-même tout l'historique de
+> l'utilisateur, sans compte, sans serveur applicatif et sans navigateur. Il **remplace** les
+> parties de [`plan-architecture.md`](plan-architecture.md) consacrées à la synchronisation
+> serveur, à l'authentification native et au compte obligatoire (§7, §7.5, §9.1 undecies, §10,
+> §14) — chacune y porte désormais un renvoi ici.
+
+---
+
+## 0. Pourquoi
+
+- **Coût** : le site applicatif `wakfu-companion` repose sur Cloudflare Pages + Functions et sur une
+  base Neon Postgres, payants au-delà des offres gratuites.
+- **Double maintenance** : chaque évolution du parseur, du modèle d'historique ou des heuristiques
+  (donjons, HDV, pactes) doit être faite deux fois, en TypeScript et en Rust, avec un risque de
+  divergence permanent (voir `plan-architecture.md` §2).
+- **Objectif utilisateur** : installer Wakfu Companion et s'en servir immédiatement — plus de
+  connexion Discord ou Google, plus d'appairage, plus de navigateur.
+
+## 1. Décisions acquises
+
+| Sujet | Décision |
+| --- | --- |
+| Lieu des données | **Tout reste sur le poste.** Aucune donnée d'historique ne quitte la machine. |
+| Stockage local | **SQLite, en clair.** Pas de chiffrement local : ce sont des données de jeu, déjà présentes en clair dans `wakfu.log`, et le chiffrement n'apporterait qu'un coût d'écriture et de lecture. |
+| Chiffrement | **Uniquement** pour la future sauvegarde vers un stockage tiers (phase 2, §11) : chiffré avant l'envoi, déchiffré à la récupération. |
+| Compte et connexion | **Supprimés** : appairage, jeton, file d'envoi, fenêtre de connexion, synchronisation des réglages. |
+| Langue | **Français uniquement.** Le parseur ne lit que des logs en français ; le catalogue embarqué ne garde que les noms français ; aucune internationalisation n'est portée depuis le site. |
+| Images du jeu | **wakassets + un petit CDN sur le dépôt GitHub de l'overlay** pour ce que wakassets n'a pas (§5). |
+| Interface d'historique | **Une vraie fenêtre autonome**, distincte des fenêtres overlay, navigable comme une application. |
+| Périmètre porté | Uniquement ce que l'overlay n'a pas : **historique des combats, récaps, achats, échanges, pactes**. Le suivi, les alertes sonores, les personnages, les alertes de chat existent déjà dans l'overlay et ne sont pas repris du site. |
+| « À propos » | Quitte la modale d'options de l'overlay et devient une page de la fenêtre autonome. |
+| Pages légales | **Restent sur le site** `wakfu-companion.com` (réécrites pour le nouveau contexte) ; l'application y renvoie par des liens. |
+| Site `wakfu-companion.com` | Conservé, réduit à **une page de présentation statique en français**, sans base ni API, hormis la Function de téléchargement (§10). |
+| Historique déjà en ligne | **Importé une fois** dans la base locale avant l'arrêt des serveurs (§8). |
+
+## 2. État des lieux (mesuré le 2026-11-27)
+
+### 2.1 Ce que l'overlay a déjà
+
+- Le moteur produit **déjà** tous les événements d'historique : `overlay-engine/src/history.rs`
+  (`FightPayload`, `PurchasePayload` — récupération de kamas HDV comprise via
+  `__hdv_kamas_sale__` —, `TradePayload`, `PactExtractionPayload`), chacun avec sa signature de
+  contenu, livrés par `Engine::drain_sync_events()`.
+- Ils partent aujourd'hui dans une **file d'envoi** SQLite (`overlay-sync/src/queue.rs`,
+  `rusqlite` bundled) puis sont **supprimés** dès que le serveur les accepte. Rien n'est relu pour
+  être affiché ; le moteur ne garde que 20 combats en mémoire (`MAX_TRACKED_FIGHTS`).
+- Le regroupement de runs de donjon est déjà porté (`overlay-engine/src/dungeon_run.rs`).
+- Dépendances utiles déjà présentes : `rusqlite`, `serde_json`, `ureq`, `image` (png, webp),
+  `flate2`, `rfd`, `directories`.
+- Design system : `window`, `tabs`, `table` (calquée sur l'historique HDV du jeu), `pagination`,
+  `scroll_area`, `collapsible`, `stepper`, `input`, `select`, `tooltip`, `item_slot`, `meter`… —
+  `table` et `pagination` ne sont encore utilisées par aucun panneau.
+- Le panneau Combat sait déjà dessiner le détail d'un combat (barres, ventilation par sort et par
+  élément : `combat_bars`, `combat_spell_block`) ; le bandeau Récap sait dessiner une bande
+  d'indicateurs (`panels/recap.rs`).
+- **Manquent** : un stockage d'historique persistant, toute interface d'historique, une fenêtre
+  normale redimensionnable (seule la fenêtre de connexion n'est pas une fenêtre overlay
+  aujourd'hui), et l'indépendance vis-à-vis de la session (catalogue, icônes et référentiels
+  exigent un jeton depuis le 2026-09-20).
+
+### 2.2 Ce que le site affiche (à reproduire)
+
+Volumes du code d'historique côté site, hors tests : ~6 500 lignes pour les six vues, ~2 650 pour
+les composants partagés, ~2 900 pour les services et utilitaires utiles à l'affichage (le reste,
+~1 200 lignes, ne sert qu'à l'envoi). Côté serveur, la partie lecture se résume aux cinq `GET`
+d'historique et à `functions/api/v1/history/stats.ts` (548 lignes, 13 requêtes SQL) ; la partie
+ingestion recalcule le rattachement aux runs de donjon (`server/history/dungeon-run.ts`, 473 l.)
+et le type de combat (`fight-type.ts`, 189 l.).
+
+Le site n'utilise **aucune bibliothèque de graphiques** (barres CSS seulement), n'a **aucun export**
+d'historique et **aucune comparaison** entre périodes.
+
+### 2.3 Volumes de données
+
+| Donnée | Taille | Remarque |
+| --- | --- | --- |
+| Catalogue complet (`wakfu-companion/repository/*.json`) | 8,6 Mo bruts | 11 844 objets, 1 252 monstres, 140 donjons, 156 familles |
+| Index compact actuel (4 langues) | 349 Ko gzip | Déjà embarqué en repli (480 Ko) ; français seul ≈ −60 % sur les noms |
+| Images wakassets utilisées | ~161 Mo, ~15 000 PNG | `items` 82 Mo, `monsters` 43, `bossIllustrations` 14, `spells` 11, `monsterIllustrations` 9,2, petits dossiers ~2 Mo |
+| Images absentes de wakassets | ~430 fichiers, ~3–5 Mo estimés | Détail §5.3 |
+| `public/` du site utile à l'overlay | ~300 Ko | En-têtes du récap, brèches, `rarity-base`, `unknown-entity`, quelques pictos |
+| Historique local d'un joueur intensif | quelques dizaines de Mo par an (estimation) | **À mesurer** sur un import réel (§12, phase 2) |
+
+## 3. Périmètre fonctionnel
+
+### 3.1 Vues à porter
+
+**Combats** (site : `features/fight-history/`)
+- Recherche insensible à la casse et aux accents sur les noms des combattants et du butin ; un run
+  de donjon reste entier si l'un de ses combats correspond.
+- Regroupement au choix : **par jour** (Aujourd'hui / Hier / Avant-hier / date) ou **par donjon et
+  famille** (sections fixes : donjons 2/3/4 salles, 3 joueurs, boss ultime, brèche, brèche ultime,
+  arcade, puis familles). Le mode « Origine » (session / compte) du site disparaît : il n'y a plus
+  qu'une origine.
+- Groupes repliables, état mémorisé ; bouton tout replier / tout déplier.
+- Runs de donjon regroupés en une entrée repliable (salles, archimonstre facultatif, salles
+  rejouées, tentatives de boss multiples), avec badge de pierre de donjon si elle a été obtenue.
+- Ligne de combat : heure (date complète en infobulle), illustration (boss > archimonstre >
+  dominant > plus gros dégâts, repli brèche), résultat (gagné / perdu / interrompu), tours et durée.
+- Détail déplié : onglets Dégâts / Armure / Soins, total ou par tour, alliés et ennemis avec barre
+  proportionnelle, KO, fuite, ventilation par sort et par élément ; butin (kamas, recherche, tri
+  A→Z / quantité / rareté) ; XP par personnage. L'en-tête d'un combat déplié reste collé en haut.
+- Bandeau « combat en cours » : **non porté** — c'est le rôle du panneau Combat de l'overlay.
+
+**Récap** (site : `features/session-recap/`)
+- Granularités : **session, jour, mois, année** (pas de semaine).
+- Navigation de période : précédent / suivant, libellés relatifs, sélecteur calendrier (grille des
+  jours, des mois, de la décennie). Bornes calculées dans le calendrier local, sans piège
+  d'heure d'été.
+- Trois modes de détail : **cumulé** (bande d'indicateurs : XP, kamas nets avec ventilation
+  combat / ventes HDV / achats / échanges reçus / donnés, combats gagnés–perdus, défis
+  réussis–échoués ; XP par personnage ; butin de la période ; pactes), **par donjon et famille**
+  (accordéon par section, mini-bande d'indicateurs, XP, butin), **par type de donjon** (les 7 types
+  toujours affichés, grisés à zéro, plus « Autres »).
+
+**Achats** (site : `features/purchases/`)
+- Recherche (nom d'objet, date), tri récent / ancien, groupes par jour avec total dépensé.
+- Achats agrégés par objet dans la journée ; la récupération de kamas HDV est épinglée en tête du
+  jour avec l'icône `itemTypes/614`.
+
+**Échanges** (site : `features/trades/`)
+- Recherche (partenaire, date, objet), tri, groupes par jour avec nombre d'échanges.
+- Chaque échange : « moi ⇄ partenaire », kamas reçus / donnés, colonnes Acquis / Donnés.
+
+**Pactes** (site : `features/pact/`)
+- Recherche (date, objet), tri, groupes par jour ; chaque extraction : nombre d'objets et liste.
+
+**À propos** : version, mise à jour, liens (site, code source, CGU d'Ankama, pages légales du site),
+soit le contenu actuel de `panels/a_propos_tab.rs`.
+
+### 3.2 Non portés
+
+Tout le reste du site : suivi en direct, alertes, personnages, filtres de chat (déjà dans
+l'overlay), profil, personnalisation du tableau de bord et des panneaux, thèmes clairs et modes
+daltoniens, onboarding, export RGPD du compte, sessions actives, correction manuelle d'objets
+homonymes (à reconsidérer plus tard si le besoin réapparaît), internationalisation.
+
+## 4. Données de référence embarquées
+
+- Un `xtask` génère, depuis `wakfu-companion/repository/*.json`, un catalogue **français seul** :
+  objets (id, nom, gfxId, rareté, catégorie, recette, `wakassets_available`), monstres (id, nom,
+  gfxId, famille, boss / archi / dominant, `wakassets_available`), donjons, familles, catégories.
+  Il remplace `catalog-index.json.gz` et est embarqué par `include_bytes!` (≲ 1,5 Mo gzip).
+- **Plus aucun appel** à `/api/v1/catalog/*`, `/dungeons`, `/monster-families`, `/items/{id}` : le
+  catalogue suit les releases. `catalog_cache.rs`, `reference_data_cache.rs` et le bandeau
+  « catalogue daté » disparaissent.
+- `CatalogIndex` perd les colonnes en/es/pt et leur indexation (`catalog.rs`).
+- Les serveurs de jeu (`/api/v1/game-servers`) deviennent une liste embarquée.
+
+## 5. Images du jeu
+
+### 5.1 Ordre de résolution
+
+1. Cache disque (`data/icons/{dossier}/{gfxId}.png`, mécanisme actuel d'`icon_cache.rs`).
+2. Images embarquées dans l'exe : petits dossiers (`rarities`, `itemTypes`, `monstersfamily`,
+   `icons`, `aptitudes`, ~2 Mo) et assets d'interface repris du site (~300 Ko).
+3. Si l'entrée du catalogue porte `wakassets_available = false` : **CDN de l'overlay**.
+4. Sinon : **wakassets**, au commit épinglé
+   (`https://raw.githubusercontent.com/Vertylo/wakassets/9159bb1/{dossier}/{gfxId}.png`).
+
+Le drapeau du catalogue évite les allers-retours en 404. `remote_icons.rs` garde sa mécanique
+(4 téléchargements parallèles, cache de textures par fenêtre) ; seules les URL changent et le
+jeton disparaît. Un joueur ne télécharge en pratique que ce qu'il voit : quelques Mo à quelques
+dizaines de Mo, pas les 161 Mo.
+
+### 5.2 CDN de l'overlay (GitHub Pages)
+
+- Le dépôt `Oumbra/wakfu-companion-overlay` est public : GitHub Pages est gratuit.
+- Un dossier `cdn/` à la racine, avec la même arborescence que wakassets (`items/`, `monsters/`,
+  `bossIllustrations/`, `monstersfamily/`…).
+- Un workflow `pages.yml` (`actions/upload-pages-artifact` avec `path: cdn/`, puis
+  `actions/deploy-pages`) ne publie **que** ce dossier, sur push vers `main` touchant `cdn/**`. Pas
+  de branche `gh-pages`.
+- URL : `https://oumbra.github.io/wakfu-companion-overlay/{dossier}/{gfxId}.png`.
+- Limites GitHub Pages : site ≤ 1 Go, bande passante indicative 100 Go/mois — très au-delà du
+  besoin, chaque image n'étant téléchargée qu'une fois par poste.
+- Le déploiement suit `main`, donc les releases : catalogue embarqué et images manquantes arrivent
+  ensemble.
+
+### 5.3 Ce qui manque à wakassets
+
+Mesuré contre le commit `9159bb1` (2026-07-02, dernière mise à jour du dépôt) :
+
+| Type | Total | Absents | Dont disponibles sur `static.ankama.com` |
+| --- | --- | --- | --- |
+| Objets | 11 844 | 356 (surtout rares et mythiques) | 159 |
+| Monstres | 1 252 | 60 | 5 |
+| Illustrations de donjons | 140 | 13 (surtout des brèches) | — |
+| Familles | 156 | 2 | — |
+
+Environ 270 images n'ont aucune source web connue : elles sont à extraire des fichiers du client de
+jeu. Le script qui alimente `cdn/` et met à jour le drapeau `wakassets_available` est à écrire
+avec l'`xtask` du catalogue.
+
+## 6. Stockage local
+
+### 6.1 Fichier et schéma
+
+- `data/history.sqlite3`, à côté des autres fichiers de données (`app_dirs.rs`). Mode WAL.
+- Schéma calqué sur les tables d'historique Neon (`wakfu-companion/server/db/schema.ts`), sans
+  `user_id` : `fights`, `fight_participants`, `fight_loot`, `purchases`, `trades`, `trade_items`,
+  `pact_extractions`, `pact_extraction_items`. Les ventilations par sort restent en JSON dans
+  `fight_participants`, comme en base aujourd'hui.
+- Idempotence : contrainte `UNIQUE (kind, signature)` et `INSERT … ON CONFLICT DO NOTHING`. La
+  signature produite par le moteur suffit ; `clientKey` (qui mélangeait l'uid) disparaît.
+- Index sur les horodatages (`started_at`, `occurred_at`) pour les listes et les agrégats par
+  période, sur `dungeon_id` / `dungeon_run_key` / `fight_type` pour les regroupements.
+- Versionnement du schéma par `PRAGMA user_version` et migrations dans le code.
+
+### 6.2 Écriture
+
+- Le thread moteur continue de vider `drain_sync_events()` ; un thread d'écriture remplace le
+  thread de synchronisation et insère par transactions groupées. Pas de réseau, pas de backoff.
+- Le recalcul fait aujourd'hui par le serveur à l'ingestion est porté : rattachement d'un combat à
+  son run de donjon sur **tout** l'historique (`dungeon-run.ts`) et type de combat (`fight-type.ts`).
+
+### 6.3 Lecture et agrégats
+
+- Les listes se lisent page par page (curseur sur horodatage + id), jamais en entier : la mémoire
+  reste indépendante de la taille de l'historique (budget de 300 Mo inchangé).
+- Les agrégats du récap reprennent `stats.ts` en SQL SQLite, avec ses règles à reproduire
+  exactement :
+  1. exclure tout combat contenant un ennemi de la famille 161 (« Extra Incarnam ») ;
+  2. un run de donjon (et ses victoires / défaites) ne compte que les combats contenant un boss ;
+  3. famille représentative d'un combat hors donjon : boss > archimonstre > dominant > plus gros
+     dégâts ;
+  4. ventes HDV et achats séparés par la sentinelle `__hdv_kamas_sale__`.
+- La granularité « session » reste calculée en mémoire par le moteur, comme aujourd'hui.
+
+## 7. Fenêtre application
+
+- Fenêtre winit **normale** : niveau normal, icône dans la barre des tâches, redimensionnable,
+  taille et position mémorisées. Elle vit à côté des fenêtres overlay, dans le même processus.
+- Ouverte depuis la modale d'options, le menu de la zone de notification et un raccourci. Un
+  paramètre de page (`Combats`, `Récap`, `Achats`, `Échanges`, `Pactes`, `À propos`) permet à
+  l'overlay de l'ouvrir directement au bon endroit.
+- Navigation par onglets en haut ; pied de page avec liens vers les pages légales du site et la
+  mention imposée par la licence des données Ankama : « WAKFU MMORPG : © 2012-[année en cours]
+  Ankama Studio. Tous droits réservés. », année calculée.
+- **Deux hôtes à câbler** : `main.rs` (Windows) et `bin/wakfu-companion-overlay-x11.rs` (Linux).
+- Design system de l'overlay, complété par cinq composants (skill `ui-component`) :
+  1. interrupteur segmenté à icônes (le `.icon-switch` du site) ;
+  2. en-tête de groupe repliable et collant (jour, donjon, run) ;
+  3. sélecteur de période (jours / mois / décennie) ;
+  4. liste de butin avec recherche et tri ;
+  5. ligne d'échange en deux colonnes (acquis / donnés).
+  Le détail d'un combat réutilise le rendu du panneau Combat ; la bande d'indicateurs du récap
+  réutilise celle du bandeau Récap.
+
+## 8. Import de l'historique en ligne
+
+- Une version de transition propose, dans la fenêtre application, « Récupérer mon historique en
+  ligne » : connexion (appairage existant) une dernière fois, puis lecture paginée de
+  `GET /api/v1/history/{fights,purchases,trades,pacts}` (`limit=200`, curseur `before`), insertion
+  dans la base locale avec dédoublonnage par signature, barre de progression.
+- Les GET renvoient déjà `dungeonId`, `dungeonRunKey` et `fightType` : rien à recalculer pour les
+  combats importés.
+- Une fois l'import fait (ou refusé), le jeton est effacé.
+- Le site garde ces endpoints et l'authentification **le temps d'une période d'import annoncée**,
+  puis Functions et Neon sont arrêtés.
+
+## 9. Retrait du compte et de la connexion
+
+À faire **après** la période d'import (l'import a besoin de la connexion une dernière fois).
+
+| Zone | Contenu retiré |
+| --- | --- |
+| `overlay-sync` | `pairing.rs`, `token_store.rs`, `session.rs`, `queue.rs`, l'authentification de `client.rs`, `catalog_cache.rs`, `reference_data_cache.rs` ; le crate se réduit à la mise à jour signée et au téléchargement d'icônes |
+| `overlay-ui` | `panels/login.rs` (connexion, appairage), les threads Auth / Sync / Catalogue / Donjons de `background.rs`, les branches compte de `main.rs`, du binaire X11, d'`engine_thread.rs`, de `render_content.rs`, d'`options_modal.rs`, l'onglet « À propos » de la modale |
+| `local_data.rs` | Le périmètre `OnDisconnect` disparaît ; `Everything` reste |
+| Moteur | Roster, liste de suivi et profil d'alertes ne viennent plus de `GET /api/v1/settings` : ils sont déjà locaux (`config.toml`), les branches de fusion avec le compte disparaissent |
+| Dépendances | `keyring` (et `secret-service` sous Linux) |
+| Build | `overlay-sync/build.rs` (base d'API par profil), `WAKFU_COMPANION_API_URL` |
+
+## 10. Site `wakfu-companion.com` (dépôt `wakfu-companion`)
+
+- **Une page de présentation statique, en français**, qui défile : fonctionnalités de l'overlay et
+  de la fenêtre historique, captures, lien de téléchargement direct en bas de page, sans connexion.
+- **Pages légales** sur le site, réécrites :
+  - *Mentions légales* : l'hébergement ne cite plus Neon ; il cite Cloudflare (page statique et
+    téléchargement), GitHub (distribution, CDN d'images) et wakassets ; la propriété
+    intellectuelle couvre aussi les images publiées sur le CDN de l'overlay.
+  - *Politique de confidentialité* : aucune donnée collectée ; tout reste sur le poste (liste des
+    fichiers et emplacements) ; seules connexions sortantes : vérification de mise à jour et
+    téléchargement d'images, chez GitHub, qui voit l'adresse IP ; notification de tour lue en
+    local ; effacement par la purge locale ou la désinstallation.
+  - *Conditions d'utilisation* : retrait du compte, de l'âge minimum, de la suppression de compte,
+    de l'export du profil et de l'historique conservé sur nos serveurs ; maintien de la
+    description passive de l'outil, de la position vis-à-vis d'Ankama, des raccourcis optionnels
+    qui tapent dans le chat, de l'absence de garantie, de la responsabilité, de l'évolution du
+    service et du droit applicable.
+- **Function de téléchargement conservée** (`functions/api/v1/overlay/download/[platform].ts`) :
+  elle relaie le binaire gzip avec `Content-Encoding: gzip` et livre un `.exe` directement
+  exécutable. C'est la seule Function restante, dans l'offre gratuite de Cloudflare.
+- `contact@wakfu-companion.com` reste l'adresse de contact.
+- Tout le reste disparaît : Angular, service worker, autres Functions, Neon, workflows RGPD.
+
+## 11. Phase 2 — sauvegarde chiffrée (plus tard)
+
+- Export de la base locale, **chiffré avant envoi** avec une clé dérivée d'une phrase secrète
+  (Argon2id) ; déchiffré à la récupération.
+- Destination au choix de l'utilisateur (dossier, disque, service de stockage), ou espace géré par
+  Wakfu Companion qui ne stocke qu'un blob opaque, lié à un identifiant et protégé par
+  authentification forte, sans jamais connaître la clé.
+- Conséquence assumée : phrase secrète perdue = sauvegarde illisible.
+
+## 12. Phases
+
+| Phase | Contenu | Critère de sortie |
+| --- | --- | --- |
+| **0 — Données** | `xtask` catalogue français embarqué ; petites images embarquées ; dossier `cdn/` + `pages.yml` ; nouvelle résolution d'icônes | L'overlay démarre et résout noms et icônes sans jeton ni API |
+| **1 — Stockage** | `history.sqlite3`, écriture depuis le moteur, recalcul runs de donjon et type de combat | Rejeu 10× du même log : aucun doublon ; totaux identiques au site sur un même log |
+| **2 — Import** | Version de transition avec import de l'historique en ligne | Historique d'un compte réel importé, volume mesuré, totaux identiques au site |
+| **3 — Fenêtre** | Fenêtre application, 5 composants, vues Combats / Récap / Achats / Échanges / Pactes / À propos, Windows et X11 | Parité fonctionnelle avec le site sur le périmètre §3.1 ; captures de référence |
+| **4 — Nettoyage** | Retrait compte et connexion (§9), du multilingue du catalogue, mise à jour de `plan-architecture.md` | Plus aucun appel à `wakfu-companion.com` hors liens ouverts dans le navigateur |
+| **5 — Site** | Page statique, pages légales réécrites, arrêt des Functions (sauf téléchargement) et de Neon | Coût d'hébergement nul hors domaine |
+| Plus tard | Sauvegarde chiffrée (§11) | — |
+
+## 13. Décisions ouvertes
+
+1. **Écran de chargement** : garder un écran d'attente au démarrage (aujourd'hui dans
+   `panels/login.rs`), ou démarrer directement les fenêtres overlay ?
+2. **Durée de la période d'import** avant l'arrêt de Neon.
+3. **Images absentes sans source web** (~270) : méthode d'extraction depuis le client de jeu.
+
+## 14. Risques
+
+- **Dépendance à wakassets**, dépôt tiers non mis à jour depuis juillet 2026 : le cache local
+  protège les images déjà vues ; en dernier recours, le CDN de l'overlay peut héberger davantage
+  de dossiers.
+- **Parité des agrégats** avec le site : les règles §6.3 sont subtiles ; les comparer sur un même
+  log et un même import avant l'arrêt du site.
+- **Deux hôtes** (Windows, X11) pour une fenêtre de plus : coût de câblage doublé, harnais
+  `overlay-testkit` à étendre.

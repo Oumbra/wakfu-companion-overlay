@@ -5,6 +5,15 @@
 > Ce document remplace le plan v1 : contraintes révisées (RAM ≤ 300 Mo, **Windows + Linux
 > uniquement**, macOS hors périmètre) et périmètre élargi à la **synchronisation serveur**.
 
+> ⚠️ **Virage du 2026-11-27 — overlay 100 % local.** L'overlay devient l'unique outil : il conserve
+> et affiche lui-même l'historique (SQLite local, en clair), sans compte, sans appairage, sans
+> API ; catalogue embarqué en français seul ; images depuis wakassets et un CDN GitHub Pages du
+> dépôt ; le site `wakfu-companion.com` se réduit à une page de présentation statique. Le plan de
+> référence de ce virage est [`plan-historique-local.md`](plan-historique-local.md). Les sections
+> qu'il remplace (§7, §7.5, §8 pour la purge, §9.1 undecies, §10 pour les hôtes, les données
+> locales et le jeton, §12 lots L4/L5, §14 points 2, 3 et 5) portent un renvoi et restent ici comme
+> journal des décisions passées.
+
 ---
 
 ## 0. Ce qui change par rapport au plan v1
@@ -16,6 +25,10 @@
 | Fichier lu | `wakfu-chat.log` | **`wakfu.log`** (nom réel, enveloppe log Java du client) |
 | Données | « extraire des JSON du dépôt web » | Le catalogue est en **Postgres/Neon derrière une API** — consommation via `GET /api/v1/catalog/` |
 | Serveur | absent du plan | **Synchronisation historique combats / achats HDV / kamas HDV / échanges / extractions de pacte**, idempotente, sur l'API existante |
+
+**v3 (2026-11-27)** : le catalogue redevient embarqué (généré depuis les JSON du dépôt web, français
+seul) et la synchronisation serveur est abandonnée au profit d'un historique local — voir
+[`plan-historique-local.md`](plan-historique-local.md).
 
 ---
 
@@ -629,6 +642,13 @@ bornée au cadre, le côté reste une case des Options), et suit tout déplaceme
 
 ## 7. Synchronisation serveur
 
+> ⚠️ **Remplacé le 2026-11-27** par [`plan-historique-local.md`](plan-historique-local.md) : les
+> événements ci-dessous ne partent plus vers l'API, ils sont écrits dans `history.sqlite3` sur le
+> poste (§6 du nouveau plan). L'appairage (§7.2) ne sert plus qu'à l'import unique de l'historique
+> en ligne (§8 du nouveau plan), puis disparaît avec la file d'envoi (§7.3) et la synchro des
+> compteurs de Suivi (§7.4). Le contenu de cette section reste valable comme description du modèle
+> d'événements et de leurs signatures.
+
 ### 7.1 Ce qui est envoyé (parité web stricte)
 
 | Événement | Endpoint | Contenu clé |
@@ -892,6 +912,11 @@ DERNIER instantané compte.
 
 ### 7.5 Catalogue
 
+> ⚠️ **Remplacé le 2026-11-27** ([`plan-historique-local.md`](plan-historique-local.md) §4 et §5) :
+> le catalogue, les donjons, les familles et les serveurs de jeu sont **embarqués** (français seul,
+> générés par un `xtask` depuis `wakfu-companion/repository/*.json`) ; les icônes viennent de
+> wakassets ou du CDN GitHub Pages du dépôt, sans jeton. Plus aucun appel à l'API pour ces données.
+
 - `GET /api/v1/catalog/version` au démarrage → si changement, `GET /api/v1/catalog/` (≈ 349 Ko gzip).
 - **Session requise (2026-09-20).** Côté `wakfu-companion` (`docs/analyse-cgu.md`, recommandation
   4 : la licence de données WAKFU n'autorise ni sous-licence ni cession), `catalog/*`,
@@ -934,6 +959,9 @@ DERNIER instantané compte.
   d'affichage) et **échoue la CI au-dessus de 300 Mo**.
 - Plafonds internes : chat borné à N messages, historique de session borné, purge des combats
   archivés déjà synchronisés (l'historique long terme vit côté serveur, pas en RAM).
+  **Depuis le 2026-11-27**, l'historique long terme vit dans `history.sqlite3` sur le poste, lu page
+  par page et agrégé en SQL : il ne réside toujours pas en RAM, le budget reste inchangé
+  ([`plan-historique-local.md`](plan-historique-local.md) §6.3).
 
 ---
 
@@ -1722,6 +1750,11 @@ mort — et l'utilisateur prévenu que l'exigence n'y est pas tenue.
   du panneau beige uniforme, ou relevé sur une capture plein écran — en attente.
 
 ### 9.1 undecies Fenêtre de connexion, compte obligatoire, icône de zone de notification (2026-09-14)
+
+> ⚠️ **Remplacé le 2026-11-27** ([`plan-historique-local.md`](plan-historique-local.md) §9) : le
+> compte n'est plus obligatoire, il disparaît. La fenêtre de connexion et l'appairage sont retirés
+> après la période d'import ; le sort de l'écran de chargement est une décision ouverte (§13 du
+> nouveau plan). L'icône de zone de notification reste.
 
 Demande utilisateur : « une fenêtre de connexion au démarrage quand aucun jeton n'est détecté »,
 première interface de l'overlay, et **plus aucun mode invité, jamais** — un compte Wakfu Companion
@@ -2917,6 +2950,13 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
 
 ## 10. Sécurité, vie privée, conformité
 
+> ⚠️ **Virage du 2026-11-27** ([`plan-historique-local.md`](plan-historique-local.md)) : aucun
+> historique ne quitte plus le poste ; les seuls hôtes contactés deviennent GitHub (mise à jour,
+> CDN d'images de l'overlay, wakassets) ; « Se déconnecter », le jeton de session et la purge
+> `Scope::OnDisconnect` disparaissent avec le compte. Les points ci-dessous sur la lecture de la
+> fenêtre de jeu, les entrées synthétiques, le contenu hostile du log et la signature des mises à
+> jour restent valables.
+
 - **Contrainte de conception non négociable** : la source des données de jeu est un fichier texte
   produit par le jeu (`wakfu.log`), et rien d'autre. Jamais de lecture mémoire, jamais d'injection
   DLL/hook. C'est la posture déjà tenue par l'app web ; l'overlay ne l'élargit pas.
@@ -3142,6 +3182,10 @@ glyphes est au manifeste (`tokens::ICON_BUTTON_CONTENT`, 18px pour un socle de 3
 | **L5 — Synchro** ✅ fait | file SQLite, lots, backoff, idempotence | Rejeu 10× du même log ⇒ **aucun** doublon en base, y compris en alternant web et overlay — **fait (2026-09-02)** : `overlay_engine::history` (signatures + payloads fight/purchase/trade) + `overlay_engine::log_time` (dates réelles depuis `LogDateAnchor`) + `overlay_sync::queue::SyncQueue` (file SQLite idempotente, lots de 50, backoff 15s→5min, abandon après 10 tentatives non réseau — testé par rejeu 10x, critère de sortie ci-contre) + câblage `overlay-ui` (thread Sync dédié, activé/désactivé avec le compte). **Complété (2026-09-02, suite, depuis le dépôt web local)** : ventilation par sort/élément, xpGained par participant ET total du combat, résolution monsterId/itemId par catalogue, gameServer (déduit du roster), récupération de kamas HDV sans achat adjacent. **Clôturé (2026-09-02, suite — demande explicite du mainteneur de lever les deux limites restantes)** : regroupement de donjon multi-salles complet (`overlay_engine::dungeon_run`, port direct de `dungeon-run-grouping.util.ts` + `findDungeonForEnemies` 3 priorités, siblings renvoyés avec le rattachement une fois le run complété — voir §7.3) ET branchement réel `overlay-ui` (`spawn_dungeon_thread`, `GET /api/v1/dungeons` → `Engine::set_dungeons`) : `dungeonId`/`dungeonRunKey` sont désormais alimentés en production, plus seulement prêts côté moteur. **Reste** : rien — voir §7.3 pour le seul renoncement volontaire restant (`turns`, jamais utilisé) |
 | **L6 — Packaging** 🟡 en cours | AppImage, installeur, mise à jour signée | Installation propre sur une machine vierge Windows et Linux — **mise à jour signée : plan et phase 0 faits le 2026-09-15** ([`plan-mise-a-jour.md`](plan-mise-a-jour.md) : profil release, API prod par défaut, procédure des clés) ; installeur et AppImage restent à faire |
 
+> **2026-11-27** : les lots L4 (auth native) et L5 (synchro) seront démantelés par le virage 100 %
+> local, et L3 (catalogue) revu (catalogue embarqué, plus de fetch). La suite de la feuille de
+> route est la table des phases de [`plan-historique-local.md`](plan-historique-local.md) §12.
+
 S1/S2/S3 étaient prévus **bloquants** (ils peuvent remettre en cause la stack). **Décision du
 mainteneur (2026-08-31) : S3 est reporté** faute de machine Linux disponible pour l'instant — S1 et
 S2 ont validé la stack sur Windows, suffisant pour démarrer L1. S3 reste à faire **avant** tout
@@ -3239,6 +3283,11 @@ entre deux clients qui écrivent dans la même base est permanent et invisible.
 ---
 
 ## 14. Décisions ouvertes (à trancher par le mainteneur)
+
+> **2026-11-27** : les points 2 (auth native) et 3 (synchro du Suivi vers le compte) deviennent
+> sans objet avec le virage 100 % local ; le point 5 est tranché — **français uniquement**,
+> définitivement ([`plan-historique-local.md`](plan-historique-local.md) §1). Les décisions
+> ouvertes du virage sont listées au §13 du nouveau plan.
 
 1. ~~**Moteur** : QuickJS embarqué ou port Rust intégral ?~~ **Tranché par S2 (voir
    `spikes/s2-engine-quickjs/`) : QuickJS embarqué, confirmé.** Correction validée sur
