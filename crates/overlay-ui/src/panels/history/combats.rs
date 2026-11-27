@@ -6,8 +6,11 @@
 //! Le modèle ([`entries`], [`matches`], [`illustration`]) est séparé du rendu : c'est lui que les
 //! tests comparent au site.
 //!
-//! **Pas encore porté** : le regroupement « Donjons & familles », la vue par tour et la ventilation
-//! par sort (le JSON des sorts n'est pas relu), le tri et la recherche du butin.
+//! Un clic sur un combattant déplie ses sorts (nom, part par élément, total), lus dans la base à
+//! la demande ([`HistoryStore::participant_spells`]) puis gardés jusqu'au prochain changement de la
+//! base.
+//!
+//! **Pas encore porté** : la vue par tour, le tri et la recherche du butin.
 
 use std::collections::{HashMap, HashSet};
 
@@ -15,7 +18,7 @@ use chrono::NaiveDate;
 use egui::{Align2, Color32, Rect, Sense, Ui};
 use overlay_engine::roster::normalize_wakfu_name;
 use overlay_engine::{CatalogIndex, DungeonIndex, IconRef, WakfuDungeonType};
-use overlay_history::read::{FightRow, ParticipantRow};
+use overlay_history::read::{FightRow, ParticipantRow, SpellColumn, SpellLine};
 use overlay_history::HistoryStore;
 
 use super::items::{self, CompactRow, DayTail, ListState};
@@ -313,7 +316,7 @@ pub fn fight_count(count: usize) -> String {
 }
 
 /// La grandeur mesurée dans le détail d'un combat.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Metric {
     #[default]
     Damage,
@@ -329,6 +332,38 @@ impl Metric {
             Metric::Heal => participant.heal,
         }
     }
+
+    fn column(self) -> SpellColumn {
+        match self {
+            Metric::Damage => SpellColumn::Damage,
+            Metric::Armor => SpellColumn::Armor,
+            Metric::Heal => SpellColumn::Heal,
+        }
+    }
+}
+
+/// Un combattant d'un combat : `(id du combat, nom, rang de l'instance)`.
+pub type ParticipantKey = (i64, String, i64);
+
+fn participant_key(fight_id: i64, participant: &ParticipantRow) -> ParticipantKey {
+    (
+        fight_id,
+        participant.name.clone(),
+        participant.instance_index,
+    )
+}
+
+/// Ce qui est déplié dans les combats, et les sorts déjà lus.
+#[derive(Default)]
+pub struct DetailState {
+    /// Combats dépliés.
+    pub expanded: HashSet<i64>,
+    /// Grandeur choisie pour chaque combat déplié.
+    pub metric: HashMap<i64, Metric>,
+    /// Combattants dépliés (leurs sorts affichés).
+    pub open_participants: HashSet<ParticipantKey>,
+    /// Sorts lus, par combattant et grandeur — vidé quand la base change.
+    pub spells: HashMap<(ParticipantKey, Metric), Vec<SpellLine>>,
 }
 
 /// État de la vue.
@@ -339,12 +374,10 @@ pub struct CombatsState {
     pub mode: GroupMode,
     /// Groupes repliés (clé : [`FightGroup::key`]).
     pub collapsed_groups: HashSet<String>,
-    /// Combats dépliés.
-    pub expanded: HashSet<i64>,
+    /// Combats et combattants dépliés.
+    pub detail: DetailState,
     /// Runs de donjon dépliés (clé : [`Entry::key`]).
     pub expanded_runs: HashSet<i64>,
-    /// Grandeur choisie pour chaque combat déplié.
-    pub metric: HashMap<i64, Metric>,
 }
 
 const SUMMARY_HEIGHT: f32 = 40.0;
@@ -359,6 +392,21 @@ const BAR_TRACK: Color32 = Color32::from_rgba_premultiplied(14, 14, 14, 14);
 const ALLY_BAR: Color32 = Color32::from_rgb(0x3E, 0x9B, 0xD6);
 const ENEMY_BAR: Color32 = Color32::from_rgb(0xC9, 0x52, 0x4A);
 const PARTICIPANT_ROW: f32 = 28.0;
+/// Une ligne de sort sous un combattant déplié.
+const SPELL_ROW: f32 = 20.0;
+/// Couleurs des éléments (`--dmg-*`, thème sombre du site).
+fn element_color(element: &str) -> Color32 {
+    match element {
+        "Feu" => Color32::from_rgb(0xE9, 0x78, 0x2D),
+        "Air" => Color32::from_rgb(0xD6, 0x9D, 0xFC),
+        "Terre" => Color32::from_rgb(0x1B, 0x80, 0x45),
+        "Eau" => Color32::from_rgb(0x00, 0xE1, 0xFF),
+        "Lumière" => Color32::from_rgb(0xFF, 0xD7, 0x00),
+        "Stasis" => Color32::from_rgb(0xCF, 0x9F, 0xFF),
+        "Neutre" => Color32::from_rgb(0xCF, 0xCF, 0xCF),
+        _ => Color32::from_rgb(0x99, 0x99, 0x99),
+    }
+}
 const LOOT_ROW: CompactRow = CompactRow {
     height: 26.0,
     pad_x: 6.0,
@@ -378,9 +426,8 @@ pub fn show(
         list,
         mode,
         collapsed_groups,
-        expanded,
+        detail,
         expanded_runs,
-        metric,
     } = state;
     let ListState {
         query: search,
@@ -484,7 +531,7 @@ pub fn show(
             for entry in &group.entries {
                 match entry {
                     Entry::Single(fight) => {
-                        fight_block(ui, width, fight, false, expanded, metric, ctx, textures);
+                        fight_block(ui, width, fight, false, detail, ctx, textures);
                     }
                     Entry::Run { dungeon_id, fights } => {
                         let key = entry.key();
@@ -498,9 +545,7 @@ pub fn show(
                         }
                         if open {
                             for fight in fights {
-                                fight_block(
-                                    ui, width, fight, true, expanded, metric, ctx, textures,
-                                );
+                                fight_block(ui, width, fight, true, detail, ctx, textures);
                             }
                         }
                     }
@@ -532,22 +577,20 @@ fn fight_block(
     width: f32,
     fight: &FightRow,
     in_run: bool,
-    expanded: &mut HashSet<i64>,
-    metrics: &mut HashMap<i64, Metric>,
+    detail: &mut DetailState,
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
 ) {
-    let open = expanded.contains(&fight.id);
+    let open = detail.expanded.contains(&fight.id);
     if fight_summary(ui, width, fight, in_run, open, ctx, textures) {
         if open {
-            expanded.remove(&fight.id);
+            detail.expanded.remove(&fight.id);
         } else {
-            expanded.insert(fight.id);
+            detail.expanded.insert(fight.id);
         }
     }
     if open {
-        let metric = metrics.entry(fight.id).or_default();
-        fight_detail(ui, width, fight, metric, ctx, textures);
+        fight_detail(ui, width, fight, detail, ctx, textures);
     }
 }
 
@@ -715,11 +758,12 @@ fn fight_detail(
     ui: &mut Ui,
     width: f32,
     fight: &FightRow,
-    metric: &mut Metric,
+    detail: &mut DetailState,
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
 ) {
     let inner_width = width - 24.0;
+    let metric = detail.metric.entry(fight.id).or_default();
     let frame_top = ui.cursor().top();
     let shape = ui.painter().add(egui::Shape::Noop);
     ui.add_space(8.0);
@@ -737,13 +781,52 @@ fn fight_detail(
     ui.add_space(8.0);
     let column_gap = 16.0;
     let column_width = (inner_width - column_gap) / 2.0;
+    let metric = *metric;
     let allies: Vec<&ParticipantRow> = fight.participants.iter().filter(|p| p.is_ally).collect();
     let enemies: Vec<&ParticipantRow> = fight.participants.iter().filter(|p| !p.is_ally).collect();
-    let rows = allies.len().max(enemies.len()) as f32;
+    // Les sorts des combattants dépliés, lus une fois par grandeur.
+    for participant in &fight.participants {
+        let key = participant_key(fight.id, participant);
+        if detail.open_participants.contains(&key) {
+            let cache_key = (key, metric);
+            if !detail.spells.contains_key(&cache_key) {
+                let (fight_id, name, instance) = &cache_key.0;
+                let spells = ctx
+                    .store
+                    .map(|store| {
+                        store
+                            .participant_spells(*fight_id, name, *instance, metric.column())
+                            .unwrap_or_else(|err| {
+                                tracing::warn!(%err, "historique : sorts illisibles");
+                                Vec::new()
+                            })
+                    })
+                    .unwrap_or_default();
+                detail.spells.insert(cache_key, spells);
+            }
+        }
+    }
+    let spell_rows = |participant: &ParticipantRow| -> usize {
+        let key = (participant_key(fight.id, participant), metric);
+        if detail.open_participants.contains(&key.0) {
+            detail.spells.get(&key).map_or(0, Vec::len).max(1)
+        } else {
+            0
+        }
+    };
+    let column_height = |side: &[&ParticipantRow]| -> f32 {
+        side.iter()
+            .map(|p| PARTICIPANT_ROW + spell_rows(p) as f32 * SPELL_ROW)
+            .sum::<f32>()
+    };
     let (columns, _) = ui.allocate_exact_size(
-        egui::vec2(width, 22.0 + rows * PARTICIPANT_ROW),
+        egui::vec2(
+            width,
+            22.0 + column_height(&allies).max(column_height(&enemies)),
+        ),
         Sense::hover(),
     );
+    let mut toggled = None;
     for (index, (title, side, bar)) in [
         ("Alliés", &allies, ALLY_BAR),
         ("Ennemis", &enemies, ENEMY_BAR),
@@ -758,7 +841,26 @@ fn fight_detail(
             ),
             egui::vec2(column_width, columns.height()),
         );
-        participants_column(ui, column, title, side, *metric, bar, ctx, textures);
+        let clicked = participants_column(
+            ui,
+            column,
+            Column {
+                title,
+                side,
+                metric,
+                bar,
+                fight_id: fight.id,
+                detail,
+            },
+            ctx,
+            textures,
+        );
+        toggled = toggled.or(clicked);
+    }
+    if let Some(key) = toggled {
+        if !detail.open_participants.remove(&key) {
+            detail.open_participants.insert(key);
+        }
     }
     if fight.won && (fight.kamas_gained.unwrap_or(0) > 0 || !fight.loot.is_empty()) {
         ui.add_space(10.0);
@@ -845,16 +947,32 @@ fn section_title(ui: &mut Ui, width: f32, title: &str, kamas: Option<i64>, tail:
 /// Une colonne de combattants : titre, puis une ligne par combattant (icône, nom, valeur, part du
 /// camp et barre proportionnelle), triés par valeur décroissante.
 #[allow(clippy::too_many_arguments)]
+/// Ce qu'une colonne Alliés / Ennemis peint.
+struct Column<'a> {
+    title: &'a str,
+    side: &'a [&'a ParticipantRow],
+    metric: Metric,
+    bar: Color32,
+    fight_id: i64,
+    detail: &'a DetailState,
+}
+
+/// Une colonne de combattants, chacun dépliable sur ses sorts. Rend le combattant cliqué.
 fn participants_column(
     ui: &Ui,
     column: Rect,
-    title: &str,
-    side: &[&ParticipantRow],
-    metric: Metric,
-    bar: Color32,
+    Column {
+        title,
+        side,
+        metric,
+        bar,
+        fight_id,
+        detail,
+    }: Column<'_>,
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
-) {
+) -> Option<ParticipantKey> {
+    let mut clicked = None;
     let painter = ui.painter_at(column.expand(2.0));
     painter.text(
         column.left_top() + egui::vec2(0.0, 9.0),
@@ -874,8 +992,28 @@ fn participants_column(
             egui::vec2(column.width(), PARTICIPANT_ROW - 4.0),
         );
         let value = metric.of(participant);
+        let key = participant_key(fight_id, participant);
+        let open = detail.open_participants.contains(&key);
+        let response = ui
+            .interact(
+                row,
+                ui.id().with(("historique.combattant", &key)),
+                Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.clicked() {
+            tracing::info!(
+                ">>> clic historique.combats.combattant {} ({})",
+                participant.name,
+                if open { "replié" } else { "déplié" }
+            );
+            clicked = Some(key.clone());
+        }
         // Barre en fond de ligne, proportionnelle au meilleur du camp.
         painter.rect_filled(row, 3.0, BAR_TRACK);
+        if response.hovered() {
+            painter.rect_filled(row, 3.0, Color32::from_white_alpha(10));
+        }
         let fill = Rect::from_min_size(
             row.min,
             egui::vec2(row.width() * value as f32 / best as f32, row.height()),
@@ -926,8 +1064,15 @@ fn participants_column(
             text::label_strong_font(ui.ctx(), 13.0),
             Color32::WHITE,
         );
+        super::paint_caret(
+            ui,
+            &painter,
+            egui::pos2(icon_rect.right() + 12.0, row.center().y),
+            open,
+            tokens::OVERLAY_TEXT_MUTED,
+        );
         let name_rect = Rect::from_min_max(
-            egui::pos2(icon_rect.right() + 8.0, row.top()),
+            egui::pos2(icon_rect.right() + 22.0, row.top()),
             egui::pos2(value_rect.left() - 8.0, row.bottom()),
         );
         let name = if participant.defeated {
@@ -949,7 +1094,82 @@ fn participants_column(
             },
         );
         top += PARTICIPANT_ROW;
+        if open {
+            let spells = detail
+                .spells
+                .get(&(key, metric))
+                .map_or(&[][..], Vec::as_slice);
+            top = paint_spells(ui, &painter, column, top, spells);
+        }
     }
+    clicked
+}
+
+/// Les sorts d'un combattant déplié, sous sa ligne : nom, part par élément (en couleur), total.
+/// Rend le haut de la ligne suivante.
+fn paint_spells(
+    ui: &Ui,
+    painter: &egui::Painter,
+    column: Rect,
+    mut top: f32,
+    spells: &[SpellLine],
+) -> f32 {
+    let left = column.left() + 34.0;
+    let right = column.right() - 6.0;
+    if spells.is_empty() {
+        painter.text(
+            egui::pos2(left, top + SPELL_ROW / 2.0 - 2.0),
+            Align2::LEFT_CENTER,
+            "Aucun sort enregistré.",
+            text::label_font(ui.ctx(), 12.0),
+            tokens::TEXT_DISABLED,
+        );
+        return top + SPELL_ROW;
+    }
+    for spell in spells {
+        let center_y = top + SPELL_ROW / 2.0 - 2.0;
+        let total_rect = painter.text(
+            egui::pos2(right, center_y),
+            Align2::RIGHT_CENTER,
+            format::thousands(spell.total),
+            text::label_strong_font(ui.ctx(), 12.0),
+            Color32::WHITE,
+        );
+        let mut x = total_rect.left() - 10.0;
+        let mut elements = spell.by_element.clone();
+        elements.sort_by_key(|(_, value)| std::cmp::Reverse(*value));
+        // Un seul élément égal au total n'apprend rien : sa couleur suffit, sur le nom du sort.
+        let single = elements.len() == 1;
+        if !single {
+            for (element, value) in elements.iter().rev() {
+                let rect = painter.text(
+                    egui::pos2(x, center_y),
+                    Align2::RIGHT_CENTER,
+                    format::thousands(*value),
+                    text::label_font(ui.ctx(), 11.0),
+                    element_color(element),
+                );
+                x = rect.left() - 8.0;
+            }
+        }
+        let name_rect =
+            Rect::from_min_max(egui::pos2(left, top), egui::pos2(x, top + SPELL_ROW - 4.0));
+        let tint = elements
+            .first()
+            .filter(|_| single)
+            .map_or(tokens::OVERLAY_TEXT_MUTED, |(element, _)| {
+                element_color(element)
+            });
+        painter.with_clip_rect(name_rect).text(
+            egui::pos2(left, center_y),
+            Align2::LEFT_CENTER,
+            &spell.spell,
+            text::label_font(ui.ctx(), 12.0),
+            tint,
+        );
+        top += SPELL_ROW;
+    }
+    top
 }
 
 #[cfg(test)]
@@ -958,6 +1178,7 @@ mod tests {
 
     fn participant(name: &str, ally: bool, damage: i64) -> ParticipantRow {
         ParticipantRow {
+            instance_index: 0,
             name: name.to_string(),
             is_ally: ally,
             monster_id: None,

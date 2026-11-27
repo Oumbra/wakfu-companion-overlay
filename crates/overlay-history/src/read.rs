@@ -61,6 +61,8 @@ pub struct PactRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParticipantRow {
     pub name: String,
+    /// Rang de l'instance parmi les combattants du même nom (clé avec `name`).
+    pub instance_index: i64,
     pub is_ally: bool,
     pub monster_id: Option<i64>,
     pub class_name: Option<String>,
@@ -70,6 +72,23 @@ pub struct ParticipantRow {
     pub defeated: bool,
     pub fled: bool,
     pub xp_gained: i64,
+}
+
+/// La ventilation lue par [`HistoryStore::participant_spells`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SpellColumn {
+    Damage,
+    Heal,
+    Armor,
+}
+
+/// Un sort d'un combattant : son total et sa part par élément (`Feu`, `Eau`…), dans l'ordre du
+/// JSON enregistré.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpellLine {
+    pub spell: String,
+    pub total: i64,
+    pub by_element: Vec<(String, i64)>,
 }
 
 /// Un combat, ses combattants (dans l'ordre d'écriture) et son butin.
@@ -125,7 +144,7 @@ impl HistoryStore {
             .collect();
         let mut stmt = self.conn.prepare_cached(
             "SELECT fight_id, name, side, monster_id, class_name, damage, heal, armor, defeated,
-                fled, xp_gained
+                fled, xp_gained, instance_index
              FROM fight_participants ORDER BY fight_id, rowid",
         )?;
         let mut rows = stmt.query(params![])?;
@@ -142,6 +161,7 @@ impl HistoryStore {
                     defeated: row.get(8)?,
                     fled: row.get(9)?,
                     xp_gained: row.get(10)?,
+                    instance_index: row.get(11)?,
                 });
             }
         }
@@ -160,6 +180,42 @@ impl HistoryStore {
             }
         }
         Ok(fights)
+    }
+
+    /// Les sorts d'un combattant, du plus gros total au plus petit — lus à la demande, quand la
+    /// vue Combats déplie sa ligne : [`Self::fights`] ne charge pas ces JSON. Un JSON illisible
+    /// donne une liste vide.
+    pub fn participant_spells(
+        &self,
+        fight_id: i64,
+        name: &str,
+        instance_index: i64,
+        column: SpellColumn,
+    ) -> Result<Vec<SpellLine>, HistoryError> {
+        let sql = match column {
+            SpellColumn::Damage => {
+                "SELECT spells FROM fight_participants
+                 WHERE fight_id = ?1 AND name = ?2 AND instance_index = ?3"
+            }
+            SpellColumn::Heal => {
+                "SELECT heal_spells FROM fight_participants
+                 WHERE fight_id = ?1 AND name = ?2 AND instance_index = ?3"
+            }
+            SpellColumn::Armor => {
+                "SELECT armor_spells FROM fight_participants
+                 WHERE fight_id = ?1 AND name = ?2 AND instance_index = ?3"
+            }
+        };
+        let json: Option<String> = self
+            .conn
+            .prepare_cached(sql)?
+            .query_row(params![fight_id, name, instance_index], |row| row.get(0))
+            .map(Some)
+            .or_else(|err| match err {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                err => Err(err),
+            })?;
+        Ok(json.map(|json| parse_spells(&json)).unwrap_or_default())
     }
 
     /// Tous les achats, du plus récent au plus ancien.
@@ -274,4 +330,38 @@ impl HistoryStore {
         }
         Ok(pacts)
     }
+}
+
+/// `[{"spell": "Flèche explosive", "total": 29616, "byElement": {"Feu": 29616}}, …]` — le format
+/// du site, enregistré tel quel. Triés du plus gros total au plus petit.
+fn parse_spells(json: &str) -> Vec<SpellLine> {
+    let number = |value: &serde_json::Value| {
+        value
+            .as_i64()
+            .or_else(|| value.as_f64().map(|v| v.round() as i64))
+    };
+    let Ok(serde_json::Value::Array(spells)) = serde_json::from_str(json) else {
+        return Vec::new();
+    };
+    let mut lines: Vec<SpellLine> = spells
+        .iter()
+        .filter_map(|spell| {
+            Some(SpellLine {
+                spell: spell.get("spell")?.as_str()?.to_string(),
+                total: spell.get("total").and_then(number).unwrap_or(0),
+                by_element: spell
+                    .get("byElement")
+                    .and_then(|v| v.as_object())
+                    .map(|elements| {
+                        elements
+                            .iter()
+                            .filter_map(|(element, value)| Some((element.clone(), number(value)?)))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })
+        })
+        .collect();
+    lines.sort_by_key(|line| std::cmp::Reverse(line.total));
+    lines
 }

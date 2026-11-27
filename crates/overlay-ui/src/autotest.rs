@@ -207,6 +207,14 @@ pub fn history_scenario() -> Vec<Step> {
                 },
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("combats-deplie-2"),
+                // Le premier allié du combat déplié : ses sorts.
+                Step::Click {
+                    x: 200.0,
+                    y: 387.0,
+                    label: "premier allié",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("combats-sorts"),
                 Step::Click {
                     x: 830.0,
                     y: 165.0,
@@ -502,7 +510,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            16
+            17
         );
     }
 

@@ -381,3 +381,54 @@ fn data_version_bouge_quand_une_autre_connexion_ecrit() {
     drop((overlay, window));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn les_sorts_d_un_combattant_se_lisent_a_la_demande() {
+    let mut store = store();
+    let mut event = fight("f1", 1, &[("Bouftou", 1)]);
+    if let HistoryPayload::Fight(payload) = &mut event.payload {
+        payload.participants[0].spells = vec![
+            overlay_engine::history::FightSpellPayload {
+                spell: "Épée divine".to_string(),
+                total: 120,
+                by_element: [("Feu".to_string(), 120)].into(),
+            },
+            overlay_engine::history::FightSpellPayload {
+                spell: "Super Iop Punch".to_string(),
+                total: 380,
+                by_element: [("Feu".to_string(), 300), ("Terre".to_string(), 80)].into(),
+            },
+        ];
+    }
+    record(&mut store, &[event]);
+    let fight = &store.fights().unwrap()[0];
+    let ally = fight.participants.iter().find(|p| p.is_ally).unwrap();
+    let spells = store
+        .participant_spells(
+            fight.id,
+            &ally.name,
+            ally.instance_index,
+            read::SpellColumn::Damage,
+        )
+        .unwrap();
+    let names: Vec<&str> = spells.iter().map(|s| s.spell.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["Super Iop Punch", "Épée divine"],
+        "du plus gros au plus petit"
+    );
+    assert_eq!(spells[0].by_element.len(), 2);
+    assert!(store
+        .participant_spells(
+            fight.id,
+            &ally.name,
+            ally.instance_index,
+            read::SpellColumn::Heal
+        )
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .participant_spells(fight.id, "Personne", 0, read::SpellColumn::Damage)
+        .unwrap()
+        .is_empty());
+}
