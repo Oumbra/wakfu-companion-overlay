@@ -59,6 +59,7 @@
 
 pub mod alert_sound;
 pub mod autostart;
+pub mod autotest;
 pub mod avatars;
 pub mod background;
 pub mod build_info;

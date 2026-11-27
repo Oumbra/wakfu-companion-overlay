@@ -946,6 +946,9 @@ struct App {
     history: Option<panels::history::HistoryHost>,
     /// `--historique[=onglet]` : à ouvrir dès que la boucle tourne, puis oublié.
     history_on_start: Option<String>,
+    /// `--autotest=<dossier>` (`overlay_ui::autotest`) : le robot qui joue le scénario de la
+    /// fenêtre d'historique, invisible. `Some`, l'overlay ne fait rien d'autre.
+    autotest: Option<overlay_ui::autotest::AutoTest>,
 }
 
 /// L'icône de zone de notification (`tray-icon`, même auteurs que `global-hotkey`) et les quatre
@@ -1202,6 +1205,7 @@ impl App {
             pairing_seen: false,
             history: None,
             history_on_start: None,
+            autotest: None,
         }
     }
 
@@ -1574,6 +1578,9 @@ impl App {
             overlay.next_redraw_at = Some(std::time::Instant::now());
             return;
         }
+        // Essai automatique : jamais montrée ni activée (une fenêtre montrée, même sans focus,
+        // Windows la met devant), et sur une copie de la base.
+        let hidden = self.autotest.is_some();
         let (rgba, width, height) = ui_icons::app_logo_rgba();
         let icon = Icon::from_rgba(rgba, width, height).ok();
         let attrs = WindowAttributes::default()
@@ -1590,7 +1597,8 @@ impl App {
             .with_decorations(false)
             .with_window_level(WindowLevel::Normal)
             .with_resizable(true)
-            .with_visible(true)
+            .with_visible(!hidden)
+            .with_active(!hidden)
             .with_window_icon(icon.clone());
         #[cfg(target_os = "windows")]
         let attrs = attrs
@@ -1600,6 +1608,9 @@ impl App {
             Ok(window) => Arc::new(window),
             Err(err) => {
                 tracing::warn!("[historique] fenêtre refusée : {err}");
+                if let Some(test) = self.autotest.as_mut() {
+                    test.fail(format!("fenêtre refusée : {err}"));
+                }
                 return;
             }
         };
@@ -1610,9 +1621,29 @@ impl App {
         let portraits = PortraitAtlas::load(&gpu.egui_ctx);
         let combat_frame = CombatFrame::load(&gpu.egui_ctx);
         let icons = UiIcons::load(&gpu.egui_ctx);
-        Self::center_on_primary_monitor(event_loop, &window);
-        window.focus_window();
-        self.history = Some(panels::history::HistoryHost::open(tab.unwrap_or_default()));
+        let tab = tab.unwrap_or_default();
+        if let Some(test) = self.autotest.as_mut() {
+            let copy = overlay_history::HistoryStore::default_path()
+                .map_err(|err| err.to_string())
+                .and_then(|source| {
+                    overlay_ui::autotest::copy_history_db(&source, &test.dir)
+                        .map_err(|err| err.to_string())
+                });
+            match copy {
+                Ok(path) => {
+                    test.log(format!("base copiée : {}", path.display()));
+                    self.history = Some(panels::history::HistoryHost::open_path(tab, Ok(path)));
+                }
+                Err(err) => {
+                    test.fail(format!("copie de la base impossible : {err}"));
+                    return;
+                }
+            }
+        } else {
+            Self::center_on_primary_monitor(event_loop, &window);
+            window.focus_window();
+            self.history = Some(panels::history::HistoryHost::open(tab));
+        }
         let overlay = OverlayWindow {
             window,
             gpu,
@@ -1652,6 +1683,95 @@ impl App {
         };
         tracing::info!("[historique] fenêtre ouverte.");
         self.windows.insert(overlay.window.id(), overlay);
+    }
+
+    /// Un pas du robot de l'essai automatique (`overlay_ui::autotest`), appelé à chaque tour de
+    /// boucle à la place de tout le reste. La fenêtre étant invisible, Windows ne lui envoie
+    /// aucun `WM_PAINT` : les frames sont peintes ici, directement.
+    fn autotest_tick(&mut self, event_loop: &ActiveEventLoop) {
+        use overlay_ui::autotest::Step;
+        if event_loop.exiting() {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let history_id = self
+            .windows
+            .iter()
+            .find(|(_, w)| w.kind == OverlayKind::History)
+            .map(|(id, _)| *id);
+        let Some(test) = self.autotest.as_mut() else {
+            return;
+        };
+        if test.done() || test.failed() {
+            let ok = test.finish();
+            println!(
+                "[autotest] {} — journal : {}",
+                if ok { "OK" } else { "ÉCHEC" },
+                test.dir.join("journal.txt").display()
+            );
+            event_loop.exit();
+            return;
+        }
+        let Some(step) = test.due(now) else {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(test.next_at()));
+            return;
+        };
+        let next_at = test.next_at();
+        let frames: Vec<Vec<egui::Event>> = match &step {
+            Step::WaitReady => {
+                if self.catalog.load().is_empty() {
+                    test.not_ready();
+                    event_loop.set_control_flow(ControlFlow::WaitUntil(next_at));
+                    return;
+                }
+                test.log("référentiel chargé");
+                vec![Vec::new()]
+            }
+            Step::Click { x, y, label } => {
+                test.log(format!("clic : {label} ({x}, {y})"));
+                overlay_ui::autotest::click_events(egui::pos2(*x, *y)).to_vec()
+            }
+            Step::Type(text) => {
+                test.log(format!("saisie : « {text} »"));
+                vec![vec![egui::Event::Text((*text).to_string())]]
+            }
+            Step::Capture(name) => {
+                let path = test.capture_path(name);
+                test.log(format!("capture : {}", path.display()));
+                if let Some(overlay) = history_id.and_then(|id| self.windows.get_mut(&id)) {
+                    overlay.gpu.capture_to = Some(path);
+                }
+                vec![Vec::new()]
+            }
+            Step::ExpectClosed => {
+                if history_id.is_some() {
+                    test.fail("la fenêtre d'historique est toujours ouverte");
+                } else {
+                    test.log("fenêtre d'historique fermée, overlay toujours actif");
+                }
+                Vec::new()
+            }
+        };
+        if !matches!(step, Step::ExpectClosed) && history_id.is_none() {
+            test.fail(format!(
+                "plus de fenêtre d'historique pour l'étape {step:?}"
+            ));
+            return;
+        }
+        for events in frames {
+            let Some(id) = history_id.filter(|id| self.windows.contains_key(id)) else {
+                break;
+            };
+            if let Some(overlay) = self.windows.get_mut(&id) {
+                overlay.gpu.injected_events.extend(events);
+            }
+            self.redraw(event_loop, id);
+        }
+        // Une frame de plus : ce que le dernier événement a changé (onglet, texte) est peint.
+        if let Some(id) = history_id.filter(|id| self.windows.contains_key(id)) {
+            self.redraw(event_loop, id);
+        }
+        event_loop.set_control_flow(ControlFlow::WaitUntil(next_at));
     }
 
     /// Ferme la fenêtre d'historique, et la base qu'elle tenait ouverte.
@@ -5853,6 +5973,14 @@ impl App {
 
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        // Essai automatique : la fenêtre d'historique seule — ni icône de notification, ni Carte,
+        // ni fenêtre sur le jeu.
+        if self.autotest.is_some() {
+            if let Some(tab) = self.history_on_start.take() {
+                self.open_history_window(event_loop, panels::history::HistoryTab::parse(&tab));
+            }
+            return;
+        }
         self.install_tray();
         if let Some(tab) = self.history_on_start.take() {
             self.open_history_window(event_loop, panels::history::HistoryTab::parse(&tab));
@@ -6011,6 +6139,10 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.autotest.is_some() {
+            self.autotest_tick(event_loop);
+            return;
+        }
         // Une mise à jour prête s'installe AVANT tout le reste du tick : l'exe est remplacé,
         // l'overlay relancé, et cette boucle se termine (voir `install_update_if_ready`).
         self.install_update_if_ready(event_loop);
@@ -6315,6 +6447,8 @@ async fn init_gpu(window: Arc<Window>) -> GpuState {
         occluded_since: None,
         hit_region: Default::default(),
         hit_test: None,
+        injected_events: Vec::new(),
+        capture_to: None,
     }
 }
 
@@ -6376,9 +6510,18 @@ fn main() {
     // **Une seule instance** (2026-09-23, `overlay_ui::single_instance`) : deux overlays
     // partageraient le jeton et la file d'envoi, et enverraient chaque lot deux fois. Pris AVANT
     // le journal, qu'une seconde instance ne doit pas toucher ; gardé jusqu'à la fin de `main`.
-    let _instance = match overlay_ui::single_instance::guard() {
-        overlay_ui::single_instance::Startup::Proceed(lock) => lock,
-        overlay_ui::single_instance::Startup::Exit => return,
+    //
+    // **Sauf essai automatique** (`--autotest=<dossier>`, `overlay_ui::autotest`) : il tourne à
+    // côté de l'overlay de l'utilisateur sans rien partager — ni jeton, ni file, ni base (une
+    // copie) —, et ne doit surtout pas ouvrir la boîte « déjà lancé ».
+    let autotest_dir = overlay_ui::autotest::requested(env::args().skip(1));
+    let _instance = if autotest_dir.is_some() {
+        None
+    } else {
+        match overlay_ui::single_instance::guard() {
+            overlay_ui::single_instance::Startup::Proceed(lock) => Some(lock),
+            overlay_ui::single_instance::Startup::Exit => return,
+        }
     };
     let log_dir = logging::init();
     logging::install_ctrlc_handler();
@@ -6457,14 +6600,19 @@ fn main() {
     let (settings_tx, settings_rx) = mpsc::channel();
     let (auth_command_tx, auth_command_rx) = mpsc::channel();
     let (sync_tx, sync_rx) = mpsc::channel();
-    spawn_sync_thread(sync_rx, auth_command_tx.clone());
-    spawn_auth_thread(
-        settings_tx.clone(),
-        sync_tx.clone(),
-        Arc::clone(&auth_status),
-        auth_command_rx,
-        proxy.clone(),
-    );
+    // Essai automatique : ni compte, ni synchronisation, ni mise à jour, ni moteur — seul le
+    // référentiel (les noms d'objets de l'historique) démarre.
+    let full_session = autotest_dir.is_none();
+    if full_session {
+        spawn_sync_thread(sync_rx, auth_command_tx.clone());
+        spawn_auth_thread(
+            settings_tx.clone(),
+            sync_tx.clone(),
+            Arc::clone(&auth_status),
+            auth_command_rx,
+            proxy.clone(),
+        );
+    }
     spawn_referentiel_thread(
         Arc::clone(&catalog),
         Arc::clone(&dungeons),
@@ -6475,46 +6623,50 @@ fn main() {
     // tout de suite, derrière l'écran de chargement ; avec « Installer automatiquement » coché,
     // une version plus récente est installée avant d'ouvrir le moindre overlay de jeu.
     let (update_command_tx, update_command_rx) = mpsc::channel();
-    spawn_update_thread(
-        Arc::clone(&update_status),
-        Arc::clone(&startup),
-        update_command_rx,
-        proxy.clone(),
-    );
-    let _ = update_command_tx.send(UpdateCommand::Check {
-        install_if_available: saved_config.auto_update,
-    });
+    if full_session {
+        spawn_update_thread(
+            Arc::clone(&update_status),
+            Arc::clone(&startup),
+            update_command_rx,
+            proxy.clone(),
+        );
+        let _ = update_command_tx.send(UpdateCommand::Check {
+            install_if_available: saved_config.auto_update,
+        });
+    }
     let remote_icons = RemoteIconStore::spawn(proxy.clone());
     // **Le canal des complétions** (2026-09-17) — voir `engine_thread::WatchlistCompleted` sur
     // pourquoi un canal et pas un `ArcSwap` : une complétion perdue est une entrée jamais retirée.
     let (completions_tx, completions_rx) = mpsc::channel();
     // **Le canal des définitions du Suivi** (2026-09-30) — voir `engine_thread::WatchlistDefinitions`.
     let (watchlist_definitions_tx, watchlist_definitions_rx) = mpsc::channel();
-    spawn_engine_thread(
-        log_path.clone(),
-        EngineHandles {
-            snapshot: Arc::clone(&snapshot),
-            watchlist: Arc::clone(&watchlist),
-            watchlist_toast: Arc::clone(&watchlist_toast),
-            completions: completions_tx,
-            watchlist_definitions: watchlist_definitions_tx,
-            watchlist_group: saved_config
-                .watchlist_groups
-                .effective_active(saved_config.suivi_groups_enabled)
-                .to_string(),
-            alert_profile: Arc::clone(&alert_profile),
-            chat_filters: Arc::clone(&chat_filters),
-            roster: Arc::clone(&roster),
-            roster_draft: Arc::clone(&roster_draft),
-            catalog: Arc::clone(&catalog),
-            dungeons: Arc::clone(&dungeons),
-            startup: Arc::clone(&startup),
-            history: spawn_history_thread(Arc::clone(&catalog), Arc::clone(&dungeons)),
-        },
-        proxy,
-        settings_rx,
-        sync_tx,
-    );
+    if full_session {
+        spawn_engine_thread(
+            log_path.clone(),
+            EngineHandles {
+                snapshot: Arc::clone(&snapshot),
+                watchlist: Arc::clone(&watchlist),
+                watchlist_toast: Arc::clone(&watchlist_toast),
+                completions: completions_tx,
+                watchlist_definitions: watchlist_definitions_tx,
+                watchlist_group: saved_config
+                    .watchlist_groups
+                    .effective_active(saved_config.suivi_groups_enabled)
+                    .to_string(),
+                alert_profile: Arc::clone(&alert_profile),
+                chat_filters: Arc::clone(&chat_filters),
+                roster: Arc::clone(&roster),
+                roster_draft: Arc::clone(&roster_draft),
+                catalog: Arc::clone(&catalog),
+                dungeons: Arc::clone(&dungeons),
+                startup: Arc::clone(&startup),
+                history: spawn_history_thread(Arc::clone(&catalog), Arc::clone(&dungeons)),
+            },
+            proxy,
+            settings_rx,
+            sync_tx,
+        );
+    }
     // Les réglages de la carte de chat sont locaux : le moteur les reçoit d'ici, pas du compte.
     let _ = settings_tx.send(EngineCommand::SetChatToast(saved_config.chat_toast()));
     let _ = settings_tx.send(EngineCommand::SetCountdownToast(
@@ -6588,5 +6740,24 @@ fn main() {
         settings_tx,
     });
     app.history_on_start = cli.history_tab;
-    event_loop.run_app(&mut app).expect("boucle d'événements");
+    if let Some(dir) = autotest_dir {
+        if let Err(err) = std::fs::create_dir_all(&dir) {
+            eprintln!("[autotest] dossier {} : {err}", dir.display());
+            std::process::exit(2);
+        }
+        // Les raccourcis globaux appartiennent à l'overlay de l'utilisateur.
+        app.hotkeys.suspend();
+        app.history_on_start = Some(String::from("achats"));
+        app.autotest = Some(overlay_ui::autotest::AutoTest::new(
+            dir,
+            overlay_ui::autotest::history_scenario(),
+        ));
+    }
+    let failed = {
+        event_loop.run_app(&mut app).expect("boucle d'événements");
+        app.autotest.as_ref().is_some_and(|test| test.failed())
+    };
+    if failed {
+        std::process::exit(1);
+    }
 }

@@ -165,7 +165,16 @@ impl HistoryHost {
     /// Ouvre la base de l'overlay (`HistoryStore::default_path`) ; une base absente ou illisible
     /// laisse la fenêtre s'ouvrir, vide.
     pub fn open(tab: HistoryTab) -> Self {
-        let store = HistoryStore::default_path()
+        Self::open_path(tab, HistoryStore::default_path())
+    }
+
+    /// Sur une autre base que celle de l'overlay — la copie de l'essai automatique
+    /// (`crate::autotest`).
+    pub fn open_path(
+        tab: HistoryTab,
+        path: Result<std::path::PathBuf, overlay_history::HistoryError>,
+    ) -> Self {
+        let store = path
             .and_then(|path| HistoryStore::open(&path))
             .map_err(|err| tracing::warn!(%err, "historique : base inaccessible"))
             .ok();

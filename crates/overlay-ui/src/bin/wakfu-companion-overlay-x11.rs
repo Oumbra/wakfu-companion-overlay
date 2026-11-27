@@ -4473,6 +4473,8 @@ mod linux_main {
             occluded_since: None,
             hit_region: Default::default(),
             hit_test: None,
+            injected_events: Vec::new(),
+            capture_to: None,
         }
     }
 

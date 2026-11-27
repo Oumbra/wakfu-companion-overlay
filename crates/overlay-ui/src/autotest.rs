@@ -1,0 +1,278 @@
+//! **Essai automatique de la vraie fenêtre**, sans toucher à l'écran de l'utilisateur
+//! (2026-11-27) : `wakfu-companion-overlay --autotest=<dossier>`.
+//!
+//! Demande de l'utilisateur : les essais lancés sur son poste ne doivent **jamais** mettre une
+//! fenêtre au premier plan ni se servir de sa souris (une première passe le faisait, par
+//! `SetForegroundWindow` et des clics système). Même principe que l'essai automatique de son
+//! projet `velmire` :
+//!
+//! - la fenêtre est créée **invisible** — ni montrée, ni activée, absente de la barre des tâches
+//!   (une fenêtre montrée, même sans focus, Windows la met devant) ;
+//! - un **robot** joue un scénario en injectant des événements egui (déplacement du pointeur,
+//!   clic, texte) dans l'entrée de la fenêtre — le vrai code de la fenêtre les traite comme ceux
+//!   de la souris, mais la souris du système ne bouge pas ;
+//! - les **captures** sont relues sur le GPU (la frame est peinte une seconde fois dans une
+//!   texture hors écran, copiée en mémoire) : rien n'est lu à l'écran ;
+//! - un `journal.txt` résume chaque étape, puis le processus se termine.
+//!
+//! Le reste de l'overlay ne démarre pas dans ce mode (voir `main.rs`) : pas de verrou d'instance
+//! unique (l'overlay de l'utilisateur peut tourner à côté), ni moteur, ni synchronisation, ni mise
+//! à jour, ni raccourcis globaux, ni icône de notification, ni fenêtre sur le jeu. La base
+//! d'historique ouverte est une **copie** de la vraie, faite dans le dossier de l'essai.
+
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+/// L'option de ligne de commande : `--autotest=<dossier>`.
+pub const FLAG: &str = "--autotest";
+
+/// Délai entre deux étapes : le temps que les frames injectées soient peintes.
+pub const STEP_INTERVAL: Duration = Duration::from_millis(120);
+
+/// Attente maximale du référentiel (noms d'objets) avant la première capture.
+const READY_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Le dossier demandé par `--autotest=<dossier>`, s'il y en a un.
+pub fn requested(args: impl IntoIterator<Item = String>) -> Option<PathBuf> {
+    args.into_iter().find_map(|arg| {
+        arg.strip_prefix(FLAG)
+            .and_then(|rest| rest.strip_prefix('='))
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from)
+    })
+}
+
+/// Une étape du scénario. Les coordonnées sont en points egui, relatives à la fenêtre.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Step {
+    /// Attendre que le référentiel soit chargé (les noms d'objets en dépendent).
+    WaitReady,
+    /// Clic gauche : survol et appui sur une frame, relâchement sur la suivante.
+    Click { x: f32, y: f32, label: &'static str },
+    /// Texte tapé dans le champ qui a le focus.
+    Type(&'static str),
+    /// Capture de la fenêtre, `<nom>.png` dans le dossier de l'essai.
+    Capture(&'static str),
+    /// La fenêtre d'historique doit être fermée.
+    ExpectClosed,
+}
+
+/// Taille de la fenêtre pendant l'essai — celle d'ouverture, sur laquelle sont relevées les
+/// coordonnées du scénario.
+pub const WINDOW_SIZE: (f64, f64) = (1100.0, 820.0);
+
+/// Centres des onglets de la fenêtre d'historique à 1100 points de large, dans l'ordre de
+/// `HistoryTab::ALL` (relevés sur la vraie fenêtre).
+const TAB_CENTERS: [(f32, &str); 6] = [
+    (111.0, "combats"),
+    (286.0, "recap"),
+    (452.0, "achats"),
+    (632.0, "echanges"),
+    (811.0, "pactes"),
+    (987.0, "a-propos"),
+];
+const TAB_Y: f32 = 92.0;
+
+/// Le scénario de la fenêtre d'historique : chaque onglet, une recherche dans les achats, puis
+/// la croix.
+pub fn history_scenario() -> Vec<Step> {
+    let mut steps = vec![Step::WaitReady, Step::Capture("00-ouverture")];
+    for (x, name) in TAB_CENTERS {
+        steps.push(Step::Click {
+            x,
+            y: TAB_Y,
+            label: name,
+        });
+        steps.push(Step::Capture(name));
+    }
+    steps.extend([
+        Step::Click {
+            x: TAB_CENTERS[2].0,
+            y: TAB_Y,
+            label: "achats",
+        },
+        Step::Click {
+            x: 450.0,
+            y: 160.0,
+            label: "champ de recherche",
+        },
+        Step::Type("Larme"),
+        Step::Capture("achats-recherche"),
+        Step::Click {
+            x: 1071.0,
+            y: 28.0,
+            label: "croix",
+        },
+        Step::ExpectClosed,
+    ]);
+    steps
+}
+
+/// L'état du robot, tenu par l'hôte.
+pub struct AutoTest {
+    pub dir: PathBuf,
+    steps: VecDeque<Step>,
+    next_at: Instant,
+    started: Instant,
+    journal: Vec<String>,
+    failed: bool,
+    shots: u32,
+}
+
+impl AutoTest {
+    pub fn new(dir: PathBuf, steps: Vec<Step>) -> Self {
+        let now = Instant::now();
+        Self {
+            dir,
+            steps: steps.into(),
+            next_at: now,
+            started: now,
+            journal: Vec::new(),
+            failed: false,
+            shots: 0,
+        }
+    }
+
+    /// L'instant de la prochaine étape.
+    pub fn next_at(&self) -> Instant {
+        self.next_at
+    }
+
+    /// La prochaine étape si elle est due, `None` sinon. Une fois le scénario épuisé,
+    /// [`Self::done`] le dit.
+    pub fn due(&mut self, now: Instant) -> Option<Step> {
+        if now < self.next_at {
+            return None;
+        }
+        let step = self.steps.pop_front()?;
+        self.next_at = now + STEP_INTERVAL;
+        Some(step)
+    }
+
+    pub fn done(&self) -> bool {
+        self.steps.is_empty() && Instant::now() >= self.next_at
+    }
+
+    /// `WaitReady` pas encore satisfait : la remet en tête, ou échoue passé le délai.
+    pub fn not_ready(&mut self) {
+        if self.started.elapsed() > READY_TIMEOUT {
+            self.fail("référentiel toujours vide après 20 s");
+        } else {
+            self.steps.push_front(Step::WaitReady);
+        }
+    }
+
+    pub fn capture_path(&mut self, name: &str) -> PathBuf {
+        self.shots += 1;
+        self.dir.join(format!("{name}.png"))
+    }
+
+    pub fn log(&mut self, line: impl Into<String>) {
+        let line = format!(
+            "[{:>6} ms] {}",
+            self.started.elapsed().as_millis(),
+            line.into()
+        );
+        tracing::info!("[autotest] {line}");
+        self.journal.push(line);
+    }
+
+    pub fn fail(&mut self, reason: impl Into<String>) {
+        self.failed = true;
+        self.log(format!("ÉCHEC : {}", reason.into()));
+    }
+
+    pub fn failed(&self) -> bool {
+        self.failed
+    }
+
+    /// Écrit `journal.txt` et rend le verdict.
+    pub fn finish(&mut self) -> bool {
+        let verdict = if self.failed { "ÉCHEC" } else { "OK" };
+        let summary = format!(
+            "{verdict} — {} captures en {} ms",
+            self.shots,
+            self.started.elapsed().as_millis()
+        );
+        self.log(summary);
+        let path = self.dir.join("journal.txt");
+        if let Err(err) = std::fs::write(&path, self.journal.join("\n") + "\n") {
+            tracing::warn!("[autotest] journal non écrit ({}) : {err}", path.display());
+        }
+        !self.failed
+    }
+}
+
+/// Copie la base d'historique dans le dossier de l'essai (avec ses fichiers WAL), pour que
+/// l'essai n'écrive jamais dans la vraie — même pas une migration.
+pub fn copy_history_db(source: &Path, dir: &Path) -> std::io::Result<PathBuf> {
+    let target = dir.join("history.sqlite3");
+    std::fs::copy(source, &target)?;
+    for suffix in ["-wal", "-shm"] {
+        let mut from = source.as_os_str().to_owned();
+        from.push(suffix);
+        let from = PathBuf::from(from);
+        if from.exists() {
+            let mut to = target.as_os_str().to_owned();
+            to.push(suffix);
+            std::fs::copy(&from, PathBuf::from(to))?;
+        }
+    }
+    Ok(target)
+}
+
+/// Les événements egui d'un clic gauche à `pos` : la première frame survole et appuie, la
+/// seconde relâche — un clic egui se termine au relâchement, sur une frame distincte.
+pub fn click_events(pos: egui::Pos2) -> [Vec<egui::Event>; 2] {
+    let button = |pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    [
+        vec![egui::Event::PointerMoved(pos), button(true)],
+        vec![button(false)],
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn option_de_ligne_de_commande() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            requested(args(&["--historique", "--autotest=C:\\essai"])),
+            Some(PathBuf::from("C:\\essai"))
+        );
+        assert_eq!(requested(args(&["--autotest"])), None);
+        assert_eq!(requested(args(&["--autotest="])), None);
+        assert_eq!(requested(args(&["wakfu.log"])), None);
+    }
+
+    #[test]
+    fn le_scenario_finit_par_la_croix() {
+        let steps = history_scenario();
+        assert_eq!(steps.first(), Some(&Step::WaitReady));
+        assert_eq!(steps.last(), Some(&Step::ExpectClosed));
+        assert_eq!(
+            steps
+                .iter()
+                .filter(|s| matches!(s, Step::Capture(_)))
+                .count(),
+            8
+        );
+    }
+
+    #[test]
+    fn les_etapes_sont_espacees() {
+        let mut test = AutoTest::new(PathBuf::new(), vec![Step::Type("a"), Step::Type("b")]);
+        let now = Instant::now();
+        assert_eq!(test.due(now), Some(Step::Type("a")));
+        assert_eq!(test.due(now), None);
+        assert_eq!(test.due(now + STEP_INTERVAL), Some(Step::Type("b")));
+    }
+}

@@ -40,6 +40,12 @@ pub struct GpuState {
     /// Dernier état passé à `Window::set_cursor_hittest` par [`sync_hit_test`] — `None` tant
     /// qu'il ne l'a jamais réglé (la création l'a fait, avec sa propre valeur).
     pub hit_test: Option<bool>,
+    /// Événements egui ajoutés à l'entrée de la prochaine frame — le robot de l'essai automatique
+    /// (`crate::autotest`) : clics et texte sans la souris ni le clavier du système.
+    pub injected_events: Vec<egui::Event>,
+    /// Capture demandée pour la prochaine frame (`crate::autotest`) : PNG écrit à ce chemin,
+    /// relu sur le GPU — rien n'est lu à l'écran.
+    pub capture_to: Option<std::path::PathBuf>,
 }
 
 /// Fenêtrage/GPU autour de `render_content::build_ui` (voir sa doc) : prend l'entrée egui de la
@@ -62,7 +68,8 @@ pub fn render(
     let now = content.now;
     let watchlist_toast = content.watchlist_toast;
 
-    let raw_input = gpu.egui_winit.take_egui_input(window);
+    let mut raw_input = gpu.egui_winit.take_egui_input(window);
+    raw_input.events.append(&mut gpu.injected_events);
     let (mut full_output, mut outcome) = build_ui(&gpu.egui_ctx, raw_input, content);
     gpu.hit_region = std::mem::take(&mut outcome.hit_region);
 
@@ -124,6 +131,17 @@ pub fn render(
         gpu.egui_renderer.free_texture(id);
     }
     full_output.textures_delta.clear();
+
+    // Capture de l'essai automatique : AVANT la surface, qu'une fenêtre invisible peut refuser
+    // (`Occluded`) — la capture ne dépend que de la frame peinte, pas de sa présentation.
+    if let Some(path) = gpu.capture_to.take() {
+        let size = [gpu.config.width, gpu.config.height];
+        let result = capture_png(gpu, &paint_jobs, size, full_output.pixels_per_point, &path);
+        match result {
+            Ok(()) => tracing::info!("[autotest] capture écrite : {}", path.display()),
+            Err(err) => tracing::warn!("[autotest] capture ratée ({}) : {err}", path.display()),
+        }
+    }
 
     let output_frame = match gpu.surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(frame) => frame,
@@ -338,4 +356,135 @@ pub fn sync_hit_test(
     };
     let _ = gpu.egui_winit.on_window_event(window, &event);
     true
+}
+
+/// Peint `paint_jobs` dans une texture hors écran et l'écrit en PNG (essai automatique, voir
+/// `crate::autotest`). Les octets sont relus tels quels : alpha prémultiplié, comme la surface —
+/// la fenêtre d'historique est opaque, seuls ses coins arrondis sont transparents.
+fn capture_png(
+    gpu: &mut GpuState,
+    paint_jobs: &[egui::ClippedPrimitive],
+    size: [u32; 2],
+    pixels_per_point: f32,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    let [width, height] = size;
+    let format = gpu.config.format;
+    let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("overlay-ui-autotest-capture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let screen_descriptor = egui_wgpu::ScreenDescriptor {
+        size_in_pixels: size,
+        pixels_per_point,
+    };
+    // Lignes alignées sur 256 octets, exigence de `copy_texture_to_buffer`.
+    let unpadded = width * 4;
+    let padded =
+        unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("overlay-ui-autotest-readback"),
+        size: u64::from(padded) * u64::from(height),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("overlay-ui-autotest-encoder"),
+        });
+    gpu.egui_renderer.update_buffers(
+        &gpu.device,
+        &gpu.queue,
+        &mut encoder,
+        paint_jobs,
+        &screen_descriptor,
+    );
+    {
+        let mut render_pass = encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("overlay-ui-autotest-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                ..Default::default()
+            })
+            .forget_lifetime();
+        gpu.egui_renderer
+            .render(&mut render_pass, paint_jobs, &screen_descriptor);
+    }
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    gpu.queue.submit(Some(encoder.finish()));
+    let slice = buffer.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx.send(result);
+    });
+    gpu.device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|err| err.to_string())?;
+    rx.recv()
+        .map_err(|err| err.to_string())?
+        .map_err(|err| err.to_string())?;
+    let mut rgba = Vec::with_capacity((unpadded * height) as usize);
+    {
+        let data = slice.get_mapped_range().map_err(|err| err.to_string())?;
+        for row in data.chunks(padded as usize) {
+            rgba.extend_from_slice(&row[..unpadded as usize]);
+        }
+    }
+    buffer.unmap();
+    let bgra = matches!(
+        format,
+        wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+    );
+    if bgra {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+        }
+    }
+    image::RgbaImage::from_raw(width, height, rgba)
+        .ok_or("tampon de capture incomplet")?
+        .save(path)
+        .map_err(|err| err.to_string())
 }

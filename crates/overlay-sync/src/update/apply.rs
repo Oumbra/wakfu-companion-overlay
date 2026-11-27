@@ -128,6 +128,9 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> ParsedArgs {
             .and_then(|rest| rest.strip_prefix('='))
         {
             parsed.history_tab = Some(tab.to_string());
+        } else if arg.starts_with("--") {
+            // Option lue ailleurs (`--autotest=<dossier>`, `overlay_ui::autotest`) : jamais un
+            // chemin de journal.
         } else if parsed.log_path.is_none() {
             parsed.log_path = Some(PathBuf::from(arg));
         }
