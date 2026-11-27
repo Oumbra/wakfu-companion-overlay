@@ -395,13 +395,22 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
   déplié ; le pied « Charger plus » est épinglé en bas du panneau, en contrôle scindé avec le menu
   des portées ; le détail d'un combat garde le retrait de son run. Ajouts propres à la fenêtre :
   sections du Récap repliables, échanges et extractions de pacte repliables un à un.
+- **Retours du 2026-11-28 (deuxième revue)** : icône calendrier du site (`CalendarLine`) ; lignes
+  de groupe du Récap en boîtes (`.group-item`) espacées de 6 px, tuiles de donjon au gabarit du
+  site (fond `#333`, image posée en bas, pastille dorée) ; vignettes Brèche, Brèche ultime et
+  « Autres » ; lignes de groupe des Combats en petites capitales grises avec le compte en
+  pastille, durée d'un run en pastille avant son chevron ; compteur de tours `‹ Tour N ›` sans
+  saisie ; pictogrammes des switches à 13 px posés sur la ligne de base ; « Charger plus » soudé
+  à son chevron. **Correction d'un objet** (`history::corrections`) : clé plate ou clic droit sur
+  une ligne de butin d'un combat ou d'achat dont le nom désigne plusieurs objets
+  (`CatalogIndex::item_homonyms`) ; l'écriture marque la ligne `corrected` (migration 3) pour que
+  la relecture du log ne l'écrase pas, et une ligne de butin vidée reste en base à quantité nulle.
 - Le symbole ₭ manque dans la police du design system : un montant est toujours suivi de l'icône
   Kamas (`paint_amount`, `paint_amount_left`).
 - Reste :
-  - Récap : illustrations des brèches ;
   - Combats : badge de pierre ;
-  - corrections au clic droit du site : réattribuer l'objet d'un achat ou d'un pacte, la classe
-    d'un personnage (ligne d'XP), un sort à un autre combattant ; suivre un ennemi ;
+  - autres corrections au clic droit du site : l'objet d'un échange, la classe d'un personnage
+    (ligne d'XP), un sort à un autre combattant ; suivre un objet ou un ennemi ;
   - **images des objets de pacte** : la plupart (costumes, équipements de boutique) n'ont ni id en
     base ni entrée dans le référentiel — la source `repository/items.json` du site ne les contient
     pas, le site ne les illustrait donc pas non plus. Il faudrait élargir la source du référentiel
