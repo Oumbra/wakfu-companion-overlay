@@ -1,0 +1,14 @@
+[workspace]
+
+[package]
+name = "referentiel"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Outil du mainteneur (docs/plan-historique-local.md §4-§5) : genere le referentiel embarque (assets/referentiel.json) depuis les JSON du depot web, et prepare les images absentes de wakassets pour le CDN de l'overlay (cdn/). Jamais compile par la CI ni par la release, jamais livre : lance a la main, son resultat est commite. `[workspace]` vide : hors du workspace principal, comme xtask/ et spikes/."
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "tga"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
