@@ -1738,6 +1738,10 @@ impl App {
                 test.log(format!("clic : {label} ({x}, {y})"));
                 overlay_ui::autotest::click_events(egui::pos2(*x, *y)).to_vec()
             }
+            Step::Scroll { x, y, lines } => {
+                test.log(format!("molette : {lines} lignes en ({x}, {y})"));
+                overlay_ui::autotest::scroll_events(egui::pos2(*x, *y), *lines)
+            }
             Step::Type(text) => {
                 test.log(format!("saisie : « {text} »"));
                 vec![vec![egui::Event::Text((*text).to_string())]]
@@ -1768,7 +1772,10 @@ impl App {
                 Vec::new()
             }
         };
-        let needs_window = matches!(step, Step::Click { .. } | Step::Type(_) | Step::Capture(_));
+        let needs_window = matches!(
+            step,
+            Step::Click { .. } | Step::Type(_) | Step::Scroll { .. } | Step::Capture(_)
+        );
         if needs_window && history_id.is_none() {
             test.fail(format!(
                 "plus de fenêtre d'historique pour l'étape {step:?}"

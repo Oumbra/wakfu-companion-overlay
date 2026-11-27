@@ -156,6 +156,8 @@ pub struct AchatsState {
     pub collapsed: BTreeSet<NaiveDate>,
     /// `None` : pas encore lu (ou à relire).
     pub rows: Option<Vec<PurchaseRow>>,
+    /// Combien d'achats sont montrés — « Charger plus » et sa période.
+    pub pager: super::pager::Pager,
 }
 
 /// Hauteur d'une ligne : l'icône de 22 px et ses 6 px de marge haute et basse, comme le site.
@@ -209,19 +211,19 @@ pub fn show(
         );
     });
     ui.add_space(8.0);
-    let groups = groups(
-        state.rows.as_deref().unwrap_or_default(),
-        &state.query,
-        state.order,
-        catalog,
-    );
+    // Comme le site, la recherche et le tri portent sur ce qui est chargé.
+    let rows = state.rows.as_deref().unwrap_or_default();
+    let times: Vec<i64> = rows.iter().map(|row| row.occurred_at).collect();
+    let shown = state.pager.visible(&times, true);
+    let groups = groups(&rows[..shown], &state.query, state.order, catalog);
+    let pager = &mut state.pager;
+    let collapsed_days = &mut state.collapsed;
     zones.scroll_area(ui, "historique-achats", |ui, width| {
         if groups.is_empty() {
             ui.add(design::label("Aucun achat enregistré.").color(tokens::TEXT_DISABLED));
-            return;
         }
         for group in &groups {
-            let collapsed = state.collapsed.contains(&group.day);
+            let collapsed = collapsed_days.contains(&group.day);
             if day_header(
                 ui,
                 width,
@@ -230,9 +232,9 @@ pub fn show(
                 !collapsed,
             ) {
                 if collapsed {
-                    state.collapsed.remove(&group.day);
+                    collapsed_days.remove(&group.day);
                 } else {
-                    state.collapsed.insert(group.day);
+                    collapsed_days.insert(group.day);
                 }
             }
             if collapsed {
@@ -243,6 +245,7 @@ pub fn show(
             }
             ui.add_space(6.0);
         }
+        pager.footer(ui, width, &times, shown, "historique.achats");
     });
 }
 

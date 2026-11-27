@@ -7,6 +7,7 @@
 
 pub mod achats;
 pub mod format;
+pub mod pager;
 
 use chrono::NaiveDate;
 use egui::{Sense, Ui};

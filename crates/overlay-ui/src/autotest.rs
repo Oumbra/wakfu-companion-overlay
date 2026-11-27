@@ -139,6 +139,8 @@ pub enum Step {
     Click { x: f32, y: f32, label: &'static str },
     /// Texte tapé dans le champ qui a le focus.
     Type(&'static str),
+    /// Molette au-dessus de `(x, y)`, en lignes (positif : vers le bas).
+    Scroll { x: f32, y: f32, lines: f32 },
     /// Capture de la fenêtre, `<nom>.png` dans le dossier de l'essai.
     Capture(&'static str),
     /// La fenêtre d'historique doit être fermée.
@@ -193,6 +195,17 @@ pub fn history_scenario() -> Vec<Step> {
             x: 450.0,
             y: 160.0,
             label: "champ de recherche",
+        },
+        Step::Scroll {
+            x: 550.0,
+            y: 500.0,
+            lines: 400.0,
+        },
+        Step::Capture("achats-fin-de-liste"),
+        Step::Scroll {
+            x: 550.0,
+            y: 500.0,
+            lines: -400.0,
         },
         Step::Type("Larme"),
         Step::Capture("achats-recherche"),
@@ -368,6 +381,22 @@ pub fn copy_history_db(source: &Path, dir: &Path) -> std::io::Result<PathBuf> {
     Ok(target)
 }
 
+/// Les frames d'un coup de molette : le survol et la molette, puis de quoi laisser le
+/// défilement animé d'egui aller au bout.
+pub fn scroll_events(pos: egui::Pos2, lines: f32) -> Vec<Vec<egui::Event>> {
+    let mut frames = vec![vec![
+        egui::Event::PointerMoved(pos),
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, -lines),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        },
+    ]];
+    frames.extend(std::iter::repeat_with(Vec::new).take(20));
+    frames
+}
+
 /// Les événements egui d'un clic gauche à `pos` : la première frame survole et appuie, la
 /// seconde relâche — un clic egui se termine au relâchement, sur une frame distincte.
 pub fn click_events(pos: egui::Pos2) -> [Vec<egui::Event>; 2] {
@@ -409,7 +438,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            8
+            9
         );
     }
 
