@@ -207,8 +207,10 @@ wakassets, qui en est manifestement une extraction convertie en PNG.
 | Illustrations de donjons (13) | les 2 donjons récents (Hominideux, Verts de vase) ; les 11 brèches utilisent déjà les images de brèche du site |
 | Monstres (60) | 14 ; la plupart des autres ont un **gfxId erroné dans le catalogue** (ex. « Bilbyboy Framboise » → `10`), à corriger dans le référentiel |
 
-Le dossier d'installation est lisible sans rien demander à l'utilisateur :
-`%APPDATA%\zaap\repositories\production\wakfu\main\release.json`, champ `location`.
+**Règle (décision du mainteneur, 2026-11-27) : l'overlay ne lit, n'ouvre ni n'extrait jamais
+aucun fichier du client de jeu** — seul `wakfu.log` est lu, comme aujourd'hui. Les images
+manquantes sont mises à disposition par le **CDN de l'overlay** (§5.2) ; le préparer est un travail
+du mainteneur, hors du binaire livré.
 
 ## 6. Stockage local
 
@@ -343,9 +345,8 @@ Le dossier d'installation est lisible sans rien demander à l'utilisateur :
    vérification d'une nouvelle version (§9).
 2. ~~Durée de la période d'import~~ — **tranché le 2026-11-27** : fixée lors de l'envoi d'e-mails
    aux comptes existants (§8).
-3. **Source des images** : les images manquantes sont dans `gui.jar` du client (§5.3). Reste à
-   choisir entre alimenter le CDN `cdn/` depuis ce fichier, ou faire lire les icônes par l'overlay
-   directement dans le client installé chez l'utilisateur.
+3. ~~Source des images~~ — **tranché le 2026-11-27** : wakassets + CDN de l'overlay (§5) ;
+   l'overlay ne lit jamais les fichiers du client de jeu.
 
 ## 14. Risques
 
