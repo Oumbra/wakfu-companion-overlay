@@ -278,7 +278,10 @@ fn une_extraction_de_pacte_s_ecrit_une_fois() {
             ],
         }),
     };
-    assert_eq!(record(&mut store, std::slice::from_ref(&pact)).pacts_inserted, 1);
+    assert_eq!(
+        record(&mut store, std::slice::from_ref(&pact)).pacts_inserted,
+        1
+    );
     assert_eq!(record(&mut store, &[pact]).pacts_inserted, 0);
     let counts = store.counts().unwrap();
     assert_eq!(
