@@ -288,13 +288,30 @@ pub struct ResolvedSpell<'a> {
 /// doc de module pour les replis. `None` : sort absent du référentiel de ce camp (pavé « ? »).
 /// C'est le SEUL point d'entrée de l'UI : `combat_spell_block` ne sait pas quel fichier répond.
 pub fn resolve_cast(fighter: &FighterDamage, spell: &str) -> Option<ResolvedSpell<'static>> {
-    let (name, icon) = if fighter.is_ally {
+    resolve_spell(
+        fighter.is_ally,
+        fighter.class_name.as_deref(),
+        fighter.breed,
+        spell,
+    )
+}
+
+/// Même résolution que [`resolve_cast`], à partir de ce qu'un combat **enregistré** garde de son
+/// lanceur (fenêtre d'historique) : son camp, sa classe (clé interne, `"iop"`) pour un allié, son
+/// `breed` (l'id du monstre) pour un ennemi.
+pub fn resolve_spell(
+    is_ally: bool,
+    class_name: Option<&str>,
+    breed: Option<i64>,
+    spell: &str,
+) -> Option<ResolvedSpell<'static>> {
+    let (name, icon) = if is_ally {
         let index = SpellIndex::embedded();
-        let idx = index.entry_index(spell, fighter.class_name.as_deref())?;
+        let idx = index.entry_index(spell, class_name)?;
         let entry = &index.entries[idx];
         (entry.name.as_str(), entry.icon.as_ref())
     } else {
-        let entry = MonsterSpellIndex::embedded().find(spell, fighter.breed)?;
+        let entry = MonsterSpellIndex::embedded().find(spell, breed)?;
         (entry.name.as_str(), entry.icon.as_ref())
     };
     Some(ResolvedSpell { name, icon })

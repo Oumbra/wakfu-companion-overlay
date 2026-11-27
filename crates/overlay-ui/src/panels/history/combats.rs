@@ -381,6 +381,8 @@ pub struct DetailState {
     pub loot_query: String,
     /// Tri du butin, partagé de même.
     pub loot_sort: LootSort,
+    /// Sens inversé (reclic sur le tri actif, `nextLootSortState` du site).
+    pub loot_reverse: bool,
 }
 
 /// Le tri du butin d'un combat (`LootSort` du site).
@@ -462,7 +464,9 @@ const ALLY_BAR: Color32 = Color32::from_rgb(0x3E, 0x9B, 0xD6);
 const ENEMY_BAR: Color32 = Color32::from_rgb(0xC9, 0x52, 0x4A);
 const PARTICIPANT_ROW: f32 = 28.0;
 /// Une ligne de sort sous un combattant déplié.
-const SPELL_ROW: f32 = 20.0;
+const SPELL_ROW: f32 = 22.0;
+/// Côté de l'icône d'un sort.
+const SPELL_ICON: f32 = 18.0;
 /// Couleurs des éléments (`--dmg-*`, thème sombre du site).
 fn element_color(element: &str) -> Color32 {
     match element {
@@ -838,12 +842,17 @@ fn fight_detail(
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.add_space(12.0);
+        // Le switch de grandeur du panneau Combat de l'overlay : mêmes pictogrammes, même socle
+        // de premier plan, mêmes infobulles (`CombatMetric::tooltip`).
         ui.add(
             design::switch(metric)
-                .slot(Metric::Damage, "Dégâts")
-                .slot(Metric::Armor, "Armure")
-                .slot(Metric::Heal, "Soins")
-                .width(300.0)
+                .slot(Metric::Damage, "Dégâts infligés")
+                .icon(design::DsIcon::MetricDamage)
+                .slot(Metric::Armor, "Armure donnée")
+                .icon(design::DsIcon::MetricArmor)
+                .slot(Metric::Heal, "Soins prodigués")
+                .icon(design::DsIcon::MetricHeal)
+                .variant(design::SwitchVariant::FirstPlan)
                 .log_name("historique.combats.grandeur"),
         );
     });
@@ -942,29 +951,14 @@ fn fight_detail(
         };
         section_title(ui, width, "Butin", kamas, &count);
         if fight.loot.len() > 1 {
-            ui.horizontal(|ui| {
-                ui.add_space(12.0);
-                ui.add(
-                    design::input(&mut detail.loot_query)
-                        .placeholder("Rechercher un objet...")
-                        .clearable(true)
-                        .width(280.0)
-                        .log_name("historique.combats.butin.recherche"),
-                );
-                ui.add_space(8.0);
-                ui.add(
-                    design::switch(&mut detail.loot_sort)
-                        .slot(LootSort::Name, "Nom")
-                        .slot(LootSort::Quantity, "Quantité")
-                        .slot(LootSort::Rarity, "Rareté")
-                        .width(300.0)
-                        .log_name("historique.combats.butin.tri"),
-                );
-            });
+            loot_controls(ui, inner_width, detail, ctx, textures);
             ui.add_space(6.0);
         }
         let query = normalize_wakfu_name(detail.loot_query.trim());
-        let lines = sorted_loot(&fight.loot, &query, detail.loot_sort, ctx.catalog);
+        let mut lines = sorted_loot(&fight.loot, &query, detail.loot_sort, ctx.catalog);
+        if detail.loot_reverse {
+            lines.reverse();
+        }
         if lines.is_empty() {
             ui.horizontal(|ui| {
                 ui.add_space(18.0);
@@ -1014,6 +1008,63 @@ fn fight_detail(
     );
     ui.painter()
         .set(shape, egui::Shape::rect_filled(frame, 0.0, DETAIL_FILL));
+}
+
+/// Recherche et tri du butin (`loot-controls-row` du site) : le champ prend toute la largeur
+/// laissée par le switch `Az` / `Nb` / gemme de rareté ; un reclic sur le tri actif inverse son
+/// sens, que l'infobulle de la case dit par ▼ / ▲.
+fn loot_controls(
+    ui: &mut Ui,
+    inner_width: f32,
+    detail: &mut DetailState,
+    ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
+) {
+    let gem = textures
+        .resolve(
+            ui.ctx(),
+            ctx.remote_icons,
+            &IconRef::for_rarity(WakfuRarity::Old),
+        )
+        .map(|texture| texture.id());
+    let tooltip = |mode: LootSort, label: &str| {
+        if detail.loot_sort == mode {
+            format!("{label} {}", if detail.loot_reverse { "▲" } else { "▼" })
+        } else {
+            label.to_string()
+        }
+    };
+    let (name_tip, quantity_tip, rarity_tip) = (
+        tooltip(LootSort::Name, "Nom"),
+        tooltip(LootSort::Quantity, "Quantité"),
+        tooltip(LootSort::Rarity, "Rareté"),
+    );
+    let before = detail.loot_sort;
+    let switch = design::switch(&mut detail.loot_sort)
+        .slot(LootSort::Name, name_tip)
+        .glyph("Az")
+        .slot(LootSort::Quantity, quantity_tip)
+        .glyph("Nb")
+        .slot(LootSort::Rarity, rarity_tip)
+        .image(gem)
+        .reclickable(true)
+        .log_name("historique.combats.butin.tri");
+    let switch_width = switch.desired_size().x;
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.add_space(12.0);
+        ui.add(
+            design::input(&mut detail.loot_query)
+                .placeholder("Rechercher un objet...")
+                .clearable(true)
+                .width(inner_width - switch_width - 8.0)
+                .log_name("historique.combats.butin.recherche"),
+        );
+        changed = ui.add(switch).changed();
+    });
+    if changed {
+        detail.loot_reverse = detail.loot_sort == before && !detail.loot_reverse;
+    }
 }
 
 /// Titre de section : le titre, puis les kamas (icône comprise) et `tail`.
@@ -1202,7 +1253,16 @@ fn participants_column(
                 .spells
                 .get(&(key, metric))
                 .map_or(&[][..], Vec::as_slice);
-            top = paint_spells(ui, &painter, column, top, spells);
+            top = paint_spells(
+                ui,
+                &painter,
+                column,
+                top,
+                participant,
+                spells,
+                ctx,
+                textures,
+            );
         }
     }
     clicked
@@ -1210,12 +1270,16 @@ fn participants_column(
 
 /// Les sorts d'un combattant déplié, sous sa ligne : nom, part par élément (en couleur), total.
 /// Rend le haut de la ligne suivante.
+#[allow(clippy::too_many_arguments)]
 fn paint_spells(
     ui: &Ui,
     painter: &egui::Painter,
     column: Rect,
     mut top: f32,
+    caster: &ParticipantRow,
     spells: &[SpellLine],
+    ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
 ) -> f32 {
     let left = column.left() + 34.0;
     let right = column.right() - 6.0;
@@ -1255,8 +1319,31 @@ fn paint_spells(
                 x = rect.left() - 8.0;
             }
         }
-        let name_rect =
-            Rect::from_min_max(egui::pos2(left, top), egui::pos2(x, top + SPELL_ROW - 4.0));
+        // L'icône du sort, résolue comme sur le panneau Combat : référentiel des classes pour un
+        // allié (par sa classe), des monstres pour un ennemi (par son id).
+        let resolved = overlay_engine::resolve_spell(
+            caster.is_ally,
+            caster.class_name.as_deref(),
+            caster.monster_id,
+            &spell.spell,
+        );
+        let icon_rect = Rect::from_center_size(
+            egui::pos2(left + SPELL_ICON / 2.0, center_y),
+            egui::vec2(SPELL_ICON, SPELL_ICON),
+        );
+        painter.rect_filled(
+            icon_rect,
+            3.0,
+            Color32::from_rgba_premultiplied(0, 0, 0, 90),
+        );
+        if let Some(icon) = resolved.and_then(|spell| spell.icon) {
+            super::paint_remote_icon(ui, painter, icon_rect, icon, ctx.remote_icons, textures);
+        }
+        let name_left = icon_rect.right() + 6.0;
+        let name_rect = Rect::from_min_max(
+            egui::pos2(name_left, top),
+            egui::pos2(x, top + SPELL_ROW - 2.0),
+        );
         let tint = elements
             .first()
             .filter(|_| single)
@@ -1264,9 +1351,9 @@ fn paint_spells(
                 element_color(element)
             });
         painter.with_clip_rect(name_rect).text(
-            egui::pos2(left, center_y),
+            egui::pos2(name_left, center_y),
             Align2::LEFT_CENTER,
-            &spell.spell,
+            resolved.map_or(spell.spell.as_str(), |spell| spell.name),
             text::label_font(ui.ctx(), 12.0),
             tint,
         );
