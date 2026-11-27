@@ -265,6 +265,22 @@ impl HistoryStore {
             .collect())
     }
 
+    /// La classe de chaque personnage allié déjà vu (`nom → classe`, la plus récente l'emporte) —
+    /// le portrait d'une ligne d'expérience du Récap, qui ne connaît que des noms
+    /// (`app-entity-icon` du site résout de même un nom en classe).
+    pub fn ally_classes(&self) -> Result<std::collections::HashMap<String, String>, HistoryError> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT name, class_name FROM fight_participants
+             WHERE side = 'ally' AND class_name IS NOT NULL ORDER BY rowid",
+        )?;
+        let rows = stmt
+            .query_map(params![], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows.into_iter().collect())
+    }
+
     /// Tous les achats, du plus récent au plus ancien.
     pub fn purchases(&self) -> Result<Vec<PurchaseRow>, HistoryError> {
         let mut stmt = self.conn.prepare_cached(

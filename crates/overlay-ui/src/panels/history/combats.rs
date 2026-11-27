@@ -434,12 +434,29 @@ pub struct DetailState {
     pub collapsed_loot: HashSet<i64>,
     /// Combats dont l'Expérience est repliée.
     pub collapsed_xp: HashSet<i64>,
-    /// Recherche dans le butin, partagée par tous les combats dépliés.
-    pub loot_query: String,
-    /// Tri du butin, partagé de même.
-    pub loot_sort: LootSort,
+    /// Recherche et tri du butin, partagés par tous les combats dépliés.
+    pub loot: LootFilter,
+}
+
+/// Recherche et tri d'une liste d'objets (`lootSearch`, `lootSort`, `lootSortReverse` du site).
+#[derive(Debug, Default)]
+pub struct LootFilter {
+    pub query: String,
+    pub sort: LootSort,
     /// Sens inversé (reclic sur le tri actif, `nextLootSortState` du site).
-    pub loot_reverse: bool,
+    pub reverse: bool,
+}
+
+impl LootFilter {
+    /// Les lignes qui passent la recherche, dans l'ordre choisi.
+    pub fn apply<'a>(&self, loot: &'a [ItemLine], catalog: &CatalogIndex) -> Vec<&'a ItemLine> {
+        let query = normalize_wakfu_name(self.query.trim());
+        let mut lines = sorted_loot(loot, &query, self.sort, catalog);
+        if self.reverse {
+            lines.reverse();
+        }
+        lines
+    }
 }
 
 /// Le tri du butin d'un combat (`LootSort` du site).
@@ -1424,14 +1441,18 @@ fn loot_section(
         return;
     }
     if fight.loot.len() > 1 {
-        loot_controls(ui, inner_width, detail, ctx, textures);
+        loot_controls(
+            ui,
+            12.0,
+            inner_width,
+            &mut detail.loot,
+            "historique.combats.butin",
+            ctx,
+            textures,
+        );
         ui.add_space(6.0);
     }
-    let query = normalize_wakfu_name(detail.loot_query.trim());
-    let mut lines = sorted_loot(&fight.loot, &query, detail.loot_sort, ctx.catalog);
-    if detail.loot_reverse {
-        lines.reverse();
-    }
+    let lines = detail.loot.apply(&fight.loot, ctx.catalog);
     if lines.is_empty() {
         empty_line(ui, "Aucun objet ne correspond à cette recherche.");
     }
@@ -1531,10 +1552,12 @@ fn xp_section(
 /// Recherche et tri du butin (`loot-controls-row` du site) : le champ prend toute la largeur
 /// laissée par le switch `Az` / `Nb` / gemme de rareté ; un reclic sur le tri actif inverse son
 /// sens, que l'infobulle de la case dit par ▼ / ▲.
-fn loot_controls(
+pub(super) fn loot_controls(
     ui: &mut Ui,
+    indent: f32,
     inner_width: f32,
-    detail: &mut DetailState,
+    filter: &mut LootFilter,
+    log_name: &str,
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
 ) {
@@ -1546,8 +1569,8 @@ fn loot_controls(
         )
         .map(|texture| texture.id());
     let tooltip = |mode: LootSort, label: &str| {
-        if detail.loot_sort == mode {
-            format!("{label} {}", if detail.loot_reverse { "▲" } else { "▼" })
+        if filter.sort == mode {
+            format!("{label} {}", if filter.reverse { "▲" } else { "▼" })
         } else {
             label.to_string()
         }
@@ -1557,8 +1580,8 @@ fn loot_controls(
         tooltip(LootSort::Quantity, "Quantité"),
         tooltip(LootSort::Rarity, "Rareté"),
     );
-    let before = detail.loot_sort;
-    let switch = design::switch(&mut detail.loot_sort)
+    let before = filter.sort;
+    let switch = design::switch(&mut filter.sort)
         .slot(LootSort::Name, name_tip)
         .glyph("Az")
         .slot(LootSort::Quantity, quantity_tip)
@@ -1566,22 +1589,22 @@ fn loot_controls(
         .slot(LootSort::Rarity, rarity_tip)
         .image(gem)
         .reclickable(true)
-        .log_name("historique.combats.butin.tri");
+        .log_name(format!("{log_name}.tri"));
     let switch_width = switch.desired_size().x;
     let mut changed = false;
     ui.horizontal(|ui| {
-        ui.add_space(12.0);
+        ui.add_space(indent);
         ui.add(
-            design::input(&mut detail.loot_query)
+            design::input(&mut filter.query)
                 .placeholder("Rechercher un objet...")
                 .clearable(true)
                 .width(inner_width - switch_width - 8.0)
-                .log_name("historique.combats.butin.recherche"),
+                .log_name(format!("{log_name}.recherche")),
         );
         changed = ui.add(switch).changed();
     });
     if changed {
-        detail.loot_reverse = detail.loot_sort == before && !detail.loot_reverse;
+        filter.reverse = filter.sort == before && !filter.reverse;
     }
 }
 

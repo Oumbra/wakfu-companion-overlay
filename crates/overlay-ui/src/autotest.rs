@@ -253,7 +253,7 @@ pub fn history_scenario() -> Vec<Step> {
             // L'année par donjon et famille, sa première ligne dépliée, puis par type.
             steps.extend([
                 Step::Click {
-                    x: 838.0,
+                    x: 950.0,
                     y: 165.0,
                     label: "donjon et famille",
                 },
@@ -267,12 +267,20 @@ pub fn history_scenario() -> Vec<Step> {
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("recap-donjons-deplie"),
                 Step::Click {
-                    x: 968.0,
+                    x: 1006.0,
                     y: 165.0,
                     label: "type",
                 },
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("recap-types"),
+                // « Donjon 3 joueurs » déplié : ses tuiles de donjons, sa pierre en tête du butin.
+                Step::Click {
+                    x: 550.0,
+                    y: 393.0,
+                    label: "un type",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("recap-types-deplie"),
             ]);
         }
         if name == "echanges" {
@@ -541,7 +549,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            20
+            21
         );
     }
 

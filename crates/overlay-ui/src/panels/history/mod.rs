@@ -31,7 +31,7 @@ pub const WINDOW_TITLE: &str = "Wakfu Companion — Historique";
 const WINDOW_UNDERLAY: egui::Color32 = egui::Color32::from_rgb(0x15, 0x17, 0x1C);
 
 /// Côté de l'icône Kamas qui suit un montant.
-const KAMAS_ICON_SIZE: f32 = 14.0;
+pub(super) const KAMAS_ICON_SIZE: f32 = 14.0;
 
 /// Peint un glyphe du design system centré sur `center`, à `size` de côté (rapport conservé).
 pub(crate) fn paint_icon(

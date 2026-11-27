@@ -485,4 +485,25 @@ ds_icons! {
         /// Deux chevrons qui s'écartent (`icons/icon-chevrons-expand.png`, 8 × 12) — « Tout
         /// déplier ». Symbole `chevrons-expand`, même traitement.
         ChevronsExpand => "icon-chevrons-expand", libre;
+
+        /// Trois traits, le dernier plus court (`icons/icon-lines.png`, 12 × 9) — affichage
+        /// « Cumulé » du Récap (`recap-group-switch` du site, tracé `M4 7h16M4 12h16M4 17h10`),
+        /// même traitement que [`DsIcon::Dungeon`] (trait 1,9).
+        Lines => "icon-lines", libre;
+
+        /// Deux épées croisées au trait (`icons/icon-swords.png`, 16 × 16) — affichage « Type » du
+        /// Récap. Symbole `swords` du sprite du site ; à ne pas confondre avec [`DsIcon::Sword`],
+        /// l'épée du jeu.
+        CrossedSwords => "icon-swords", libre;
+
+        /// Coche (`icons/icon-check.png`, 12 × 8) — case « Victoire » du détail d'une ligne du
+        /// Récap, teintée en vert par l'appelant.
+        Victory => "icon-check", libre;
+
+        /// Croix (`icons/icon-cross.png`, 10 × 10) — case « Défaite », teintée en rouge.
+        Defeat => "icon-cross", libre;
+
+        /// Patte (`icons/icon-paw.png`, 18 × 14) — vignette de repli d'une ligne « famille » du
+        /// Récap (tracé du site, rastérisé à 24 px, trait 1,7).
+        Paw => "icon-paw", libre;
 }
