@@ -449,7 +449,7 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
 | Zone | Contenu retiré |
 | --- | --- |
 | `overlay-sync` | `pairing.rs`, `token_store.rs`, `session.rs`, `queue.rs`, l'authentification de `client.rs`, `catalog_cache.rs`, `reference_data_cache.rs` ; le crate se réduit à la mise à jour signée et au téléchargement d'icônes |
-| `overlay-ui` | `panels/login.rs` (connexion, appairage ; l'écran de chargement ne survit que pour le téléchargement et la vérification d'une nouvelle version — décision du 2026-11-27 —, le démarrage ouvre directement les fenêtres overlay), les threads Auth / Sync / Catalogue / Donjons de `background.rs`, les branches compte de `main.rs`, du binaire X11, d'`engine_thread.rs`, de `render_content.rs`, d'`options_modal.rs`, l'onglet « À propos » de la modale |
+| `overlay-ui` | `panels/login.rs` (connexion, appairage ; l'écran de chargement ne survit que pour le téléchargement et la vérification d'une nouvelle version — décision du 2026-11-27 —, le démarrage ouvre directement les fenêtres overlay), les threads Auth / Sync / Catalogue / Donjons de `background.rs`, les branches compte de `main.rs`, du binaire X11, d'`engine_thread.rs`, de `render_content.rs`, d'`options_modal.rs` (l'onglet « À propos » de la modale reste : décision du 2026-11-27) |
 | `local_data.rs` | Le périmètre `OnDisconnect` disparaît ; `Everything` reste |
 | Moteur | Roster, liste de suivi et profil d'alertes ne viennent plus de `GET /api/v1/settings` : ils sont déjà locaux (`config.toml`), les branches de fusion avec le compte disparaissent |
 | Dépendances | `keyring` (et `secret-service` sous Linux) |
