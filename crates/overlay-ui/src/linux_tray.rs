@@ -1,7 +1,7 @@
 //! Icône de zone de notification sous Linux/KDE (StatusNotifierItem sur DBus, §17.2 du plan) —
 //! équivalent Linux de `main.rs::install_tray`/`sync_tray_menu`/`handle_tray_menu` (Windows,
-//! `tray-icon`). Même menu (Paramètres / Mise à jour / Déconnecter ou Se connecter / Quitter),
-//! même politique
+//! `tray-icon`). Même menu (Paramètres / Historique / Mise à jour / Déconnecter ou Se connecter /
+//! Quitter), même politique
 //! (jamais fatal si la pose échoue), mais via `ksni` : implémentation pure Rust du protocole SNI,
 //! sans GTK/libappindicator — voir la doc de module de `bin/wakfu-companion-overlay-x11.rs`, qui
 //! expliquait pourquoi `tray-icon` avait été écarté côté Linux. KDE Plasma (et tout hôte SNI,
@@ -18,12 +18,16 @@ use ksni::menu::{MenuItem, StandardItem};
 
 use crate::ui_icons;
 
-/// Les quatre actions du menu — sondées côté binaire X11 par `try_recv`, exactement comme
+/// Les cinq actions du menu — sondées côté binaire X11 par `try_recv`, exactement comme
 /// `hotkey_events` (voir `about_to_wait`).
 pub enum TrayEvent {
     /// « Paramètres » : ouvre la Carte sur son volet des paramètres (2026-09-22). Elle ouvrait la
     /// fenêtre Options sur son onglet jusque-là.
     Settings,
+    /// « Historique » (2026-11-27) : lance le processus d'historique (`--historique`) — voir
+    /// `bin/wakfu-companion-overlay-x11.rs::launch_history_process` et
+    /// `main.rs::launch_history_process`.
+    History,
     ManualUpdate,
     /// La troisième entrée, dont le libellé suit l'état du compte : « Se déconnecter » quand il y en
     /// a un, « Se connecter » sinon. Les deux ouvrent la Carte — voir `menu`.
@@ -67,6 +71,7 @@ impl ksni::Tray for LinuxTray {
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let options_tx = self.event_tx.clone();
+        let history_tx = self.event_tx.clone();
         let update_tx = self.event_tx.clone();
         let disconnect_tx = self.event_tx.clone();
         let quit_tx = self.event_tx.clone();
@@ -75,6 +80,16 @@ impl ksni::Tray for LinuxTray {
                 label: "Paramètres".into(),
                 activate: Box::new(move |_| {
                     let _ = options_tx.send(TrayEvent::Settings);
+                }),
+                ..Default::default()
+            }
+            .into(),
+            // Même place que côté Windows (`main.rs::App::install_tray`) : juste sous
+            // « Paramètres », avant « Mise à jour ».
+            StandardItem {
+                label: "Historique".into(),
+                activate: Box::new(move |_| {
+                    let _ = history_tx.send(TrayEvent::History);
                 }),
                 ..Default::default()
             }
@@ -125,7 +140,7 @@ pub fn install_tray() -> Option<(ksni::blocking::Handle<LinuxTray>, mpsc::Receiv
     match tray.spawn() {
         Ok(handle) => {
             tracing::info!(
-                "[zone de notification] icône posée — menu Paramètres / Mise à jour / compte / Quitter."
+                "[zone de notification] icône posée — menu Paramètres / Historique / Mise à jour / compte / Quitter."
             );
             Some((handle, event_rx))
         }

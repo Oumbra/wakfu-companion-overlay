@@ -18,13 +18,22 @@
 //!
 //! **Icône de zone de notification (2026-09-18)** : `overlay_ui::linux_tray`, via `ksni`
 //! (StatusNotifierItem/DBus, pure Rust) plutôt que `tray-icon` (GTK/libappindicator sous Linux,
-//! écarté pour cette raison). Même menu que Windows — Options / Mise à jour / Déconnecter /
-//! Quitter (`App::install_tray`/`handle_tray_menu`) — affiché nativement par tout hôte SNI (KDE
-//! Plasma, Discord en est un exemple courant). Sans hôte SNI (GNOME sans extension, Game
+//! écarté pour cette raison). Même menu que Windows — Options / Historique / Mise à jour /
+//! Déconnecter / Quitter (`App::install_tray`/`handle_tray_menu`) — affiché nativement par tout
+//! hôte SNI (KDE Plasma, Discord en est un exemple courant). Sans hôte SNI (GNOME sans extension, Game
 //! Mode/Gamescope), la pose échoue silencieusement (`tracing::warn!`, jamais fatal) et les
 //! anciens accès restent valables : raccourci global, fermeture de la fenêtre de connexion
 //! (`CloseRequested`) ou Ctrl+C pour quitter, section « Compte » de la fenêtre Options pour se
 //! déconnecter.
+//!
+//! **Fenêtre d'historique en processus à part (2026-11-27)** — portage de `main.rs`, voir
+//! `docs/plan-historique-local.md` §7 : l'entrée « Historique » du menu relance ce même binaire
+//! avec `--historique[=onglet]` (`launch_history_process`). Ce processus-là est « autonome »
+//! (`App::standalone`) : son propre verrou (`single_instance::history_guard`), ni moteur, ni
+//! compte, ni synchronisation, ni mise à jour, ni icône de notification, raccourcis globaux
+//! suspendus, `wakfu.log` jamais cherché ; il n'ouvre que la fenêtre d'historique
+//! (`App::open_history_window`, fenêtre X11 ordinaire) et se termine avec elle. L'essai
+//! automatique invisible (`--autotest`, `overlay_ui::autotest`) n'est pas porté ici.
 //!
 //! **Ce qui reste propre à Windows, documenté honnêtement (§17.2 « État ») :**
 //! - Pas de hotkey rafraîchissement/détails (`ShortcutAction::LINUX_SUPPORTED` seulement :
@@ -133,6 +142,29 @@ mod linux_main {
     const COMPLETION_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
 
     const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+    /// Taille d'ouverture de la fenêtre d'historique (points logiques) — voir
+    /// `main.rs::HISTORY_WINDOW_SIZE`, même valeur : celle des pages du site.
+    const HISTORY_WINDOW_SIZE: (f64, f64) = (1100.0, 820.0);
+    /// Voir `main.rs::HISTORY_WINDOW_MIN_SIZE` : en deçà, les tableaux des vues ne tiennent plus.
+    const HISTORY_WINDOW_MIN_SIZE: (f64, f64) = (720.0, 480.0);
+
+    /// Voir `main.rs::winit_resize_direction` — le bord de la fenêtre d'historique saisi par la
+    /// souris, d'egui vers winit (qui le confie au gestionnaire de fenêtres, `_NET_WM_MOVERESIZE`).
+    fn winit_resize_direction(direction: egui::ResizeDirection) -> winit::window::ResizeDirection {
+        use egui::ResizeDirection as E;
+        use winit::window::ResizeDirection as W;
+        match direction {
+            E::North => W::North,
+            E::South => W::South,
+            E::East => W::East,
+            E::West => W::West,
+            E::NorthEast => W::NorthEast,
+            E::NorthWest => W::NorthWest,
+            E::SouthEast => W::SouthEast,
+            E::SouthWest => W::SouthWest,
+        }
+    }
 
     /// Voir `main.rs::App::follows_hit_region`.
     fn follows_hit_region(kind: OverlayKind) -> bool {
@@ -409,6 +441,22 @@ mod linux_main {
         /// (aller-retour vers le thread DBus du service) à chaque tick alors que rien n'a changé,
         /// voir `sync_session_windows`.
         tray_synced_connected: bool,
+        /// Référentiel des donjons (noms des runs), publié par le thread Référentiel — lu par la
+        /// fenêtre d'historique (`panels::history::HistoryHost`), comme
+        /// `main.rs::App::dungeons`.
+        dungeons: Arc<ArcSwap<DungeonIndex>>,
+        /// Voir `main.rs::App::history` : la fenêtre d'historique ouverte, son état et la base.
+        /// `None` tant qu'elle est fermée — la base n'est ouverte que le temps de la fenêtre.
+        history: Option<panels::history::HistoryHost>,
+        /// `--historique[=onglet]` : à ouvrir dès que la boucle tourne, puis oublié.
+        history_on_start: Option<String>,
+        /// **Processus d'historique** (`--historique[=onglet]`, 2026-11-27) — voir
+        /// `main.rs::App::standalone` : la fenêtre d'historique seule, sans jeu ni overlay (ni
+        /// moteur, ni compte, ni icône de notification, ni fenêtre sur le jeu) ; le processus se
+        /// termine avec sa fenêtre. Un processus à part plutôt qu'une fenêtre de l'overlay : son
+        /// contexte GPU est rendu en entier à la fermeture, et chaque processus garde son budget
+        /// mémoire.
+        standalone: bool,
     }
 
     /// Ce qu'il faut savoir pour poser une fenêtre `Combat` — voir
@@ -658,6 +706,8 @@ mod linux_main {
         watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
         watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
         catalog: Arc<ArcSwap<CatalogIndex>>,
+        /// Voir `App::dungeons`.
+        dungeons: Arc<ArcSwap<DungeonIndex>>,
         remote_icons: RemoteIconStore,
         auth_status: Arc<ArcSwap<AuthStatus>>,
         auth_command_tx: mpsc::Sender<AuthCommand>,
@@ -710,6 +760,7 @@ mod linux_main {
                 watchlist,
                 watchlist_toast,
                 catalog,
+                dungeons,
                 remote_icons,
                 auth_status,
                 auth_command_tx,
@@ -795,6 +846,10 @@ mod linux_main {
                 tray: None,
                 tray_rx: None,
                 tray_synced_connected: false,
+                dungeons,
+                history: None,
+                history_on_start: None,
+                standalone: false,
             }
         }
 
@@ -931,7 +986,9 @@ mod linux_main {
                     .values()
                     .any(|w| w.kind == OverlayKind::Options);
                 let before = self.windows.len();
-                self.windows.retain(|_, w| w.kind == OverlayKind::Login);
+                // La fenêtre d'historique ne dépend pas du compte : elle reste — voir `main.rs`.
+                self.windows
+                    .retain(|_, w| matches!(w.kind, OverlayKind::Login | OverlayKind::History));
                 if self.windows.len() != before {
                     if had_options {
                         let _ = self.hotkeys.resume();
@@ -1084,6 +1141,7 @@ mod linux_main {
                     overlay_ui::linux_tray::TrayEvent::Settings => {
                         self.open_settings_card(event_loop);
                     }
+                    overlay_ui::linux_tray::TrayEvent::History => launch_history_process(),
                     overlay_ui::linux_tray::TrayEvent::ManualUpdate => {
                         self.open_manual_update_window(event_loop);
                     }
@@ -1211,6 +1269,190 @@ mod linux_main {
                 origin.x + (screen.width as i32 - outer.width as i32) / 2,
                 origin.y + (screen.height as i32 - outer.height as i32) / 2,
             ));
+        }
+
+        /// Voir `main.rs::App::open_history_window` (2026-11-27) — ouvre la fenêtre d'historique,
+        /// ou la ramène au premier plan si elle l'est déjà, sur l'onglet `tab` s'il est donné.
+        /// Fenêtre X11 ORDINAIRE comme la Carte (`_NET_WM_WINDOW_TYPE_NORMAL`, jamais `Utility`
+        /// comme les overlays de jeu) : barre des tâches, bascule de fenêtres, z-order normal,
+        /// sans décorations (sa bannière la déplace, ses bords la retaillent). Taille et position
+        /// de la dernière fermeture si elles tombent encore sur un écran
+        /// (`overlay_ui::history_placement`), centrée sur l'écran principal sinon.
+        ///
+        /// Pas de variante invisible ici : l'essai automatique (`--autotest`) n'existe que sous
+        /// Windows.
+        fn open_history_window(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            tab: Option<panels::history::HistoryTab>,
+        ) {
+            if let Some(overlay) = self
+                .windows
+                .values_mut()
+                .find(|w| w.kind == OverlayKind::History)
+            {
+                if let (Some(tab), Some(host)) = (tab, self.history.as_mut()) {
+                    host.state.tab = tab;
+                }
+                overlay.window.focus_window();
+                overlay.window.request_redraw();
+                return;
+            }
+            let screens: Vec<overlay_ui::history_placement::Screen> = event_loop
+                .available_monitors()
+                .map(|monitor| overlay_ui::history_placement::Screen {
+                    x: monitor.position().x,
+                    y: monitor.position().y,
+                    width: monitor.size().width,
+                    height: monitor.size().height,
+                })
+                .collect();
+            let placement = overlay_ui::history_placement::load()
+                .filter(|placement| placement.reachable(&screens));
+            let (rgba, width, height) = ui_icons::app_logo_rgba();
+            let icon = match Icon::from_rgba(rgba, width, height) {
+                Ok(icon) => Some(icon),
+                Err(err) => {
+                    tracing::warn!("[historique] icône de fenêtre refusée : {err}");
+                    None
+                }
+            };
+            let attrs = WindowAttributes::default()
+                .with_title(panels::history::WINDOW_TITLE)
+                .with_inner_size(winit::dpi::LogicalSize::new(
+                    HISTORY_WINDOW_SIZE.0,
+                    HISTORY_WINDOW_SIZE.1,
+                ))
+                .with_min_inner_size(winit::dpi::LogicalSize::new(
+                    HISTORY_WINDOW_MIN_SIZE.0,
+                    HISTORY_WINDOW_MIN_SIZE.1,
+                ))
+                .with_transparent(true)
+                .with_decorations(false)
+                .with_window_level(WindowLevel::Normal)
+                .with_resizable(true)
+                .with_visible(true)
+                .with_window_icon(icon)
+                .with_x11_window_type(vec![WindowType::Normal]);
+            let attrs = match placement {
+                Some(placement) => attrs
+                    .with_inner_size(winit::dpi::PhysicalSize::new(
+                        placement.width,
+                        placement.height,
+                    ))
+                    .with_position(PhysicalPosition::new(placement.x, placement.y)),
+                None => attrs,
+            };
+            let window = match event_loop.create_window(attrs) {
+                Ok(window) => Arc::new(window),
+                Err(err) => {
+                    tracing::warn!("[historique] fenêtre refusée : {err}");
+                    return;
+                }
+            };
+            if let Err(err) = window.set_cursor_hittest(true) {
+                tracing::warn!("set_cursor_hittest a échoué à la création : {err}");
+            }
+
+            let gpu = pollster::block_on(init_gpu(Arc::clone(&window)));
+            let portraits = PortraitAtlas::load(&gpu.egui_ctx);
+            let combat_frame = CombatFrame::load(&gpu.egui_ctx);
+            let icons = UiIcons::load(&gpu.egui_ctx);
+
+            if placement.is_none() {
+                Self::center_on_primary_monitor(event_loop, &window);
+            }
+            window.focus_window();
+            self.history = Some(panels::history::HistoryHost::open(
+                tab.unwrap_or_default(),
+                Arc::clone(&self.dungeons),
+            ));
+
+            let overlay = OverlayWindow {
+                window,
+                gpu,
+                kind: OverlayKind::History,
+                portraits,
+                combat_frame,
+                icons,
+                avatars: None,
+                remote_icon_textures: RemoteIconTextures::default(),
+                combat_side: CombatSide::default(),
+                combat_metric: CombatMetric::default(),
+                options_state: None,
+                login_state: None,
+                last_login_height: None,
+                // Aucune fenêtre de jeu derrière (`is_detached`) : `sync_windows` la laisse en
+                // place, `sync_topmost` ne la promeut jamais.
+                game_window: 0,
+                game_rect: GameRect {
+                    left: 0,
+                    top: 0,
+                    width: 0,
+                    height: 0,
+                    client_top: 0,
+                },
+                character_name: "Historique".to_string(),
+                last_position: None,
+                last_watchlist_width: None,
+                last_watchlist_height: None,
+                watchlist_state: None,
+                watchlist_plan: None,
+                click_through_hovered: false,
+                last_recap_height: None,
+                visible: true,
+                topmost_state: TopmostState::Normal,
+                next_redraw_at: None,
+            };
+            overlay.window.request_redraw();
+            tracing::info!("[historique] fenêtre ouverte.");
+            self.windows.insert(overlay.window.id(), overlay);
+        }
+
+        /// Voir `main.rs::App::close_history_window` — ferme la fenêtre d'historique, et la base
+        /// qu'elle tenait ouverte, après avoir noté sa taille et sa position pour la prochaine
+        /// ouverture.
+        fn close_history_window(&mut self) {
+            if let Some(overlay) = self
+                .windows
+                .values()
+                .find(|w| w.kind == OverlayKind::History)
+            {
+                if let Ok(position) = overlay.window.outer_position() {
+                    let size = overlay.window.inner_size();
+                    overlay_ui::history_placement::save(
+                        &overlay_ui::history_placement::Placement {
+                            x: position.x,
+                            y: position.y,
+                            width: size.width,
+                            height: size.height,
+                        },
+                    );
+                }
+            }
+            self.windows.retain(|_, w| w.kind != OverlayKind::History);
+            self.history = None;
+            tracing::info!("[historique] fenêtre fermée.");
+        }
+
+        /// Fin de chaque tour de boucle : les redessins dus, puis le prochain réveil — voir
+        /// `main.rs::App::drive_redraws`. Ici les redessins passent par `request_redraw()` (le
+        /// rendu vit dans `WindowEvent::RedrawRequested`). Seul travail du processus d'historique
+        /// (`standalone`), qui n'a ni jeu à suivre ni raccourci à sonder.
+        fn drive_redraws(&mut self, event_loop: &ActiveEventLoop) {
+            let now = std::time::Instant::now();
+            let mut next_wake = now + POLL_INTERVAL;
+            for overlay in self.windows.values_mut() {
+                if let Some(due) = overlay.next_redraw_at {
+                    if due <= now {
+                        overlay.next_redraw_at = None;
+                        overlay.window.request_redraw();
+                    } else {
+                        next_wake = next_wake.min(due);
+                    }
+                }
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(next_wake));
         }
 
         /// Même politique que `main.rs::App::sync_windows` (voir sa doc) : converge `self.windows`
@@ -1427,7 +1669,8 @@ mod linux_main {
                 // tout sauf la modale, centrée par le rendu (2026-09-17) — voir
                 // `main.rs::App::anchor_position`. Détachée, ce bras n'est pas lu.
                 OverlayKind::Options => PhysicalPosition::new(rect.left, rect.top),
-                // Jamais créée par ce binaire (voir la doc de module) — exhaustivité seulement.
+                // Créées par `create_login_window` / `open_history_window`, jamais par
+                // `create_overlay_window` — exhaustivité seulement.
                 OverlayKind::Login | OverlayKind::History => PhysicalPosition::new(0, 0),
             }
         }
@@ -1488,8 +1731,8 @@ mod linux_main {
                     panels::login::WINDOW_WIDTH as f64,
                     panels::login::INITIAL_HEIGHT as f64,
                 ),
-                // Fenêtre d'historique : pas encore câblée sous Linux — exhaustivité seulement.
-                OverlayKind::History => (1100.0, 820.0),
+                // Créée par `open_history_window`, jamais par ici — exhaustivité seulement.
+                OverlayKind::History => HISTORY_WINDOW_SIZE,
                 // Exactement le bouton et son fond de section — voir `main.rs`, même raison.
                 OverlayKind::ClickThrough => (
                     click_through::SECTION_SIZE.x as f64,
@@ -3086,7 +3329,28 @@ mod linux_main {
 
     impl ApplicationHandler<UserEvent> for App {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            // Processus d'historique : la fenêtre d'historique seule — ni icône de notification,
+            // ni Carte, ni fenêtre sur le jeu (voir `main.rs`, même branche).
+            if self.standalone {
+                if let Some(tab) = self.history_on_start.take() {
+                    self.open_history_window(event_loop, panels::history::HistoryTab::parse(&tab));
+                    // Fenêtre refusée (serveur X, GPU) : un processus sans fenêtre ne servirait
+                    // à rien et ne se fermerait jamais — il s'arrête tout de suite.
+                    if !self
+                        .windows
+                        .values()
+                        .any(|w| w.kind == OverlayKind::History)
+                    {
+                        logging::log_session_end("fenêtre d'historique refusée");
+                        event_loop.exit();
+                    }
+                }
+                return;
+            }
             self.install_tray();
+            if let Some(tab) = self.history_on_start.take() {
+                self.open_history_window(event_loop, panels::history::HistoryTab::parse(&tab));
+            }
             self.sync_session_windows(event_loop);
             self.sync_windows(event_loop);
             if !self.banner_printed {
@@ -3194,6 +3458,9 @@ mod linux_main {
                 StartManualUpdate,
                 /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle.
                 CloseManualUpdate,
+                /// Croix de la fenêtre d'historique (ou fermeture par le gestionnaire de
+                /// fenêtres) — voir `App::close_history_window`.
+                CloseHistory,
             }
             let mut post_redraw = PostRedraw::None;
             // La bande Récap vient d'être reposée : la config est réécrite une fois le geste
@@ -3235,6 +3502,9 @@ mod linux_main {
                             }
                             _ => post_redraw = PostRedraw::CloseOptions,
                         }
+                    } else if overlay.kind == OverlayKind::History {
+                        // Alt+F4 sur la fenêtre d'historique : elle seule se ferme — voir `main.rs`.
+                        post_redraw = PostRedraw::CloseHistory;
                     } else if let OverlayKind::ResetConfirm(target) = overlay.kind {
                         // Fermer la question, c'est répondre « Non ».
                         post_redraw = PostRedraw::AnswerResetConfirm(target, false);
@@ -3537,7 +3807,11 @@ mod linux_main {
                             veiled,
                             login: overlay.login_state.as_mut(),
                             card_settings: card_settings.as_mut(),
-                            history: None,
+                            history: if overlay.kind == OverlayKind::History {
+                                self.history.as_mut()
+                            } else {
+                                None
+                            },
                         },
                     );
                     // Bloc Récap : retaillé à la hauteur qu'il vient de mesurer — voir
@@ -3863,6 +4137,29 @@ mod linux_main {
                                     }
                                 }
                             }
+                        }
+                    }
+                    // Fenêtre d'historique : déplacée par sa bannière, retaillée par ses bords —
+                    // sans décorations, ce sont les seuls moyens —, fermée par sa croix. Voir
+                    // `main.rs`, même bloc ; sous X11, les deux gestes passent la main au
+                    // gestionnaire de fenêtres (`_NET_WM_MOVERESIZE`), et le `Resized` qui suit
+                    // reconfigure la surface (voir plus haut).
+                    if overlay.kind == OverlayKind::History {
+                        if outcome.drag_window {
+                            if let Err(err) = overlay.window.drag_window() {
+                                tracing::warn!("[historique] déplacement refusé : {err}");
+                            }
+                        }
+                        if let Some(direction) = outcome.resize_window {
+                            if let Err(err) = overlay
+                                .window
+                                .drag_resize_window(winit_resize_direction(direction))
+                            {
+                                tracing::warn!("[historique] redimensionnement refusé : {err}");
+                            }
+                        }
+                        if outcome.close_history {
+                            post_redraw = PostRedraw::CloseHistory;
                         }
                     }
                     // Fenêtre de connexion : retaillée à la hauteur de la carte et recentrée —
@@ -4209,10 +4506,24 @@ mod linux_main {
                     let _ = self.update_command_tx.send(UpdateCommand::Download);
                 }
                 PostRedraw::CloseManualUpdate => self.close_manual_update_window(event_loop),
+                PostRedraw::CloseHistory => {
+                    self.close_history_window();
+                    // Processus d'historique : il n'existe que pour sa fenêtre.
+                    if self.standalone {
+                        logging::log_session_end("fenêtre d'historique fermée");
+                        event_loop.exit();
+                    }
+                }
             }
         }
 
         fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+            // Processus d'historique : ni mise à jour, ni moteur, ni raccourcis, ni jeu à suivre —
+            // seulement les redessins de sa fenêtre (voir `main.rs`, même branche).
+            if self.standalone {
+                self.drive_redraws(event_loop);
+                return;
+            }
             // Une mise à jour prête s'installe avant tout le reste — voir `main.rs`.
             self.install_update_if_ready(event_loop);
             if event_loop.exiting() {
@@ -4350,20 +4661,7 @@ mod linux_main {
             self.sync_panel_visibility();
             self.sync_topmost();
             self.sync_hit_tests();
-
-            let now = std::time::Instant::now();
-            let mut next_wake = now + POLL_INTERVAL;
-            for overlay in self.windows.values_mut() {
-                if let Some(due) = overlay.next_redraw_at {
-                    if due <= now {
-                        overlay.next_redraw_at = None;
-                        overlay.window.request_redraw();
-                    } else {
-                        next_wake = next_wake.min(due);
-                    }
-                }
-            }
-            event_loop.set_control_flow(ControlFlow::WaitUntil(next_wake));
+            self.drive_redraws(event_loop);
         }
     }
 
@@ -4478,6 +4776,38 @@ mod linux_main {
         }
     }
 
+    /// Entrée « Historique » du menu de la zone de notification : lance le processus d'historique
+    /// (`--historique`) — voir `main.rs::launch_history_process`, même geste. S'il tourne déjà, le
+    /// nouveau processus bute sur son verrou (`single_instance::history_guard`) et s'arrête ;
+    /// contrairement à Windows, la fenêtre déjà ouverte n'est PAS ramenée au premier plan
+    /// (`single_instance::focus_existing_history` ne sait chercher une fenêtre par son titre que
+    /// sous Windows).
+    fn launch_history_process() {
+        tracing::info!(">>> Historique (zone de notification).");
+        let exe = match env::current_exe() {
+            Ok(exe) => exe,
+            Err(err) => {
+                tracing::warn!("[historique] exécutable introuvable : {err}");
+                return;
+            }
+        };
+        match std::process::Command::new(exe)
+            .arg(update_apply::HISTORY_FLAG)
+            .spawn()
+        {
+            // Sous Unix, un enfant jamais attendu reste zombie jusqu'à la fin de l'overlay : un
+            // fil le récolte à sa sortie.
+            Ok(mut child) => {
+                let _ = std::thread::Builder::new()
+                    .name("historique-attente".into())
+                    .spawn(move || {
+                        let _ = child.wait();
+                    });
+            }
+            Err(err) => tracing::warn!("[historique] lancement refusé : {err}"),
+        }
+    }
+
     /// Ordre de priorité complet (voir `config::resolve_log_path`) : argument CLI > chemin
     /// sauvegardé par une validation précédente de la modale Options (2026-09-08) > découverte
     /// automatique. Seule la découverte automatique peut échouer complètement (aucun argument, rien
@@ -4509,7 +4839,18 @@ mod linux_main {
         build_info::mark_process_start();
         // **Une seule instance** (2026-09-23, `overlay_ui::single_instance`) : AVANT le journal,
         // qu'une seconde instance ne doit pas toucher. Le verrou vit jusqu'à la fin de `run`.
-        let _instance = match overlay_ui::single_instance::guard() {
+        //
+        // **Processus d'historique** (`--historique`, 2026-11-27) : son propre verrou, à côté de
+        // celui de l'overlay (`single_instance::history_guard`) — voir `main.rs`.
+        let standalone = update_apply::parse_args(env::args().skip(1))
+            .history_tab
+            .is_some();
+        let guard = if standalone {
+            overlay_ui::single_instance::history_guard()
+        } else {
+            overlay_ui::single_instance::guard()
+        };
+        let _instance = match guard {
             overlay_ui::single_instance::Startup::Proceed(lock) => lock,
             overlay_ui::single_instance::Startup::Exit => return,
         };
@@ -4555,7 +4896,12 @@ mod linux_main {
             update_apply::cleanup(&overlay_sync::update::updates_dir());
         }
 
-        let log_path = resolve_path(&saved_config, cli.log_path);
+        // Le processus d'historique ne lit pas `wakfu.log` : il s'ouvre aussi sans le jeu installé.
+        let log_path = if standalone {
+            PathBuf::new()
+        } else {
+            resolve_path(&saved_config, cli.log_path)
+        };
         let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
         let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
         let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
@@ -4586,14 +4932,19 @@ mod linux_main {
         let (settings_tx, settings_rx) = mpsc::channel();
         let (auth_command_tx, auth_command_rx) = mpsc::channel();
         let (sync_tx, sync_rx) = mpsc::channel();
-        spawn_sync_thread(sync_rx, auth_command_tx.clone());
-        spawn_auth_thread(
-            settings_tx.clone(),
-            sync_tx.clone(),
-            Arc::clone(&auth_status),
-            auth_command_rx,
-            proxy.clone(),
-        );
+        // Processus d'historique : ni compte, ni synchronisation, ni mise à jour, ni moteur —
+        // seul le référentiel (les noms d'objets et de donjons de l'historique) démarre.
+        let full_session = !standalone;
+        if full_session {
+            spawn_sync_thread(sync_rx, auth_command_tx.clone());
+            spawn_auth_thread(
+                settings_tx.clone(),
+                sync_tx.clone(),
+                Arc::clone(&auth_status),
+                auth_command_rx,
+                proxy.clone(),
+            );
+        }
         spawn_referentiel_thread(
             Arc::clone(&catalog),
             Arc::clone(&dungeons),
@@ -4604,45 +4955,49 @@ mod linux_main {
         // tout de suite, derrière l'écran de chargement ; avec « Installer automatiquement » coché,
         // une version plus récente est installée avant d'ouvrir le moindre overlay de jeu.
         let (update_command_tx, update_command_rx) = mpsc::channel();
-        spawn_update_thread(
-            Arc::clone(&update_status),
-            Arc::clone(&startup),
-            update_command_rx,
-            proxy.clone(),
-        );
-        let _ = update_command_tx.send(UpdateCommand::Check {
-            install_if_available: saved_config.auto_update,
-        });
+        if full_session {
+            spawn_update_thread(
+                Arc::clone(&update_status),
+                Arc::clone(&startup),
+                update_command_rx,
+                proxy.clone(),
+            );
+            let _ = update_command_tx.send(UpdateCommand::Check {
+                install_if_available: saved_config.auto_update,
+            });
+        }
         let remote_icons = RemoteIconStore::spawn(proxy.clone());
         // **Le canal des complétions** (2026-09-17) — voir `engine_thread::WatchlistCompleted` sur
         // pourquoi un canal et pas un `ArcSwap` : une complétion perdue est une entrée jamais retirée.
         let (completions_tx, completions_rx) = mpsc::channel();
         let (watchlist_definitions_tx, watchlist_definitions_rx) = mpsc::channel();
-        spawn_engine_thread(
-            log_path.clone(),
-            EngineHandles {
-                snapshot: Arc::clone(&snapshot),
-                watchlist: Arc::clone(&watchlist),
-                watchlist_toast: Arc::clone(&watchlist_toast),
-                completions: completions_tx,
-                watchlist_definitions: watchlist_definitions_tx,
-                watchlist_group: saved_config
-                    .watchlist_groups
-                    .effective_active(saved_config.suivi_groups_enabled)
-                    .to_string(),
-                alert_profile: Arc::clone(&alert_profile),
-                chat_filters: Arc::clone(&chat_filters),
-                roster,
-                roster_draft: Arc::clone(&roster_draft),
-                catalog: Arc::clone(&catalog),
-                dungeons: Arc::clone(&dungeons),
-                startup: Arc::clone(&startup),
-                history: spawn_history_thread(Arc::clone(&catalog), Arc::clone(&dungeons)),
-            },
-            proxy,
-            settings_rx,
-            sync_tx,
-        );
+        if full_session {
+            spawn_engine_thread(
+                log_path.clone(),
+                EngineHandles {
+                    snapshot: Arc::clone(&snapshot),
+                    watchlist: Arc::clone(&watchlist),
+                    watchlist_toast: Arc::clone(&watchlist_toast),
+                    completions: completions_tx,
+                    watchlist_definitions: watchlist_definitions_tx,
+                    watchlist_group: saved_config
+                        .watchlist_groups
+                        .effective_active(saved_config.suivi_groups_enabled)
+                        .to_string(),
+                    alert_profile: Arc::clone(&alert_profile),
+                    chat_filters: Arc::clone(&chat_filters),
+                    roster,
+                    roster_draft: Arc::clone(&roster_draft),
+                    catalog: Arc::clone(&catalog),
+                    dungeons: Arc::clone(&dungeons),
+                    startup: Arc::clone(&startup),
+                    history: spawn_history_thread(Arc::clone(&catalog), Arc::clone(&dungeons)),
+                },
+                proxy,
+                settings_rx,
+                sync_tx,
+            );
+        }
         // Les réglages de la carte de chat sont locaux : le moteur les reçoit d'ici. Les
         // interrupteurs de fonctionnalité aussi — voir `main.rs` pour pourquoi cet envoi ne peut
         // pas attendre la première validation de la fenêtre Options.
@@ -4698,6 +5053,7 @@ mod linux_main {
             watchlist,
             watchlist_toast,
             catalog,
+            dungeons,
             remote_icons,
             auth_status,
             auth_command_tx,
@@ -4713,6 +5069,12 @@ mod linux_main {
             game_window,
             settings_tx,
         });
+        app.history_on_start = cli.history_tab;
+        if standalone {
+            // Les raccourcis globaux appartiennent à l'overlay — voir `main.rs`.
+            app.hotkeys.suspend();
+            app.standalone = true;
+        }
         event_loop.run_app(&mut app).expect("boucle d'événements");
     }
 }
