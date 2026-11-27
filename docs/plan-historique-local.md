@@ -191,9 +191,24 @@ Mesuré contre le commit `9159bb1` (2026-07-02, dernière mise à jour du dépô
 | Illustrations de donjons | 140 | 13 (surtout des brèches) | — |
 | Familles | 156 | 2 | — |
 
-Environ 270 images n'ont aucune source web connue : elles sont à extraire des fichiers du client de
-jeu. Le script qui alimente `cdn/` et met à jour le drapeau `wakassets_available` est à écrire
-avec l'`xtask` du catalogue.
+Ces images ne sont **affichées nulle part aujourd'hui** : le site comme l'overlay montrent une
+icône générique à leur place. Ce sont les contenus les plus récents (objets d'id 32 874 à 33 723 :
+décorations de Havre-Enclos et de Havre-Sac, porte-bonheurs, reliquèmes, nouveaux équipements).
+
+**Elles existent dans le client de jeu** (vérifié le 2026-11-27 sur une installation réelle) :
+`<installation Wakfu>/contents/gui_jar/gui.jar` (730 Mo) contient `icons/items/64/{gfxId}.tga`
+(11 277 icônes), `icons/monsterIllustrations/`, `icons/bossIllustrations/`, `icons/spells/`,
+`icons/monstersFamily/`, `icons/aptitudes/`, `icons/timePointBonus/`… — les mêmes dossiers que
+wakassets, qui en est manifestement une extraction convertie en PNG.
+
+| Type absent de wakassets | Trouvé dans `gui.jar` |
+| --- | --- |
+| Objets (356) | **355** |
+| Illustrations de donjons (13) | les 2 donjons récents (Hominideux, Verts de vase) ; les 11 brèches utilisent déjà les images de brèche du site |
+| Monstres (60) | 14 ; la plupart des autres ont un **gfxId erroné dans le catalogue** (ex. « Bilbyboy Framboise » → `10`), à corriger dans le référentiel |
+
+Le dossier d'installation est lisible sans rien demander à l'utilisateur :
+`%APPDATA%\zaap\repositories\production\wakfu\main\release.json`, champ `location`.
 
 ## 6. Stockage local
 
@@ -261,6 +276,9 @@ avec l'`xtask` du catalogue.
 - Une fois l'import fait (ou refusé), le jeton est effacé.
 - Le site garde ces endpoints et l'authentification **le temps d'une période d'import annoncée**,
   puis Functions et Neon sont arrêtés.
+- Seuls les comptes ont des données sur le serveur : le mainteneur les préviendra par un **envoi
+  d'e-mails dédié** (texte à rédiger le moment venu), la durée de la période étant fixée à ce
+  moment-là.
 
 ## 9. Retrait du compte et de la connexion
 
@@ -269,7 +287,7 @@ avec l'`xtask` du catalogue.
 | Zone | Contenu retiré |
 | --- | --- |
 | `overlay-sync` | `pairing.rs`, `token_store.rs`, `session.rs`, `queue.rs`, l'authentification de `client.rs`, `catalog_cache.rs`, `reference_data_cache.rs` ; le crate se réduit à la mise à jour signée et au téléchargement d'icônes |
-| `overlay-ui` | `panels/login.rs` (connexion, appairage), les threads Auth / Sync / Catalogue / Donjons de `background.rs`, les branches compte de `main.rs`, du binaire X11, d'`engine_thread.rs`, de `render_content.rs`, d'`options_modal.rs`, l'onglet « À propos » de la modale |
+| `overlay-ui` | `panels/login.rs` (connexion, appairage ; l'écran de chargement ne survit que pour le téléchargement et la vérification d'une nouvelle version — décision du 2026-11-27 —, le démarrage ouvre directement les fenêtres overlay), les threads Auth / Sync / Catalogue / Donjons de `background.rs`, les branches compte de `main.rs`, du binaire X11, d'`engine_thread.rs`, de `render_content.rs`, d'`options_modal.rs`, l'onglet « À propos » de la modale |
 | `local_data.rs` | Le périmètre `OnDisconnect` disparaît ; `Everything` reste |
 | Moteur | Roster, liste de suivi et profil d'alertes ne viennent plus de `GET /api/v1/settings` : ils sont déjà locaux (`config.toml`), les branches de fusion avec le compte disparaissent |
 | Dépendances | `keyring` (et `secret-service` sous Linux) |
@@ -321,10 +339,13 @@ avec l'`xtask` du catalogue.
 
 ## 13. Décisions ouvertes
 
-1. **Écran de chargement** : garder un écran d'attente au démarrage (aujourd'hui dans
-   `panels/login.rs`), ou démarrer directement les fenêtres overlay ?
-2. **Durée de la période d'import** avant l'arrêt de Neon.
-3. **Images absentes sans source web** (~270) : méthode d'extraction depuis le client de jeu.
+1. ~~Écran de chargement~~ — **tranché le 2026-11-27** : seulement pendant le téléchargement et la
+   vérification d'une nouvelle version (§9).
+2. ~~Durée de la période d'import~~ — **tranché le 2026-11-27** : fixée lors de l'envoi d'e-mails
+   aux comptes existants (§8).
+3. **Source des images** : les images manquantes sont dans `gui.jar` du client (§5.3). Reste à
+   choisir entre alimenter le CDN `cdn/` depuis ce fichier, ou faire lire les icônes par l'overlay
+   directement dans le client installé chez l'utilisateur.
 
 ## 14. Risques
 

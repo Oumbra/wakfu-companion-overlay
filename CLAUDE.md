@@ -138,8 +138,14 @@ Historique, symétrie `ci.yml`/`ci-local.sh`, coût et symptômes : `.claude/rul
 Overlay de jeu natif **Rust** pour Wakfu, portage de
 [`Oumbra/wakfu-companion`](https://github.com/Oumbra/wakfu-companion) (Angular 21) : lecture en
 direct de `wakfu.log`, affichage par-dessus le jeu (dégâts de combat, suivi d'objets/ennemis,
-alertes de drop) et synchronisation de l'historique (combats, achats et récupérations de kamas à
-l'Hôtel de Vente, échanges) vers la même API.
+alertes de drop) et historique (combats, achats et récupérations de kamas à l'Hôtel de Vente,
+échanges, pactes) — aujourd'hui encore synchronisé vers l'API du site.
+
+**Cap décidé le 2026-11-27 : tout en local.** L'overlay devient l'unique outil : historique stocké
+sur le poste (SQLite, en clair), fenêtre application autonome pour le consulter, plus de compte ni
+d'appairage, français uniquement, le site réduit à une page de présentation statique. Toute
+nouvelle fonctionnalité doit marcher sans serveur. Plan de référence :
+[`docs/plan-historique-local.md`](docs/plan-historique-local.md).
 
 **Plateformes : Windows et Linux (X11 / XWayland) uniquement.** macOS est hors périmètre.
 Budget mémoire : **300 Mo maximum**.
