@@ -183,7 +183,24 @@ pub fn history_scenario() -> Vec<Step> {
             y: TAB_Y,
             label: name,
         });
+        // Une liste d'objets demande ses icônes à sa première frame : même pause qu'à
+        // l'ouverture.
+        if matches!(name, "echanges" | "pactes") {
+            steps.push(Step::Pause(Duration::from_secs(2)));
+        }
         steps.push(Step::Capture(name));
+        if name == "echanges" {
+            // Plus bas dans la liste : kamas et objets cédés.
+            steps.extend([
+                Step::Scroll {
+                    x: 550.0,
+                    y: 500.0,
+                    lines: 12.0,
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("echanges-suite"),
+            ]);
+        }
     }
     steps.extend([
         Step::Click {
@@ -438,7 +455,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            9
+            10
         );
     }
 

@@ -4,7 +4,7 @@
 //!
 //! Le modèle ([`groups`]) est séparé du rendu : c'est lui que les tests comparent au site.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use egui::{Align2, Color32, Rect, Sense, Ui};
@@ -12,9 +12,12 @@ use overlay_engine::roster::normalize_wakfu_name;
 use overlay_engine::{CatalogIndex, IconKind, IconRef};
 use overlay_history::read::PurchaseRow;
 use overlay_history::stats::HDV_KAMAS_SALE_ITEM;
+use overlay_history::HistoryStore;
 
+pub use super::items::SortOrder;
+use super::items::{self, DayTail, ListState};
 use super::{format, HistoryContext};
-use crate::design::{self, text, tokens, DsIcon};
+use crate::design::{self, text, tokens};
 use crate::rarity_bridge::rarity_color;
 use crate::remote_icons::RemoteIconTextures;
 
@@ -28,14 +31,6 @@ pub fn hdv_icon() -> IconRef {
         kind: IconKind::ItemCategory,
         gfx_id: "614".to_string(),
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SortOrder {
-    /// Plus récent en premier (défaut du site).
-    #[default]
-    Newest,
-    Oldest,
 }
 
 /// Une ligne d'un jour : un objet, cumulé sur la journée.
@@ -125,10 +120,9 @@ pub fn groups(
                 }
             }
             rows.sort_by(|a, b| {
-                b.is_hdv_sale.cmp(&a.is_hdv_sale).then(match order {
-                    SortOrder::Newest => b.last_ms.cmp(&a.last_ms),
-                    SortOrder::Oldest => a.last_ms.cmp(&b.last_ms),
-                })
+                b.is_hdv_sale
+                    .cmp(&a.is_hdv_sale)
+                    .then(order.cmp_times(a.last_ms, b.last_ms))
             });
             DayGroup {
                 day,
@@ -140,25 +134,13 @@ pub fn groups(
     groups.sort_by(|a, b| {
         let a_time = a.rows.first().map_or(0, |row| row.last_ms);
         let b_time = b.rows.first().map_or(0, |row| row.last_ms);
-        match order {
-            SortOrder::Newest => b_time.cmp(&a_time),
-            SortOrder::Oldest => a_time.cmp(&b_time),
-        }
+        order.cmp_times(a_time, b_time)
     });
     groups
 }
 
 /// État de la vue : la saisie, le tri, les jours repliés, et les lignes lues dans la base.
-#[derive(Default)]
-pub struct AchatsState {
-    pub query: String,
-    pub order: SortOrder,
-    pub collapsed: BTreeSet<NaiveDate>,
-    /// `None` : pas encore lu (ou à relire).
-    pub rows: Option<Vec<PurchaseRow>>,
-    /// Combien d'achats sont montrés — « Charger plus » et sa période.
-    pub pager: super::pager::Pager,
-}
+pub type AchatsState = ListState<PurchaseRow>;
 
 /// Hauteur d'une ligne : l'icône de 22 px et ses 6 px de marge haute et basse, comme le site.
 const ROW_HEIGHT: f32 = 34.0;
@@ -168,11 +150,7 @@ const ICON_SIZE: f32 = 22.0;
 const ROW_PAD_LEFT: f32 = 30.0;
 /// Écart entre l'icône et le nom (`gap: 10px`).
 const ROW_GAP: f32 = 10.0;
-/// Liseré gauche d'une ligne d'objet (`border-left: 3px`).
-const RARITY_EDGE: f32 = 3.0;
-const SORT_SWITCH_WIDTH: f32 = 180.0;
-const DAY_HEADER_HEIGHT: f32 = 30.0;
-const FONT_SIZE: f32 = 14.0;
+const FONT_SIZE: f32 = items::FONT_SIZE;
 const HDV_GAIN: Color32 = Color32::from_rgb(0x8B, 0xD3, 0x6B);
 
 /// Rendu dans la zone de contenu d'un panneau.
@@ -184,33 +162,15 @@ pub fn show(
     textures: &mut RemoteIconTextures,
 ) {
     let (catalog, today) = (ctx.catalog, ctx.today);
-    if state.rows.is_none() {
-        state.rows = Some(match ctx.store.map(|store| store.purchases()) {
-            Some(Ok(rows)) => rows,
-            Some(Err(err)) => {
-                tracing::warn!(%err, "historique : achats illisibles");
-                Vec::new()
-            }
-            None => Vec::new(),
-        });
-    }
-    ui.horizontal(|ui| {
-        ui.add(
-            design::input(&mut state.query)
-                .placeholder("Rechercher un objet ou une date...")
-                .clearable(true)
-                .width(zones.inner.width() - SORT_SWITCH_WIDTH - 12.0)
-                .log_name("historique.achats.recherche"),
-        );
-        ui.add(
-            design::switch(&mut state.order)
-                .slot(SortOrder::Newest, "Récent")
-                .slot(SortOrder::Oldest, "Ancien")
-                .width(SORT_SWITCH_WIDTH)
-                .log_name("historique.achats.tri"),
-        );
-    });
-    ui.add_space(8.0);
+    state.load(ctx.store, HistoryStore::purchases, "achats");
+    items::list_header(
+        ui,
+        zones,
+        &mut state.query,
+        &mut state.order,
+        "Rechercher un objet ou une date...",
+        "historique.achats",
+    );
     // Comme le site, la recherche et le tri portent sur ce qui est chargé.
     let rows = state.rows.as_deref().unwrap_or_default();
     let times: Vec<i64> = rows.iter().map(|row| row.occurred_at).collect();
@@ -224,18 +184,14 @@ pub fn show(
         }
         for group in &groups {
             let collapsed = collapsed_days.contains(&group.day);
-            if day_header(
+            if items::day_header(
                 ui,
                 width,
                 &format::relative_day(group.day, today),
-                &format::thousands(group.total_cost),
+                DayTail::Kamas(&format::thousands(group.total_cost)),
                 !collapsed,
             ) {
-                if collapsed {
-                    collapsed_days.remove(&group.day);
-                } else {
-                    collapsed_days.insert(group.day);
-                }
+                ListState::<PurchaseRow>::toggle(collapsed_days, group.day);
             }
             if collapsed {
                 continue;
@@ -247,80 +203,6 @@ pub fn show(
         }
         pager.footer(ui, width, &times, shown, "historique.achats");
     });
-}
-
-/// En-tête de jour cliquable : date à gauche, total et chevron à droite. Rend `true` au clic.
-fn day_header(ui: &mut Ui, width: f32, day: &str, total: &str, open: bool) -> bool {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(width, DAY_HEADER_HEIGHT), Sense::click());
-    let painter = ui.painter_at(rect);
-    let fill = if response.hovered() {
-        Color32::from_rgba_unmultiplied(255, 255, 255, 18)
-    } else {
-        Color32::from_rgba_unmultiplied(255, 255, 255, 10)
-    };
-    painter.rect_filled(rect, 4.0, fill);
-    let font = text::label_strong_font(ui.ctx(), FONT_SIZE + 1.0);
-    painter.text(
-        rect.left_center() + egui::vec2(10.0, 0.0),
-        Align2::LEFT_CENTER,
-        day,
-        font.clone(),
-        tokens::TEXT_GOLD,
-    );
-    super::paint_amount(
-        ui,
-        &painter,
-        egui::pos2(rect.right() - 34.0, rect.center().y),
-        total,
-        font,
-        tokens::TEXT_GOLD,
-    );
-    super::paint_icon(
-        ui,
-        &painter,
-        egui::pos2(rect.right() - 14.0, rect.center().y),
-        if open {
-            DsIcon::ChevronDown
-        } else {
-            DsIcon::TriangleRight
-        },
-        12.0,
-        tokens::TEXT_GOLD,
-    );
-    response.clicked()
-}
-
-/// Fond d'une ligne d'objet, comme `.purchase-row[class*='rarity-']` du site : liseré gauche de
-/// la couleur de rareté, dégradé de cette couleur (35 %) vers le fond à 70 % de la largeur, et
-/// filet haut qui s'efface au même endroit.
-fn paint_rarity_background(painter: &egui::Painter, rect: Rect, rarity: Color32) {
-    let fade_x = rect.left() + rect.width() * 0.7;
-    let horizontal_fade = |top: f32, bottom: f32, from: Color32| {
-        let mut mesh = egui::Mesh::default();
-        let clear = Color32::TRANSPARENT;
-        for (x, color) in [(rect.left(), from), (fade_x, clear)] {
-            mesh.colored_vertex(egui::pos2(x, top), color);
-            mesh.colored_vertex(egui::pos2(x, bottom), color);
-        }
-        mesh.add_triangle(0, 1, 2);
-        mesh.add_triangle(1, 3, 2);
-        mesh
-    };
-    painter.add(horizontal_fade(
-        rect.top(),
-        rect.bottom(),
-        rarity.gamma_multiply(0.35),
-    ));
-    painter.add(horizontal_fade(rect.top(), rect.top() + 1.0, rarity));
-    painter.rect_filled(
-        Rect::from_min_max(
-            rect.min,
-            egui::pos2(rect.left() + RARITY_EDGE, rect.bottom()),
-        ),
-        0.0,
-        rarity,
-    );
 }
 
 fn purchase_row(
@@ -340,10 +222,11 @@ fn purchase_row(
     let icon = if row.is_hdv_sale {
         Some(hdv_icon())
     } else {
-        paint_rarity_background(
+        items::paint_rarity_background(
             &painter,
             rect,
             rarity_color(ctx.catalog.find_item_rarity(&row.name, row.item_id)),
+            items::PURCHASE_RARITY,
         );
         ctx.catalog.find_item_icon(&row.name, row.item_id)
     };

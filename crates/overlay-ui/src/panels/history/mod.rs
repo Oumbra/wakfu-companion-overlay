@@ -6,7 +6,10 @@
 //! permet au harnais de rendu (`overlay-testkit`) de le dessiner hors écran sur une vraie base.
 
 pub mod achats;
+pub mod echanges;
 pub mod format;
+pub mod items;
+pub mod pactes;
 pub mod pager;
 
 use chrono::NaiveDate;
@@ -123,6 +126,8 @@ impl HistoryTab {
 pub struct HistoryWindowState {
     pub tab: HistoryTab,
     pub achats: achats::AchatsState,
+    pub echanges: echanges::EchangesState,
+    pub pactes: pactes::PactesState,
 }
 
 impl HistoryWindowState {
@@ -136,6 +141,8 @@ impl HistoryWindowState {
     /// La base a changé (nouveaux événements, import) : chaque vue relira ses données.
     pub fn invalidate(&mut self) {
         self.achats.rows = None;
+        self.echanges.rows = None;
+        self.pactes.rows = None;
     }
 }
 
@@ -315,6 +322,8 @@ pub fn show(
     chrome.tabs(ui, tabs);
     design::panel().show(ui, chrome.content, |ui, zones| match state.tab {
         HistoryTab::Achats => achats::show(ui, zones, &mut state.achats, ctx, textures),
+        HistoryTab::Echanges => echanges::show(ui, zones, &mut state.echanges, ctx, textures),
+        HistoryTab::Pactes => pactes::show(ui, zones, &mut state.pactes, ctx, textures),
         other => {
             ui.add(
                 design::label(format!("{} — à venir", other.label()))

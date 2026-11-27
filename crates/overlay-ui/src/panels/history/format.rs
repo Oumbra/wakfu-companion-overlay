@@ -30,6 +30,19 @@ pub fn medium_date(day: NaiveDate) -> String {
     )
 }
 
+/// `27 nov. 2026, 14:03:12` — `formatDateTime` (`dateStyle` et `timeStyle` `medium`), en heure
+/// locale.
+pub fn date_time(ms: i64) -> String {
+    match Local.timestamp_millis_opt(ms).earliest() {
+        Some(moment) => format!(
+            "{}, {}",
+            medium_date(moment.date_naive()),
+            moment.format("%H:%M:%S")
+        ),
+        None => String::new(),
+    }
+}
+
 /// « Aujourd'hui », « Hier », « Avant-hier », sinon la date — `formatRelativeDay`.
 pub fn relative_day(day: NaiveDate, today: NaiveDate) -> String {
     match (today - day).num_days() {
