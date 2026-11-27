@@ -57,7 +57,7 @@ pub fn scenario(args: impl IntoIterator<Item = String>) -> Option<(Vec<Step>, &'
         })
         .unwrap_or_else(|| "historique".to_string());
     match name.as_str() {
-        "historique" => Some((history_scenario(), "achats")),
+        "historique" => Some((history_scenario(), "recap")),
         "memoire" => Some((memory_scenario(), "echanges")),
         _ => None,
     }
@@ -157,13 +157,12 @@ pub const WINDOW_SIZE: (f64, f64) = (1100.0, 820.0);
 
 /// Centres des onglets de la fenêtre d'historique à 1100 points de large, dans l'ordre de
 /// `HistoryTab::ALL` (relevés sur la vraie fenêtre).
-const TAB_CENTERS: [(f32, &str); 6] = [
-    (111.0, "combats"),
-    (286.0, "recap"),
-    (452.0, "achats"),
-    (632.0, "echanges"),
-    (811.0, "pactes"),
-    (987.0, "a-propos"),
+const TAB_CENTERS: [(f32, &str); 5] = [
+    (120.0, "recap"),
+    (332.0, "combats"),
+    (546.0, "achats"),
+    (762.0, "echanges"),
+    (978.0, "pactes"),
 ];
 const TAB_Y: f32 = 92.0;
 
@@ -510,7 +509,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            17
+            16
         );
     }
 

@@ -406,7 +406,7 @@ pub fn show(
     // **Tout l'onglet défile** : voir la doc de module. La largeur utile vient de la zone
     // défilable, réserve de barre déjà déduite (voir `design::PanelZones::scroll_area`).
     panel.scroll_area(ui, "options-a-propos", |ui, inner_width| {
-        action = show_sections(ui, inner_width, ctx.api_override.as_deref(), true);
+        action = show_sections(ui, inner_width, ctx.api_override.as_deref());
 
         // **Section « Mise à jour »** (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décisions du
         // mainteneur) : une ligne d'information (dernière vérification, version disponible et son
@@ -546,14 +546,11 @@ pub fn show(
 }
 
 /// **Les sections d'information** (« Wakfu Companion », « Vos données », « Ankama »), avec leurs
-/// liens — partagées par l'onglet « À propos » des Options et celui de la fenêtre d'historique.
-/// `with_purge` : le bouton « Supprimer les données locales » sous « Vos données » (Options
-/// seulement : effacer ferme l'overlay, ce que la fenêtre d'historique ne sait pas faire).
-pub fn show_sections(
+/// liens, et le bouton « Supprimer les données locales » sous « Vos données ».
+fn show_sections(
     ui: &mut egui::Ui,
     inner_width: f32,
     api_override: Option<&str>,
-    with_purge: bool,
 ) -> AProposTabAction {
     let mut action = AProposTabAction::None;
     // **Les trois sections d'information** (voir la doc de module et [`SECTIONS`]), avant
@@ -620,7 +617,7 @@ pub fn show_sections(
         // Rouge et centré comme « Fermer l'overlay », plus bas, et pour la même raison en plus
         // forte : c'est la seule action de toute la fenêtre qui ne laisse RIEN derrière elle.
         // La confirmation, chez l'appelant, nomme les deux conséquences dans l'ordre.
-        if with_purge && section.title == VOS_DONNEES_TITLE {
+        if section.title == VOS_DONNEES_TITLE {
             ui.add_space(INFO_GAP);
             ui.add(
                 design::info_text(PURGE_INFO)

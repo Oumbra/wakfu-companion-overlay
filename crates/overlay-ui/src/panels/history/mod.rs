@@ -128,26 +128,26 @@ pub(crate) fn paint_amount_left(
     icon_center.x + KAMAS_ICON_SIZE / 2.0
 }
 
-/// Les onglets, dans l'ordre de la barre.
+/// Les onglets, dans l'ordre de la barre (demande de l'utilisateur, 2026-11-27 : le Récap
+/// d'abord). Pas d'onglet « À propos » : il existe déjà dans les Options de l'overlay, et les
+/// pages légales sont au menu de l'icône de notification — la fenêtre d'historique ne le redit pas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HistoryTab {
     #[default]
-    Combats,
     Recap,
+    Combats,
     Achats,
     Echanges,
     Pactes,
-    APropos,
 }
 
 impl HistoryTab {
-    pub const ALL: [HistoryTab; 6] = [
-        HistoryTab::Combats,
+    pub const ALL: [HistoryTab; 5] = [
         HistoryTab::Recap,
+        HistoryTab::Combats,
         HistoryTab::Achats,
         HistoryTab::Echanges,
         HistoryTab::Pactes,
-        HistoryTab::APropos,
     ];
 
     pub fn label(self) -> &'static str {
@@ -157,7 +157,6 @@ impl HistoryTab {
             HistoryTab::Achats => "Achats",
             HistoryTab::Echanges => "Échanges",
             HistoryTab::Pactes => "Pactes",
-            HistoryTab::APropos => "À propos",
         }
     }
 
@@ -218,7 +217,7 @@ pub struct HistoryContext<'a> {
 }
 
 /// Ce que la fenêtre demande à son hôte après une frame.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct HistoryOutcome {
     /// La croix de la bannière.
     pub close: bool,
@@ -227,8 +226,6 @@ pub struct HistoryOutcome {
     pub drag_window: bool,
     /// Bouton pressé sur un bord : l'hôte lance `Window::drag_resize_window` dans ce sens.
     pub resize: Option<egui::ResizeDirection>,
-    /// Un lien de l'onglet « À propos » : l'hôte ouvre cette page dans le navigateur.
-    pub open_url: Option<String>,
 }
 
 /// Ce que l'hôte garde pour la fenêtre ouverte : son état et la base, ouverte avec elle et
@@ -431,17 +428,6 @@ pub fn show(
         HistoryTab::Achats => achats::show(ui, zones, &mut state.achats, ctx, textures),
         HistoryTab::Echanges => echanges::show(ui, zones, &mut state.echanges, ctx, textures),
         HistoryTab::Pactes => pactes::show(ui, zones, &mut state.pactes, ctx, textures),
-        HistoryTab::APropos => {
-            // Les sections d'information de l'onglet « À propos » des Options, sans ce qui pilote
-            // l'overlay (mise à jour, redémarrage, effacement) : ce processus ne le porte pas.
-            zones.scroll_area(ui, "historique-a-propos", |ui, width| {
-                if let crate::panels::a_propos_tab::AProposTabAction::OpenUrl(url) =
-                    crate::panels::a_propos_tab::show_sections(ui, width, None, false)
-                {
-                    outcome.open_url = Some(url);
-                }
-            });
-        }
     });
     outcome.close = chrome.close;
     // Poignée de déplacement : la bannière, croix exceptée (elle garde ses clics).
