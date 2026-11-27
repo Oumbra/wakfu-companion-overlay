@@ -368,6 +368,11 @@ struct Slot<T> {
     label: String,
     /// Pictogramme qui **remplace** le libellé au rendu — voir [`Switch::icon`].
     icon: Option<DsIcon>,
+    /// Texte court qui **remplace** le libellé au rendu (`Az`, `Nb`) — voir [`Switch::glyph`].
+    glyph: Option<String>,
+    /// Image (texture déjà chargée, ex. une icône distante) qui **remplace** le libellé au rendu —
+    /// voir [`Switch::image`].
+    image: Option<egui::TextureId>,
     /// Force l'état peint de CETTE case — voir [`Switch::preview_state`].
     forced_state: Option<SwitchState>,
 }
@@ -389,6 +394,8 @@ pub struct Switch<'a, T> {
     /// Rapport d'échelle homothétique — voir [`Switch::scale`]. 1 = la taille du jeu.
     scale: f32,
     enabled: bool,
+    /// Un clic sur la case déjà choisie est signalé — voir [`Switch::reclickable`].
+    reclickable: bool,
     log_name: Option<String>,
 }
 
@@ -402,6 +409,7 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
             height: None,
             scale: 1.0,
             enabled: true,
+            reclickable: false,
             log_name: None,
         }
     }
@@ -413,8 +421,36 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
             value,
             label: label.into(),
             icon: None,
+            glyph: None,
+            image: None,
             forced_state: None,
         });
+        self
+    }
+
+    /// Donne à **la dernière case déclarée** un texte court affiché à la place de son libellé
+    /// (`Az`, `Nb` du tri du butin du site) ; le libellé devient son infobulle.
+    pub fn glyph(mut self, glyph: impl Into<String>) -> Self {
+        if let Some(last) = self.slots.last_mut() {
+            last.glyph = Some(glyph.into());
+        }
+        self
+    }
+
+    /// Donne à **la dernière case déclarée** une image (texture déjà chargée — la gemme de rareté
+    /// de wakassets, par exemple) affichée à la place de son libellé ; le libellé devient son
+    /// infobulle. Tant que la texture n'est pas là, passer `None` laisse le libellé.
+    pub fn image(mut self, texture: Option<egui::TextureId>) -> Self {
+        if let Some(last) = self.slots.last_mut() {
+            last.image = texture;
+        }
+        self
+    }
+
+    /// Un clic sur la case **déjà choisie** marque aussi la réponse `changed()`, sans changer la
+    /// valeur : l'appelant y lit un « reclic » (inverser le sens d'un tri, comme sur le site).
+    pub fn reclickable(mut self, reclickable: bool) -> Self {
+        self.reclickable = reclickable;
         self
     }
 
@@ -593,6 +629,7 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
         };
 
         let mut clicked: Option<(usize, T)> = None;
+        let mut reclicked: Option<usize> = None;
         // Le liseré de la case choisie est peint APRÈS la boucle : en `FirstPlan` les socles se
         // chevauchent, celui de droite recouvrirait sinon le liseré de son voisin de gauche.
         let mut selected_rect: Option<egui::Rect> = None;
@@ -630,7 +667,22 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                 let painter = ui
                     .painter()
                     .with_clip_rect(slot_rect.intersect(ui.clip_rect()));
-                if let Some(icon) = slot.icon {
+                if let Some(texture) = slot.image {
+                    let side = tokens::SWITCH_ICON_SIZE * self.scale;
+                    let min = (slot_rect.center() - Vec2::splat(side) * 0.5)
+                        .round_to_pixels(ui.pixels_per_point());
+                    let tint = if state == SwitchState::Active || state == SwitchState::Hovered {
+                        Color32::WHITE
+                    } else {
+                        Color32::from_white_alpha(170)
+                    };
+                    painter.image(
+                        texture,
+                        egui::Rect::from_min_size(min, Vec2::splat(side)),
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        tint,
+                    );
+                } else if let Some(icon) = slot.icon {
                     let color = self.variant.glyph_color(state, icon.native_color());
                     // `self.scale` et non `effective_scale` : le glyphe ne suit pas la réduction
                     // du cadre à 36 (plafond commun aux deux variantes, doc de module).
@@ -644,7 +696,8 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                 } else {
                     let color = self.variant.glyph_color(state, false);
                     let font = text::label_font(ui.ctx(), tokens::SWITCH_FONT_SIZE);
-                    let galley = painter.layout_no_wrap(slot.label.clone(), font, color);
+                    let shown = slot.glyph.clone().unwrap_or_else(|| slot.label.clone());
+                    let galley = painter.layout_no_wrap(shown, font, color);
                     let pos = Align2::CENTER_CENTER
                         .align_size_within_rect(galley.size(), slot_rect)
                         .min;
@@ -694,7 +747,7 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
 
             // L'infobulle d'une case à pictogramme porte son libellé — posée hors du test de
             // visibilité, une infobulle s'affiche sur interaction, pas sur peinture.
-            if slot.icon.is_some() {
+            if slot.icon.is_some() || slot.glyph.is_some() || slot.image.is_some() {
                 crate::design::tooltip(&slot_response).text(slot.label.clone());
             }
 
@@ -702,6 +755,8 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                 let slot_response = slot_response.on_hover_cursor(egui::CursorIcon::PointingHand);
                 if slot_response.clicked() && !selected {
                     clicked = Some((index, slot.value));
+                } else if slot_response.clicked() && self.reclickable {
+                    reclicked = Some(index);
                 }
             }
         }
@@ -743,6 +798,15 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
             );
         }
 
+        if let Some(index) = reclicked {
+            response.mark_changed();
+            tracing::debug!(
+                component = "switch",
+                name,
+                case = self.slots[index].label,
+                "reclic"
+            );
+        }
         if let Some((index, value)) = clicked {
             *self.selected = value;
             response.mark_changed();
