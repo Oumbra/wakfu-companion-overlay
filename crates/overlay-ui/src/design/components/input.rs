@@ -155,7 +155,13 @@ pub struct Input<'a> {
     forced_state: Option<InputState>,
     request_focus: bool,
     leading_icon: Option<crate::design::DsIcon>,
+    /// L'icône de tête est peinte en miroir (le sens du jeu) — voir [`Input::leading_icon_mirrored`].
+    leading_mirrored: bool,
     clearable: bool,
+    /// Corps du texte imposé — voir [`Input::text_size`].
+    text_size: Option<f32>,
+    /// Teinte du texte indicatif imposée — voir [`Input::placeholder_color`].
+    placeholder_color: Option<egui::Color32>,
 }
 
 impl<'a> Input<'a> {
@@ -174,8 +180,32 @@ impl<'a> Input<'a> {
             forced_state: None,
             request_focus: false,
             leading_icon: None,
+            leading_mirrored: true,
             clearable: false,
+            text_size: None,
+            placeholder_color: None,
         }
+    }
+
+    /// **Corps du texte imposé**, valeur saisie et texte indicatif ensemble, sans toucher au
+    /// gabarit (marges, ornements). Sert aux champs qui reprennent une mesure d'ailleurs que du
+    /// jeu — les recherches de la fenêtre d'historique, calées sur celles du site (2026-11-27).
+    pub fn text_size(mut self, size: f32) -> Self {
+        self.text_size = Some(size);
+        self
+    }
+
+    /// Teinte du texte indicatif — le kaki éteint du jeu par défaut ([`tokens::INPUT_PLACEHOLDER`]).
+    pub fn placeholder_color(mut self, color: egui::Color32) -> Self {
+        self.placeholder_color = Some(color);
+        self
+    }
+
+    /// `false` peint l'icône de tête dans le sens de son fichier — la loupe du site, verre à
+    /// gauche et manche en bas à droite — au lieu du miroir que le jeu emploie (le défaut).
+    pub fn leading_icon_mirrored(mut self, mirrored: bool) -> Self {
+        self.leading_mirrored = mirrored;
+        self
     }
 
     /// Pose une **croix d'effacement** à droite du champ, visible dès qu'une valeur est saisie
@@ -333,8 +363,13 @@ impl Widget for Input<'_> {
         let height = self.size.height();
         let box_height = self.box_height.unwrap_or(height);
         let width = self.width.unwrap_or_else(|| ui.available_width());
-        let font = text::label_font(ui.ctx(), self.size.font_size());
+        let font = text::label_font(
+            ui.ctx(),
+            self.text_size.unwrap_or_else(|| self.size.font_size()),
+        );
         let pad_x = self.size.pad_x();
+        let leading_mirrored = self.leading_mirrored;
+        let placeholder_color = self.placeholder_color.unwrap_or(tokens::INPUT_PLACEHOLDER);
 
         let (rect, frame_response) =
             ui.allocate_exact_size(Vec2::new(width, box_height), Sense::hover());
@@ -442,7 +477,7 @@ impl Widget for Input<'_> {
                     icon_rect,
                     icon,
                     tint,
-                    true,
+                    leading_mirrored,
                 );
             }
             // Ce que le texte perd à gauche : le retrait, l'icône, la gouttière — moins le
@@ -540,7 +575,7 @@ impl Widget for Input<'_> {
                         Align2::LEFT_CENTER,
                         placeholder,
                         font.clone(),
-                        tokens::INPUT_PLACEHOLDER,
+                        placeholder_color,
                     );
             }
         }

@@ -399,6 +399,8 @@ pub struct Switch<'a, T> {
     enabled: bool,
     /// Un clic sur la case déjà choisie est signalé — voir [`Switch::reclickable`].
     reclickable: bool,
+    /// Corps des libellés imposé — voir [`Switch::text_size`].
+    text_size: Option<f32>,
     log_name: Option<String>,
 }
 
@@ -413,7 +415,25 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
             scale: 1.0,
             enabled: true,
             reclickable: false,
+            text_size: None,
             log_name: None,
+        }
+    }
+
+    /// **Corps des libellés imposé**, en graisse appuyée — sans lui, le corps des libellés du jeu
+    /// ([`tokens::SWITCH_FONT_SIZE`], régulier). Les switches de la fenêtre d'historique reprennent
+    /// les mesures du site (`.icon-switch-option`, 0,62 à 0,72 rem en gras), retour utilisateur du
+    /// 2026-11-27 : « la taille des polices dans les switches est trop élevée ».
+    pub fn text_size(mut self, size: f32) -> Self {
+        self.text_size = Some(size);
+        self
+    }
+
+    /// La police des libellés et des glyphes texte.
+    fn label_font(&self, ctx: &egui::Context) -> egui::FontId {
+        match self.text_size {
+            Some(size) => text::label_strong_font(ctx, size),
+            None => text::label_font(ctx, tokens::SWITCH_FONT_SIZE),
         }
     }
 
@@ -683,9 +703,20 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                     .painter()
                     .with_clip_rect(slot_rect.intersect(ui.clip_rect()));
                 if let Some(texture) = slot.image {
+                    // Proportions de l'image gardées (`object-fit: contain` du site) : la gemme de
+                    // rareté fait 9 × 14, un carré la déformait.
                     let side = tokens::SWITCH_ICON_SIZE * self.scale;
-                    let min = (slot_rect.center() - Vec2::splat(side) * 0.5)
-                        .round_to_pixels(ui.pixels_per_point());
+                    let native = ui
+                        .ctx()
+                        .tex_manager()
+                        .read()
+                        .meta(texture)
+                        .map(|meta| Vec2::new(meta.size[0] as f32, meta.size[1] as f32))
+                        .filter(|size| size.x > 0.0 && size.y > 0.0)
+                        .unwrap_or(Vec2::splat(side));
+                    let drawn = native * (side / native.x.max(native.y));
+                    let min =
+                        (slot_rect.center() - drawn * 0.5).round_to_pixels(ui.pixels_per_point());
                     let tint = if state == SwitchState::Active || state == SwitchState::Hovered {
                         Color32::WHITE
                     } else {
@@ -693,7 +724,7 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                     };
                     painter.image(
                         texture,
-                        egui::Rect::from_min_size(min, Vec2::splat(side)),
+                        egui::Rect::from_min_size(min, drawn),
                         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                         tint,
                     );
@@ -702,7 +733,7 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                     let color = self.variant.glyph_color(state, false);
                     let icon_color = self.variant.glyph_color(state, icon.native_color());
                     let drawn = self.variant.glyph_size(&design, icon) * self.scale;
-                    let font = text::label_font(ui.ctx(), tokens::SWITCH_FONT_SIZE);
+                    let font = self.label_font(ui.ctx());
                     let galley = painter.layout_no_wrap(slot.label.clone(), font, color);
                     let gap = 6.0 * self.scale;
                     let total = drawn.x + gap + galley.size().x;
@@ -733,7 +764,7 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                     design.paint_icon(&painter, egui::Rect::from_min_size(min, drawn), icon, color);
                 } else {
                     let color = self.variant.glyph_color(state, false);
-                    let font = text::label_font(ui.ctx(), tokens::SWITCH_FONT_SIZE);
+                    let font = self.label_font(ui.ctx());
                     let shown = slot.glyph.clone().unwrap_or_else(|| slot.label.clone());
                     let galley = painter.layout_no_wrap(shown, font, color);
                     let pos = Align2::CENTER_CENTER

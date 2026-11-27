@@ -138,6 +138,12 @@ ds_icons! {
         /// laquelle le jeu le peint, au pixel près.
         ChevronDown => "icon-chevron-down", libre;
 
+        /// Le même chevron tourné d'un quart de tour, pointe à droite (`icons/icon-chevron-right.png`,
+        /// 8 × 14) — l'état replié d'une ligne dépliable : replié `›`, déplié `⌄`, toujours le même
+        /// trait (retour utilisateur du 2026-11-27, plutôt qu'un triangle plein pour l'un et un
+        /// chevron pour l'autre).
+        ChevronRight => "icon-chevron-right", libre;
+
         /// Glyphe du bouton Options du carré de contrôle.
         ///
         /// Cette doc portait jusqu'au 2026-09-11 une règle devenue caduque — « la table ne porte que
