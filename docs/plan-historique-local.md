@@ -393,7 +393,8 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
 - Reste :
   - Récap : sélecteur calendrier ; illustrations des brèches ;
   - Combats : menu de plage de « Charger plus », badge de pierre ;
-  - corrections au clic droit (renommer, déplacer une entrée) des listes du site ;
+  - corrections au clic droit du site : réattribuer l'objet d'un achat ou d'un pacte, la classe
+    d'un personnage (ligne d'XP), un sort à un autre combattant ; suivre un ennemi ;
   - **images des objets de pacte** : la plupart (costumes, équipements de boutique) n'ont ni id en
     base ni entrée dans le référentiel — la source `repository/items.json` du site ne les contient
     pas, le site ne les illustrait donc pas non plus. Il faudrait élargir la source du référentiel
