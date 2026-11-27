@@ -73,6 +73,7 @@ pub mod engine_thread;
 pub mod frame;
 pub mod game_servers;
 pub mod game_window;
+pub mod history_placement;
 pub mod hit_region;
 #[cfg(not(target_os = "windows"))]
 pub mod linux_tray;

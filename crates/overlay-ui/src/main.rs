@@ -1594,6 +1594,20 @@ impl App {
         // Essai automatique : jamais montrée ni activée (une fenêtre montrée, même sans focus,
         // Windows la met devant), et sur une copie de la base.
         let hidden = self.autotest.is_some();
+        // Taille et position de la dernière fermeture, si elles tombent encore sur un écran.
+        let screens: Vec<overlay_ui::history_placement::Screen> = event_loop
+            .available_monitors()
+            .map(|monitor| overlay_ui::history_placement::Screen {
+                x: monitor.position().x,
+                y: monitor.position().y,
+                width: monitor.size().width,
+                height: monitor.size().height,
+            })
+            .collect();
+        let placement = (!hidden)
+            .then(overlay_ui::history_placement::load)
+            .flatten()
+            .filter(|placement| placement.reachable(&screens));
         let (rgba, width, height) = ui_icons::app_logo_rgba();
         let icon = Icon::from_rgba(rgba, width, height).ok();
         let attrs = WindowAttributes::default()
@@ -1613,6 +1627,15 @@ impl App {
             .with_visible(!hidden)
             .with_active(!hidden)
             .with_window_icon(icon.clone());
+        let attrs = match placement {
+            Some(placement) => attrs
+                .with_inner_size(winit::dpi::PhysicalSize::new(
+                    placement.width,
+                    placement.height,
+                ))
+                .with_position(PhysicalPosition::new(placement.x, placement.y)),
+            None => attrs,
+        };
         #[cfg(target_os = "windows")]
         let attrs = attrs
             .with_taskbar_icon(icon)
@@ -1657,7 +1680,9 @@ impl App {
                 }
             }
         } else {
-            Self::center_on_primary_monitor(event_loop, &window);
+            if placement.is_none() {
+                Self::center_on_primary_monitor(event_loop, &window);
+            }
             window.focus_window();
             self.history = Some(panels::history::HistoryHost::open(
                 tab,
@@ -1813,6 +1838,27 @@ impl App {
 
     /// Ferme la fenêtre d'historique, et la base qu'elle tenait ouverte.
     fn close_history_window(&mut self) {
+        // Taille et position retrouvées à la prochaine ouverture — jamais celles d'un essai
+        // automatique, dont la fenêtre n'a jamais été montrée.
+        if self.autotest.is_none() {
+            if let Some(overlay) = self
+                .windows
+                .values()
+                .find(|w| w.kind == OverlayKind::History)
+            {
+                if let Ok(position) = overlay.window.outer_position() {
+                    let size = overlay.window.inner_size();
+                    overlay_ui::history_placement::save(
+                        &overlay_ui::history_placement::Placement {
+                            x: position.x,
+                            y: position.y,
+                            width: size.width,
+                            height: size.height,
+                        },
+                    );
+                }
+            }
+        }
         self.windows.retain(|_, w| w.kind != OverlayKind::History);
         self.history = None;
         tracing::info!("[historique] fenêtre fermée.");
