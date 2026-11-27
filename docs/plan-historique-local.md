@@ -335,6 +335,31 @@ avec les seules images absentes de wakassets, converties en PNG (350 fichiers, 2
   d'e-mails dédié** (texte à rédiger le moment venu), la durée de la période étant fixée à ce
   moment-là.
 
+**Fait (phase 2, 2026-11-27) — mécanique d'import, sans fenêtre.**
+
+- **Déclenchement automatique** tant que la connexion existe encore : dès que l'uid du compte est
+  connu (`background::activate_sync_queue`), un thread jetable (`spawn_history_import`) importe
+  tout, **une fois par compte** (`meta.import_done:<uid>`). Un échec n'est pas noté : la connexion
+  suivante recommence, sans doublon. Le bouton « Récupérer mon historique en ligne » et la barre de
+  progression viendront avec la fenêtre (phase 3) ; en attendant, l'avancement est journalisé
+  (`[import]`). Ainsi, les comptes connectés d'ici la version de transition ont déjà tout en local.
+- **Dédoublonnage par la clé du site.** Les GET ne rendent pas la signature d'origine, seulement
+  `clientKey = sha256(uid|type|signature)`. Schéma v2 : colonne `client_key` (unique, nullable)
+  sur les quatre tables, table `meta`. Avec l'uid connu (`set_account_uid`), chaque ligne lue dans
+  le log reçoit sa clé — rattrapage des lignes antérieures compris —, donc :
+  - un événement déjà lu dans le log n'est pas réimporté (son rattachement de donjon est seulement
+    complété par celui du site, jamais écrasé) ;
+  - une ligne importée (signature provisoire `import:<clientKey>`) que le log produit plus tard est
+    **adoptée** : elle prend la vraie signature au lieu d'être doublée ;
+  - une copie importée avant que l'uid soit connu est fondue dans la ligne locale à la pose de
+    l'uid.
+- Combats importés : dungeonId, clé de run (`migrated:<id>` comprise) et type gardés tels que le
+  serveur les a calculés ; un type absent (anciennes lignes) est complété par les écritures
+  suivantes (500 combats par lot au plus).
+- Une page = une transaction, base ouverte le temps d'une page (`busy_timeout` de 10 s entre
+  l'import et le thread Historique) ; 3 essais par page sur panne réseau, 429 ou 5xx.
+- Reste pour fermer la phase : l'import d'un compte réel (volume, durée, totaux comparés au site).
+
 ## 9. Retrait du compte et de la connexion
 
 À faire **après** la période d'import (l'import a besoin de la connexion une dernière fois).
@@ -386,7 +411,7 @@ avec les seules images absentes de wakassets, converties en PNG (350 fichiers, 2
 | --- | --- | --- |
 | **0 — Données** ✅ | Référentiel français embarqué (`tools/referentiel`) ; dossier `cdn/` + `pages.yml` ; résolution d'icônes wakassets puis CDN | L'overlay démarre et résout noms et icônes sans jeton ni API |
 | **1 — Stockage** ✅ | `history.sqlite3`, écriture depuis le moteur, recalcul runs de donjon et type de combat | Rejeu 10× du même log : aucun doublon ✅ ; totaux identiques au site sur un même log : vérifiés contre le moteur, la comparaison avec le site se fait sur un import réel (phase 2) |
-| **2 — Import** | Version de transition avec import de l'historique en ligne | Historique d'un compte réel importé, volume mesuré, totaux identiques au site |
+| **2 — Import** (mécanique ✅) | Import de l'historique en ligne, automatique à la connexion ; bouton et progression dans la fenêtre (phase 3) | Historique d'un compte réel importé, volume mesuré, totaux identiques au site |
 | **3 — Fenêtre** | Fenêtre application, 5 composants, vues Combats / Récap / Achats / Échanges / Pactes / À propos, Windows et X11 | Parité fonctionnelle avec le site sur le périmètre §3.1 ; captures de référence |
 | **4 — Nettoyage** | Retrait compte et connexion (§9), du multilingue du catalogue, mise à jour de `plan-architecture.md` | Plus aucun appel à `wakfu-companion.com` hors liens ouverts dans le navigateur |
 | **5 — Site** | Page statique, pages légales réécrites, arrêt des Functions (sauf téléchargement) et de Neon | Coût d'hébergement nul hors domaine |
