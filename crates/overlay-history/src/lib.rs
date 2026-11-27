@@ -10,7 +10,8 @@
 //!   local, et type de combat, comme le faisait le serveur.
 //! - **Import** (`import`, plan §8) : l'historique que le site a reçu, récupéré une fois par
 //!   compte ; reconnu ligne à ligne par sa clé du site (`account`), jamais doublé.
-//! - **Lecture** : listes et agrégats du récap viendront avec la fenêtre d'historique (phase 3).
+//! - **Lecture** : agrégats d'une période pour le récap (`stats`, port de `stats.ts`) ; les listes
+//!   viendront avec la fenêtre d'historique (phase 3).
 //!
 //! La base n'est **pas chiffrée** (décision du 2026-11-27) : elle vit dans le dossier de données de
 //! l'utilisateur, comme le reste de l'overlay ; seule une future sauvegarde vers un tiers le sera.
@@ -19,6 +20,7 @@ mod account;
 mod derive;
 pub mod import;
 mod schema;
+pub mod stats;
 mod write;
 
 use std::path::{Path, PathBuf};
@@ -29,6 +31,7 @@ use rusqlite::Connection;
 pub use account::{client_key, AccountReport, IMPORTED_SIGNATURE_PREFIX};
 pub use import::{import_all, ImportError, ImportKind, ImportProgress, PageReport};
 pub use schema::SCHEMA_VERSION;
+pub use stats::PeriodStats;
 pub use write::RecordReport;
 
 /// Nom du fichier, dans le dossier de données de l'overlay.

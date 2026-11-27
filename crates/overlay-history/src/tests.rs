@@ -343,3 +343,4 @@ fn une_base_plus_recente_est_refusee() {
 }
 
 mod import;
+mod stats;

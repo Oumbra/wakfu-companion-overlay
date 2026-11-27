@@ -193,10 +193,38 @@ pub(crate) fn recompute_dungeon_runs(
 }
 
 /// Un ennemi vu du type de combat.
-struct Enemy {
-    name: String,
-    monster_id: Option<i64>,
-    damage: i64,
+pub(crate) struct Enemy {
+    pub(crate) name: String,
+    pub(crate) monster_id: Option<i64>,
+    pub(crate) damage: i64,
+}
+
+/// Famille représentative d'un combat : boss > archimonstre > dominant > autre, puis plus gros
+/// dégâts, parmi les ennemis que le référentiel connaît (jointure `monsters` côté serveur).
+/// `None` : aucun ennemi connu ; `Some(None)` : le représentant n'a pas de famille.
+///
+/// `min_by` sur l'ordre inversé : à égalité parfaite, le premier dans l'ordre de lecture gagne,
+/// stable d'un calcul à l'autre.
+pub(crate) fn representative_family(
+    enemies: &[Enemy],
+    catalog: &CatalogIndex,
+) -> Option<Option<i64>> {
+    let classification =
+        |enemy: &Enemy, id: i64| catalog.find_monster_classification(&enemy.name, Some(id));
+    let (enemy, id) = enemies
+        .iter()
+        .filter_map(|enemy| {
+            enemy
+                .monster_id
+                .filter(|id| catalog.has_monster_id(*id))
+                .map(|id| (enemy, id))
+        })
+        .min_by(|(a, a_id), (b, b_id)| {
+            classification(b, *b_id)
+                .cmp(&classification(a, *a_id))
+                .then_with(|| b.damage.cmp(&a.damage))
+        })?;
+    Some(catalog.find_monster_family_id(&enemy.name, Some(id)))
 }
 
 /// Type de combat (`fights.fight_type`) — miroir des trois requêtes de `fight-type.ts`. `None` :
@@ -248,20 +276,10 @@ fn fight_type(
     if enemies.iter().all(|enemy| enemy.monster_id.is_none()) {
         return Some("EVENT".to_string());
     }
-    // Famille représentative : boss > archimonstre > dominant > autre, puis plus gros dégâts.
-    // `min_by` sur l'ordre inversé : à égalité parfaite, le premier dans l'ordre de lecture gagne,
-    // stable d'un calcul à l'autre.
-    let (enemy, id) = known.iter().min_by(|(a, a_id), (b, b_id)| {
-        classification(b, *b_id)
-            .cmp(&classification(a, *a_id))
-            .then_with(|| b.damage.cmp(&a.damage))
-    })?;
-    Some(
-        match catalog.find_monster_family_id(&enemy.name, Some(*id)) {
-            Some(family) => format!("FAMILY_{family}"),
-            None => "FAMILY_NONE".to_string(),
-        },
-    )
+    Some(match representative_family(enemies, catalog)? {
+        Some(family) => format!("FAMILY_{family}"),
+        None => "FAMILY_NONE".to_string(),
+    })
 }
 
 /// Recalcule et écrit le type des combats `ids` — entièrement, à chaque fois (idempotent).
