@@ -569,7 +569,13 @@ fn fight_detail(
     }
     if fight.won && (fight.kamas_gained.unwrap_or(0) > 0 || !fight.loot.is_empty()) {
         ui.add_space(10.0);
-        section_title(ui, width, "Butin", &loot_summary(fight));
+        let kamas = fight.kamas_gained.filter(|&kamas| kamas > 0);
+        let count = if fight.loot.is_empty() {
+            String::new()
+        } else {
+            format!("{} objet(s)", fight.loot.len())
+        };
+        section_title(ui, width, "Butin", kamas, &count);
         for line in &fight.loot {
             let (row, _) =
                 ui.allocate_exact_size(egui::vec2(width, LOOT_ROW.height + 2.0), Sense::hover());
@@ -583,7 +589,7 @@ fn fight_detail(
     let xp: Vec<&ParticipantRow> = allies.iter().copied().filter(|p| p.xp_gained > 0).collect();
     if !xp.is_empty() {
         ui.add_space(10.0);
-        section_title(ui, width, "Expérience", "");
+        section_title(ui, width, "Expérience", None, "");
         for participant in xp {
             let (row, _) = ui.allocate_exact_size(egui::vec2(width, 24.0), Sense::hover());
             let painter = ui.painter_at(row);
@@ -612,19 +618,8 @@ fn fight_detail(
         .set(shape, egui::Shape::rect_filled(frame, 0.0, DETAIL_FILL));
 }
 
-/// `12 345 ₭ · 7 objet(s)`.
-fn loot_summary(fight: &FightRow) -> String {
-    let mut parts = Vec::new();
-    if let Some(kamas) = fight.kamas_gained.filter(|&kamas| kamas > 0) {
-        parts.push(format::kamas(kamas));
-    }
-    if !fight.loot.is_empty() {
-        parts.push(format!("{} objet(s)", fight.loot.len()));
-    }
-    parts.join(" · ")
-}
-
-fn section_title(ui: &mut Ui, width: f32, title: &str, tail: &str) {
+/// Titre de section : le titre, puis les kamas (icône comprise) et `tail`.
+fn section_title(ui: &mut Ui, width: f32, title: &str, kamas: Option<i64>, tail: &str) {
     let (row, _) = ui.allocate_exact_size(egui::vec2(width, 22.0), Sense::hover());
     let painter = ui.painter_at(row);
     let title = painter.text(
@@ -634,8 +629,19 @@ fn section_title(ui: &mut Ui, width: f32, title: &str, tail: &str) {
         text::label_strong_font(ui.ctx(), 13.0),
         tokens::TEXT_GOLD,
     );
+    let mut x = title.right() + 10.0;
+    if let Some(kamas) = kamas {
+        x = super::paint_amount_left(
+            ui,
+            &painter,
+            egui::pos2(x, row.center().y),
+            &format::thousands(kamas),
+            text::label_strong_font(ui.ctx(), 13.0),
+            tokens::TEXT_GOLD,
+        ) + 10.0;
+    }
     painter.text(
-        egui::pos2(title.right() + 10.0, row.center().y),
+        egui::pos2(x, row.center().y),
         Align2::LEFT_CENTER,
         tail,
         text::label_font(ui.ctx(), 13.0),

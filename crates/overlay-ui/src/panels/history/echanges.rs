@@ -253,14 +253,15 @@ fn trade_entry(
             if amount <= 0 {
                 continue;
             }
-            let value = painter.text(
+            // La police n'a pas le symbole ₭ : le montant est suivi de l'icône Kamas.
+            x = super::paint_amount_left(
+                ui,
+                &painter,
                 egui::pos2(x, row.center().y),
-                Align2::LEFT_CENTER,
-                format!("{sign}{}", format::kamas(amount)),
+                &format!("{sign}{}", format::thousands(amount)),
                 font.clone(),
                 color,
-            );
-            x = value.right() + 8.0;
+            ) + 10.0;
         }
         y += KAMAS_HEIGHT + BLOCK_GAP;
     }

@@ -12,6 +12,7 @@ pub mod format;
 pub mod items;
 pub mod pactes;
 pub mod pager;
+pub mod recap;
 
 use chrono::NaiveDate;
 use egui::{Sense, Ui};
@@ -104,6 +105,29 @@ pub(crate) fn paint_amount(
     rect.left()
 }
 
+/// Un montant en kamas qui commence en `left` : le nombre, puis l'icône Kamas. Rend le bord droit
+/// de l'icône.
+pub(crate) fn paint_amount_left(
+    ui: &Ui,
+    painter: &egui::Painter,
+    left: egui::Pos2,
+    amount: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+) -> f32 {
+    let rect = painter.text(left, egui::Align2::LEFT_CENTER, amount, font, color);
+    let icon_center = egui::pos2(rect.right() + 4.0 + KAMAS_ICON_SIZE / 2.0, left.y);
+    paint_icon(
+        ui,
+        painter,
+        icon_center,
+        DsIcon::Kamas,
+        KAMAS_ICON_SIZE,
+        egui::Color32::WHITE,
+    );
+    icon_center.x + KAMAS_ICON_SIZE / 2.0
+}
+
 /// Les onglets, dans l'ordre de la barre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HistoryTab {
@@ -153,6 +177,7 @@ pub struct HistoryWindowState {
     pub tab: HistoryTab,
     pub achats: achats::AchatsState,
     pub combats: combats::CombatsState,
+    pub recap: recap::RecapState,
     pub echanges: echanges::EchangesState,
     pub pactes: pactes::PactesState,
 }
@@ -169,6 +194,7 @@ impl HistoryWindowState {
     pub fn invalidate(&mut self) {
         self.achats.rows = None;
         self.combats.list.rows = None;
+        self.recap.invalidate();
         self.echanges.rows = None;
         self.pactes.rows = None;
     }
@@ -361,6 +387,7 @@ pub fn show(
     chrome.tabs(ui, tabs);
     design::panel().show(ui, chrome.content, |ui, zones| match state.tab {
         HistoryTab::Combats => combats::show(ui, zones, &mut state.combats, ctx, textures),
+        HistoryTab::Recap => recap::show(ui, zones, &mut state.recap, ctx, textures),
         HistoryTab::Achats => achats::show(ui, zones, &mut state.achats, ctx, textures),
         HistoryTab::Echanges => echanges::show(ui, zones, &mut state.echanges, ctx, textures),
         HistoryTab::Pactes => pactes::show(ui, zones, &mut state.pactes, ctx, textures),
@@ -374,12 +401,6 @@ pub fn show(
                     outcome.open_url = Some(url);
                 }
             });
-        }
-        other => {
-            ui.add(
-                design::label(format!("{} — à venir", other.label()))
-                    .color(design::tokens::TEXT_DISABLED),
-            );
         }
     });
     outcome.close = chrome.close;

@@ -209,6 +209,19 @@ pub fn history_scenario() -> Vec<Step> {
                 Step::Capture("combats-deplie-2"),
             ]);
         }
+        if name == "recap" {
+            // Aujourd'hui peut être vide : le mois et l'année en cours.
+            for (x, label, capture) in [
+                (174.0, "mois", "recap-mois"),
+                (264.0, "annee", "recap-annee"),
+            ] {
+                steps.extend([
+                    Step::Click { x, y: 165.0, label },
+                    Step::Pause(Duration::from_secs(2)),
+                    Step::Capture(capture),
+                ]);
+            }
+        }
         if name == "echanges" {
             // Plus bas dans la liste : kamas et objets cédés.
             steps.extend([
@@ -475,7 +488,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            12
+            14
         );
     }
 

@@ -53,11 +53,6 @@ pub fn relative_day(day: NaiveDate, today: NaiveDate) -> String {
     }
 }
 
-/// `12 345 ₭`.
-pub fn kamas(amount: i64) -> String {
-    format!("{} ₭", thousands(amount))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,6 +68,5 @@ mod tests {
             medium_date(NaiveDate::from_ymd_opt(2026, 8, 3).unwrap()),
             "3 août 2026"
         );
-        assert_eq!(kamas(1_234_567), "1 234 567 ₭");
     }
 }
