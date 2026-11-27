@@ -335,7 +335,7 @@ avec les seules images absentes de wakassets, converties en PNG (350 fichiers, 2
   d'e-mails dédié** (texte à rédiger le moment venu), la durée de la période étant fixée à ce
   moment-là.
 
-**Fait (phase 2, 2026-11-27) — mécanique d'import, sans fenêtre.**
+**Fait (phase 2, 2026-11-27).**
 
 - **Déclenchement automatique** tant que la connexion existe encore : dès que l'uid du compte est
   connu (`background::activate_sync_queue`), un thread jetable (`spawn_history_import`) importe
@@ -365,7 +365,12 @@ avec les seules images absentes de wakassets, converties en PNG (350 fichiers, 2
   XP ; jusqu'à 6 copies) existent déjà sur le site sous des `clientKey` différentes — signatures
   d'anciennes versions du moteur. Recopiés tels quels (parité avec le site) ; un dédoublonnage par
   contenu pourra se faire dans la fenêtre (phase 3) si on le juge utile.
-- Reste pour fermer la phase : comparer les totaux avec le récap du site.
+- **Comparaison avec le site (2026-11-27)** : les quatre GET relus dans le navigateur connecté au
+  compte, puis comparés à la base locale. Totaux identiques (combats gagnés/perdus, XP, kamas,
+  participants, butin, achats et récupérations de kamas, échanges, pactes et leurs objets), et
+  **empreintes ligne à ligne identiques** (SHA-256 des lignes triées : clé, date, issue, XP, kamas,
+  donjon, run, type, nombres de participants et de lignes de butin ; mêmes principes pour les
+  trois autres tables).
 
 ## 9. Retrait du compte et de la connexion
 
@@ -418,7 +423,7 @@ avec les seules images absentes de wakassets, converties en PNG (350 fichiers, 2
 | --- | --- | --- |
 | **0 — Données** ✅ | Référentiel français embarqué (`tools/referentiel`) ; dossier `cdn/` + `pages.yml` ; résolution d'icônes wakassets puis CDN | L'overlay démarre et résout noms et icônes sans jeton ni API |
 | **1 — Stockage** ✅ | `history.sqlite3`, écriture depuis le moteur, recalcul runs de donjon et type de combat | Rejeu 10× du même log : aucun doublon ✅ ; totaux identiques au site sur un même log : vérifiés contre le moteur, la comparaison avec le site se fait sur un import réel (phase 2) |
-| **2 — Import** (mécanique ✅) | Import de l'historique en ligne, automatique à la connexion ; bouton et progression dans la fenêtre (phase 3) | Historique d'un compte réel importé, volume mesuré, totaux identiques au site |
+| **2 — Import** ✅ | Import de l'historique en ligne, automatique à la connexion ; bouton et progression dans la fenêtre (phase 3) | Historique d'un compte réel importé ✅ (1 562 entrées, 4,6 s, 3,2 Mo), totaux et lignes identiques au site ✅ |
 | **3 — Fenêtre** | Fenêtre application, 5 composants, vues Combats / Récap / Achats / Échanges / Pactes / À propos, Windows et X11 | Parité fonctionnelle avec le site sur le périmètre §3.1 ; captures de référence |
 | **4 — Nettoyage** | Retrait compte et connexion (§9), du multilingue du catalogue, mise à jour de `plan-architecture.md` | Plus aucun appel à `wakfu-companion.com` hors liens ouverts dans le navigateur |
 | **5 — Site** | Page statique, pages légales réécrites, arrêt des Functions (sauf téléchargement) et de Neon | Coût d'hébergement nul hors domaine |
