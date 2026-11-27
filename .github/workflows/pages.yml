@@ -1,0 +1,46 @@
+# CDN d'images de l'overlay (2026-11-27, `docs/plan-historique-local.md` §5) : publie le dossier
+# `cdn/` du dépôt sur GitHub Pages, à l'adresse `https://oumbra.github.io/wakfu-companion-overlay/`.
+#
+# L'overlay y cherche les icônes que wakassets n'a pas (objets, monstres, donjons récents…), avec
+# les mêmes chemins que wakassets (`items/1234.png`, voir `overlay_sync::client::icon_urls`). Les
+# images sont préparées EN AMONT par le mainteneur avec `tools/referentiel` (commande `images`),
+# puis commitées dans `cdn/` : ni ce workflow ni l'overlay ne lisent jamais les fichiers du jeu.
+#
+# Déclenché par un push sur `main` qui touche `cdn/` — donc à la mise en production, en même temps
+# que la release dont le référentiel embarqué référence ces images — ou à la main.
+#
+# Prérequis, une fois pour toutes : Settings › Pages › Source = « GitHub Actions ».
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['cdn/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Un seul déploiement à la fois ; celui en cours va jusqu'au bout plutôt que d'être annulé.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: cdn
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: cdn
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

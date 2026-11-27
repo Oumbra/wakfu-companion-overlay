@@ -48,10 +48,15 @@ on:
     # design/fonts.rs, ui_icons.rs…) : les toucher peut casser la compilation ET les snapshots
     # d'`overlay-testkit`. GitHub n'applique l'exclusion que si TOUS les fichiers du push
     # correspondent — un push mêlant doc et code déclenche bien le CI.
+    # `cdn/**` (images publiées par `pages.yml`, jamais embarquées) et `tools/**` (outils du
+    # mainteneur : scripts Python, crates à workspace propre hors `members`) ne touchent pas non
+    # plus le binaire — ce qu'ils produisent n'y entre qu'en étant commité ailleurs (`assets/`).
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
       - '.claude/**'
+      - 'cdn/**'
+      - 'tools/**'
   pull_request:
     # Une PR vers `main` n'est ouverte que par `release-pr.yml`, qui joue déjà ce CI complet sur
     # le même commit (`workflow_call`, job `ci`). Le run `pull_request` qu'elle déclenchait en plus
@@ -63,6 +68,8 @@ on:
       - 'docs/**'
       - '**/*.md'
       - '.claude/**'
+      - 'cdn/**'
+      - 'tools/**'
   workflow_dispatch:
   # Appelé aussi par `release-pr.yml` (job `ci`) : une branche de release n'est fusionnée dans
   # `main` qu'après ce CI complet sur son commit de tête — sans `paths-ignore`, une release de
