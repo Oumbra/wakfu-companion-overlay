@@ -2,8 +2,9 @@
 //!
 //! Ces trois historiques restent petits (quelques centaines de lignes par an) : ils sont lus en
 //! entier, du plus récent au plus ancien, et la vue filtre, groupe et trie en mémoire — comme le
-//! site, qui recevait tout l'historique avant d'en faire ses groupes par jour. Les combats, eux,
-//! auront leur lecture propre.
+//! site, qui recevait tout l'historique avant d'en faire ses groupes par jour. Les combats sont lus
+//! de même, sans leurs ventilations par sort (le JSON le plus lourd de la base) : quelques milliers
+//! de combats et leurs participants tiennent en quelques Mo.
 //!
 //! **Égalité d'horodatage** (même milliseconde, cas réel : une ligne d'achat lue deux fois par un
 //! ancien parseur) : départagée par `id` **croissant**. Le site triait par son id décroissant, et
@@ -56,7 +57,111 @@ pub struct PactRow {
     pub items: Vec<ItemLine>,
 }
 
+/// Un combattant d'un combat — une ligne par instance (trois Bouftous = trois lignes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParticipantRow {
+    pub name: String,
+    pub is_ally: bool,
+    pub monster_id: Option<i64>,
+    pub class_name: Option<String>,
+    pub damage: i64,
+    pub heal: i64,
+    pub armor: i64,
+    pub defeated: bool,
+    pub fled: bool,
+    pub xp_gained: i64,
+}
+
+/// Un combat, ses combattants (dans l'ordre d'écriture) et son butin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FightRow {
+    pub id: i64,
+    /// ms UTC.
+    pub started_at: i64,
+    pub duration_ms: Option<i64>,
+    pub won: bool,
+    pub turns: i64,
+    pub xp_gained: i64,
+    pub kamas_gained: Option<i64>,
+    pub dungeon_id: Option<i64>,
+    /// Partagée par les combats d'un même run de donjon (`derive`).
+    pub dungeon_run_key: Option<String>,
+    pub fight_type: Option<String>,
+    pub participants: Vec<ParticipantRow>,
+    pub loot: Vec<ItemLine>,
+}
+
 impl HistoryStore {
+    /// Tous les combats, du plus récent au plus ancien, avec leurs combattants et leur butin.
+    pub fn fights(&self) -> Result<Vec<FightRow>, HistoryError> {
+        let mut fights: Vec<FightRow> = self
+            .conn
+            .prepare_cached(
+                "SELECT id, started_at, duration_ms, won, turns, xp_gained, kamas_gained,
+                    dungeon_id, dungeon_run_key, fight_type
+                 FROM fights ORDER BY started_at DESC, id",
+            )?
+            .query_map([], |row| {
+                Ok(FightRow {
+                    id: row.get(0)?,
+                    started_at: row.get(1)?,
+                    duration_ms: row.get(2)?,
+                    won: row.get(3)?,
+                    turns: row.get(4)?,
+                    xp_gained: row.get(5)?,
+                    kamas_gained: row.get(6)?,
+                    dungeon_id: row.get(7)?,
+                    dungeon_run_key: row.get(8)?,
+                    fight_type: row.get(9)?,
+                    participants: Vec::new(),
+                    loot: Vec::new(),
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        let index: std::collections::HashMap<i64, usize> = fights
+            .iter()
+            .enumerate()
+            .map(|(position, fight)| (fight.id, position))
+            .collect();
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT fight_id, name, side, monster_id, class_name, damage, heal, armor, defeated,
+                fled, xp_gained
+             FROM fight_participants ORDER BY fight_id, rowid",
+        )?;
+        let mut rows = stmt.query(params![])?;
+        while let Some(row) = rows.next()? {
+            if let Some(&position) = index.get(&row.get::<_, i64>(0)?) {
+                fights[position].participants.push(ParticipantRow {
+                    name: row.get(1)?,
+                    is_ally: row.get::<_, String>(2)? == "ally",
+                    monster_id: row.get(3)?,
+                    class_name: row.get(4)?,
+                    damage: row.get(5)?,
+                    heal: row.get(6)?,
+                    armor: row.get(7)?,
+                    defeated: row.get(8)?,
+                    fled: row.get(9)?,
+                    xp_gained: row.get(10)?,
+                });
+            }
+        }
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT fight_id, item_id, item_name, quantity FROM fight_loot
+             ORDER BY fight_id, line_index",
+        )?;
+        let mut rows = stmt.query(params![])?;
+        while let Some(row) = rows.next()? {
+            if let Some(&position) = index.get(&row.get::<_, i64>(0)?) {
+                fights[position].loot.push(ItemLine {
+                    item_id: row.get(1)?,
+                    item_name: row.get(2)?,
+                    quantity: row.get(3)?,
+                });
+            }
+        }
+        Ok(fights)
+    }
+
     /// Tous les achats, du plus récent au plus ancien.
     pub fn purchases(&self) -> Result<Vec<PurchaseRow>, HistoryError> {
         let mut stmt = self.conn.prepare_cached(

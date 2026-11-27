@@ -132,6 +132,8 @@ pub enum DayTail<'a> {
     Kamas(&'a str),
     /// Nombre d'entrées (Échanges, Pactes).
     Count(usize),
+    /// Un libellé (« 3 combats »).
+    Text(&'a str),
 }
 
 /// En-tête de jour cliquable : date à gauche, total ou nombre et chevron à droite. Rend `true`
@@ -168,17 +170,15 @@ pub fn day_header(ui: &mut Ui, width: f32, day: &str, tail: DayTail<'_>, open: b
                 ACCENT,
             );
         }
+        DayTail::Text(label) => {
+            painter.text(tail_right, Align2::RIGHT_CENTER, label, font, ACCENT);
+        }
     }
-    super::paint_icon(
+    super::paint_caret(
         ui,
         &painter,
         egui::pos2(rect.right() - 14.0, rect.center().y),
-        if open {
-            DsIcon::ChevronDown
-        } else {
-            DsIcon::TriangleRight
-        },
-        12.0,
+        open,
         tokens::TEXT_GOLD,
     );
     response.clicked()

@@ -185,10 +185,30 @@ pub fn history_scenario() -> Vec<Step> {
         });
         // Une liste d'objets demande ses icônes à sa première frame : même pause qu'à
         // l'ouverture.
-        if matches!(name, "echanges" | "pactes") {
+        if matches!(name, "combats" | "echanges" | "pactes") {
             steps.push(Step::Pause(Duration::from_secs(2)));
         }
         steps.push(Step::Capture(name));
+        if name == "combats" {
+            // La première entrée du premier jour, dépliée (un combat, ou un run de donjon), puis
+            // la ligne suivante (le premier combat du run, ou le combat suivant).
+            steps.extend([
+                Step::Click {
+                    x: 550.0,
+                    y: 242.0,
+                    label: "premier combat",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("combats-deplie"),
+                Step::Click {
+                    x: 550.0,
+                    y: 282.0,
+                    label: "ligne suivante",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("combats-deplie-2"),
+            ]);
+        }
         if name == "echanges" {
             // Plus bas dans la liste : kamas et objets cédés.
             steps.extend([
@@ -455,7 +475,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            10
+            12
         );
     }
 

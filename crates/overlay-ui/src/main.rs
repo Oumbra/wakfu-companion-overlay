@@ -732,6 +732,9 @@ struct App {
     /// embarqué. Vide (`CatalogIndex::default`) le temps de son analyse au lancement — les tuiles
     /// du panneau Suivi retombent alors sur l'icône générique.
     catalog: Arc<ArcSwap<CatalogIndex>>,
+    /// Référentiel des donjons, publié par le même thread que `catalog` — noms des donjons de la
+    /// fenêtre d'historique.
+    dungeons: Arc<ArcSwap<DungeonIndex>>,
     /// Un seul thread/état de téléchargement d'icônes PARTAGÉ par toutes les fenêtres (voir
     /// `remote_icons::RemoteIconStore`) — chaque fenêtre garde son propre cache de textures déjà
     /// uploadées (`OverlayWindow::remote_icon_textures`), mais ne retélécharge jamais une icône
@@ -1065,6 +1068,7 @@ struct AppState {
     /// (`config::OverlayConfig::recap_locked`).
     recap_locked: bool,
     catalog: Arc<ArcSwap<CatalogIndex>>,
+    dungeons: Arc<ArcSwap<DungeonIndex>>,
     remote_icons: RemoteIconStore,
     auth_status: Arc<ArcSwap<AuthStatus>>,
     auth_command_tx: mpsc::Sender<AuthCommand>,
@@ -1118,6 +1122,7 @@ impl App {
             watchlist_vertical,
             recap_locked,
             catalog,
+            dungeons,
             remote_icons,
             auth_status,
             auth_command_tx,
@@ -1164,6 +1169,7 @@ impl App {
             countdown_toast,
             completion,
             catalog,
+            dungeons,
             remote_icons,
             auth_status,
             auth_command_tx,
@@ -1639,7 +1645,11 @@ impl App {
             match copy {
                 Ok(path) => {
                     test.log(format!("base copiée : {}", path.display()));
-                    self.history = Some(panels::history::HistoryHost::open_path(tab, Ok(path)));
+                    self.history = Some(panels::history::HistoryHost::open_path(
+                        tab,
+                        Ok(path),
+                        Arc::clone(&self.dungeons),
+                    ));
                 }
                 Err(err) => {
                     test.fail(format!("copie de la base impossible : {err}"));
@@ -1649,7 +1659,10 @@ impl App {
         } else {
             Self::center_on_primary_monitor(event_loop, &window);
             window.focus_window();
-            self.history = Some(panels::history::HistoryHost::open(tab));
+            self.history = Some(panels::history::HistoryHost::open(
+                tab,
+                Arc::clone(&self.dungeons),
+            ));
         }
         let overlay = OverlayWindow {
             window,
@@ -6806,6 +6819,7 @@ fn main() {
         watchlist_vertical: saved_config.watchlist_vertical,
         recap_locked: saved_config.recap_locked,
         catalog,
+        dungeons,
         remote_icons,
         auth_status,
         auth_command_tx,

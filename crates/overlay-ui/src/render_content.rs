@@ -998,12 +998,14 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // `options`).
                 OverlayKind::History => {
                     if let Some(host) = history {
+                        let dungeons = host.dungeons.load();
                         let history_outcome = panels::history::show(
                             ui,
                             &mut host.state,
                             &panels::history::HistoryContext {
                                 store: host.store.as_ref(),
                                 catalog,
+                                dungeons: &dungeons,
                                 remote_icons,
                                 today: chrono::Local::now().date_naive(),
                             },

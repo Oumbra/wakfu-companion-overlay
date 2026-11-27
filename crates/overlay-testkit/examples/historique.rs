@@ -93,6 +93,7 @@ fn main() {
         let ctx = HistoryContext {
             store: Some(&store),
             catalog: &referentiel.catalog,
+            dungeons: &referentiel.dungeons,
             remote_icons: &remote_icons,
             today,
         };

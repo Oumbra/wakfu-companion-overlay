@@ -344,3 +344,22 @@ fn une_base_plus_recente_est_refusee() {
 
 mod import;
 mod stats;
+
+#[test]
+fn un_combat_relu_porte_ses_combattants_et_son_butin() {
+    let mut store = store();
+    record(
+        &mut store,
+        &[fight("f1", 1, &[("Bouftou", 1), ("Bouftou", 1)])],
+    );
+    let fights = store.fights().unwrap();
+    assert_eq!(fights.len(), 1);
+    let fight = &fights[0];
+    assert_eq!(fight.participants.len(), 3);
+    assert_eq!(
+        fight.participants.iter().filter(|p| p.is_ally).count(),
+        1,
+        "un allié, deux Bouftous"
+    );
+    assert_eq!(fight.loot.len(), 1);
+}

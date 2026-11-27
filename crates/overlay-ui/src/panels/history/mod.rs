@@ -6,6 +6,7 @@
 //! permet au harnais de rendu (`overlay-testkit`) de le dessiner hors écran sur une vraie base.
 
 pub mod achats;
+pub mod combats;
 pub mod echanges;
 pub mod format;
 pub mod items;
@@ -14,7 +15,7 @@ pub mod pager;
 
 use chrono::NaiveDate;
 use egui::{Sense, Ui};
-use overlay_engine::CatalogIndex;
+use overlay_engine::{CatalogIndex, DungeonIndex};
 use overlay_history::HistoryStore;
 
 use crate::remote_icons::{RemoteIconStore, RemoteIconTextures};
@@ -47,6 +48,31 @@ pub(crate) fn paint_icon(
         egui::Rect::from_center_size(center, drawn),
         icon,
         tint,
+    );
+}
+
+/// Le chevron d'une ligne repliable centré sur `center` : `⌄` dépliée, `▸` repliée. Le triangle
+/// du jeu pointe vers la gauche (voir `DsIcon::TriangleRight`) : il est peint en miroir.
+pub(crate) fn paint_caret(
+    ui: &Ui,
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    open: bool,
+    tint: egui::Color32,
+) {
+    if open {
+        paint_icon(ui, painter, center, DsIcon::ChevronDown, 12.0, tint);
+        return;
+    }
+    let ds = design::DesignSystem::get(ui.ctx());
+    let icon = DsIcon::TriangleRight;
+    let drawn = design::components::icon_button::glyph_fit(ds.icon_native_size(icon), 12.0);
+    ds.paint_icon_flipped(
+        painter,
+        egui::Rect::from_center_size(center, drawn),
+        icon,
+        tint,
+        true,
     );
 }
 
@@ -126,6 +152,7 @@ impl HistoryTab {
 pub struct HistoryWindowState {
     pub tab: HistoryTab,
     pub achats: achats::AchatsState,
+    pub combats: combats::CombatsState,
     pub echanges: echanges::EchangesState,
     pub pactes: pactes::PactesState,
 }
@@ -141,6 +168,7 @@ impl HistoryWindowState {
     /// La base a changé (nouveaux événements, import) : chaque vue relira ses données.
     pub fn invalidate(&mut self) {
         self.achats.rows = None;
+        self.combats.list.rows = None;
         self.echanges.rows = None;
         self.pactes.rows = None;
     }
@@ -151,6 +179,8 @@ pub struct HistoryContext<'a> {
     /// `None` : base absente ou illisible — les vues se montrent vides.
     pub store: Option<&'a HistoryStore>,
     pub catalog: &'a CatalogIndex,
+    /// Référentiel des donjons (noms des runs de la vue Combats).
+    pub dungeons: &'a DungeonIndex,
     /// Icônes d'objets (wakassets, puis le CDN de l'overlay), partagées par le processus.
     pub remote_icons: &'a RemoteIconStore,
     /// Jour local courant (« Aujourd'hui », « Hier »…), fourni par l'hôte pour que les captures
@@ -177,13 +207,18 @@ pub struct HistoryOutcome {
 pub struct HistoryHost {
     pub state: HistoryWindowState,
     pub store: Option<HistoryStore>,
+    /// Référentiel des donjons (noms des runs), publié par le thread Référentiel.
+    pub dungeons: std::sync::Arc<arc_swap::ArcSwap<DungeonIndex>>,
 }
 
 impl HistoryHost {
     /// Ouvre la base de l'overlay (`HistoryStore::default_path`) ; une base absente ou illisible
     /// laisse la fenêtre s'ouvrir, vide.
-    pub fn open(tab: HistoryTab) -> Self {
-        Self::open_path(tab, HistoryStore::default_path())
+    pub fn open(
+        tab: HistoryTab,
+        dungeons: std::sync::Arc<arc_swap::ArcSwap<DungeonIndex>>,
+    ) -> Self {
+        Self::open_path(tab, HistoryStore::default_path(), dungeons)
     }
 
     /// Sur une autre base que celle de l'overlay — la copie de l'essai automatique
@@ -191,6 +226,7 @@ impl HistoryHost {
     pub fn open_path(
         tab: HistoryTab,
         path: Result<std::path::PathBuf, overlay_history::HistoryError>,
+        dungeons: std::sync::Arc<arc_swap::ArcSwap<DungeonIndex>>,
     ) -> Self {
         let store = path
             .and_then(|path| HistoryStore::open(&path))
@@ -199,6 +235,7 @@ impl HistoryHost {
         Self {
             state: HistoryWindowState::new(tab),
             store,
+            dungeons,
         }
     }
 }
@@ -323,6 +360,7 @@ pub fn show(
     }
     chrome.tabs(ui, tabs);
     design::panel().show(ui, chrome.content, |ui, zones| match state.tab {
+        HistoryTab::Combats => combats::show(ui, zones, &mut state.combats, ctx, textures),
         HistoryTab::Achats => achats::show(ui, zones, &mut state.achats, ctx, textures),
         HistoryTab::Echanges => echanges::show(ui, zones, &mut state.echanges, ctx, textures),
         HistoryTab::Pactes => pactes::show(ui, zones, &mut state.pactes, ctx, textures),
