@@ -420,6 +420,12 @@ pub struct DetailState {
     pub turn: HashMap<i64, i64>,
     /// Sorts de tout un combat, lus pour la vue « Tour » — vidé quand la base change.
     pub fight_spells: HashMap<(i64, Metric), FightSpells>,
+    /// Combats dont « Informations de combat » est replié (ouvert par défaut, comme sur le site).
+    pub collapsed_info: HashSet<i64>,
+    /// Combats dont le Butin est replié.
+    pub collapsed_loot: HashSet<i64>,
+    /// Combats dont l'Expérience est repliée.
+    pub collapsed_xp: HashSet<i64>,
     /// Recherche dans le butin, partagée par tous les combats dépliés.
     pub loot_query: String,
     /// Tri du butin, partagé de même.
@@ -500,6 +506,83 @@ const TOGGLE_ALL_WIDTH: f32 = 140.0;
 const MODE_SWITCH_WIDTH: f32 = 300.0;
 /// Switch « Cumulé » / « Tour ».
 const VIEW_SWITCH_WIDTH: f32 = 180.0;
+/// Écart entre le switch de vue et le libellé « Tour », et largeur de ce libellé.
+const TURN_GAP: f32 = 12.0;
+const TURN_LABEL_WIDTH: f32 = 36.0;
+/// Hauteur de l'en-tête « Informations de combat » (il porte les switches).
+const INFO_HEADER_HEIGHT: f32 = 40.0;
+/// Hauteur des en-têtes Butin et Expérience.
+const SECTION_HEADER_HEIGHT: f32 = 30.0;
+/// Côté des médaillons d'en-tête.
+const SECTION_ICON: f32 = 20.0;
+
+/// Le message d'une colonne sans combattant (`emptyMessageKey` du site, combat terminé).
+fn empty_message(metric: Metric, ally: bool) -> &'static str {
+    match (metric, ally) {
+        (Metric::Damage, true) => "Aucun personnage n'a infligé de dégâts.",
+        (Metric::Damage, false) => "Aucun ennemi n'a infligé de dégâts.",
+        (Metric::Armor, true) => "Aucun personnage n'a donné d'armure.",
+        (Metric::Armor, false) => "Aucun ennemi n'a donné d'armure.",
+        (Metric::Heal, true) => "Aucun personnage n'a soigné.",
+        (Metric::Heal, false) => "Aucun ennemi n'a soigné.",
+    }
+}
+
+/// Le statut d'un combattant qui ne finit pas le combat debout.
+#[derive(Clone, Copy)]
+enum Status {
+    Ko,
+    Fled,
+}
+
+/// Peint le pictogramme d'un statut dans `rect` (16 × 16) : la tête de mort du site
+/// (`app-ko-icon`, tracé repris de son SVG 24 × 24) ou une flèche de sortie pour la fuite.
+fn paint_status(painter: &egui::Painter, rect: Rect, status: Status) {
+    let scale = rect.width() / 24.0;
+    let at = |x: f32, y: f32| rect.min + egui::vec2(x * scale, y * scale);
+    match status {
+        Status::Ko => {
+            let color = LOST;
+            let stroke = egui::Stroke::new(1.4, color);
+            let outline = [
+                (5.0, 11.0),
+                (5.6, 7.6),
+                (7.6, 4.9),
+                (12.0, 3.5),
+                (16.4, 4.9),
+                (18.4, 7.6),
+                (19.0, 11.0),
+                (18.2, 14.3),
+                (16.0, 17.0),
+                (16.0, 19.3),
+                (15.0, 20.3),
+                (9.0, 20.3),
+                (8.0, 19.3),
+                (8.0, 17.0),
+                (5.8, 14.3),
+            ]
+            .map(|(x, y)| at(x, y));
+            painter.add(egui::Shape::closed_line(outline.to_vec(), stroke));
+            painter.circle_filled(at(9.3, 11.0), 1.4 * scale, color);
+            painter.circle_filled(at(14.7, 11.0), 1.4 * scale, color);
+            painter.line_segment([at(9.5, 18.7), at(14.5, 18.7)], stroke);
+        }
+        Status::Fled => {
+            let color = Color32::from_rgb(0xE0, 0xA3, 0x5A);
+            let stroke = egui::Stroke::new(1.6, color);
+            // Un cadre de porte ouvert à droite, et la flèche qui en sort.
+            painter.add(egui::Shape::line(
+                vec![at(13.0, 4.0), at(5.0, 4.0), at(5.0, 20.0), at(13.0, 20.0)],
+                stroke,
+            ));
+            painter.line_segment([at(9.0, 12.0), at(21.0, 12.0)], stroke);
+            painter.add(egui::Shape::line(
+                vec![at(17.0, 8.0), at(21.0, 12.0), at(17.0, 16.0)],
+                stroke,
+            ));
+        }
+    }
+}
 /// Victoire / défaite (`.fight-badge.won`, `.lost`).
 const WON: Color32 = items::GAIN;
 const LOST: Color32 = items::LOSS;
@@ -881,56 +964,185 @@ fn fight_detail(
     textures: &mut RemoteIconTextures,
 ) {
     let inner_width = width - 24.0;
-    let metric = detail.metric.entry(fight.id).or_default();
     let frame_top = ui.cursor().top();
     let shape = ui.painter().add(egui::Shape::Noop);
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.add_space(12.0);
-        // Le switch de grandeur du panneau Combat de l'overlay : mêmes pictogrammes, même socle
-        // de premier plan, mêmes infobulles (`CombatMetric::tooltip`).
-        ui.add(
-            design::switch(metric)
-                .slot(Metric::Damage, "Dégâts infligés")
-                .icon(design::DsIcon::MetricDamage)
-                .slot(Metric::Armor, "Armure donnée")
-                .icon(design::DsIcon::MetricArmor)
-                .slot(Metric::Heal, "Soins prodigués")
-                .icon(design::DsIcon::MetricHeal)
-                .variant(design::SwitchVariant::FirstPlan)
-                .log_name("historique.combats.grandeur"),
+    ui.add_space(4.0);
+    // « Informations de combat » (`combat-info-toggle` du site) : replie ensemble les switches et
+    // les deux colonnes. La vue au centre, la grandeur à droite, avant le chevron.
+    let info_open = !detail.collapsed_info.contains(&fight.id);
+    let (header, _, clicked) = collapsible_header(
+        ui,
+        width,
+        INFO_HEADER_HEIGHT,
+        design::DsIcon::HeaderCombat,
+        "Informations de combat",
+        info_open,
+    );
+    if clicked {
+        toggle(&mut detail.collapsed_info, fight.id);
+    }
+    if info_open {
+        header_switches(ui, header, fight, detail);
+    }
+    ui.add_space(6.0);
+    if info_open {
+        combat_columns(ui, width, inner_width, fight, detail, ctx, textures);
+    }
+    if fight.won {
+        loot_section(ui, width, inner_width, fight, detail, ctx, textures);
+    }
+    xp_section(ui, width, fight, detail, ctx);
+    ui.add_space(10.0);
+    let frame = Rect::from_min_max(
+        egui::pos2(ui.max_rect().left(), frame_top),
+        egui::pos2(ui.max_rect().left() + width, ui.cursor().top()),
+    );
+    ui.painter()
+        .set(shape, egui::Shape::rect_filled(frame, 0.0, DETAIL_FILL));
+}
+
+/// Ajoute ou retire `id` de `set`.
+fn toggle(set: &mut HashSet<i64>, id: i64) {
+    if !set.remove(&id) {
+        set.insert(id);
+    }
+}
+
+/// Les switches de l'en-tête « Informations de combat », posés sur sa ligne : « Cumulé » /
+/// « Tour » (et le tour affiché) au centre, la grandeur à droite.
+fn header_switches(ui: &mut Ui, header: Rect, fight: &FightRow, detail: &mut DetailState) {
+    // Le switch de grandeur du panneau Combat de l'overlay : mêmes pictogrammes, même socle de
+    // premier plan, mêmes infobulles (`CombatMetric::tooltip`).
+    let metric = detail.metric.entry(fight.id).or_default();
+    let metric_switch = design::switch(metric)
+        .slot(Metric::Damage, "Dégâts infligés")
+        .icon(design::DsIcon::MetricDamage)
+        .slot(Metric::Armor, "Armure donnée")
+        .icon(design::DsIcon::MetricArmor)
+        .slot(Metric::Heal, "Soins prodigués")
+        .icon(design::DsIcon::MetricHeal)
+        .variant(design::SwitchVariant::FirstPlan)
+        .log_name("historique.combats.grandeur");
+    let size = metric_switch.desired_size();
+    ui.put(
+        Rect::from_min_size(
+            egui::pos2(
+                header.right() - 34.0 - size.x,
+                header.center().y - size.y / 2.0,
+            ),
+            size,
+        ),
+        metric_switch,
+    );
+    // « Cumulé » / « Tour » puis, en vue « Tour », le tour affiché (`damage-view-switch`).
+    let view = detail.view.entry(fight.id).or_default();
+    let turn_mode = *view == ViewMode::Turn;
+    let view_switch = design::switch(view)
+        .slot(ViewMode::Cumulative, "Cumulé")
+        .slot(ViewMode::Turn, "Tour")
+        .width(VIEW_SWITCH_WIDTH)
+        .log_name("historique.combats.vue");
+    let view_size = view_switch.desired_size();
+    let last = fight.turns.max(1);
+    let turn = detail.turn.entry(fight.id).or_insert(last);
+    *turn = (*turn).clamp(1, last);
+    let stepper = design::stepper(turn)
+        .range(1..=last)
+        .size(30.0)
+        .field_width(48.0)
+        .log_name("historique.combats.tour");
+    let stepper_width = stepper.desired_size().0.unwrap_or(130.0);
+    let group = view_size.x
+        + if turn_mode {
+            TURN_GAP + TURN_LABEL_WIDTH + stepper_width
+        } else {
+            0.0
+        };
+    let mut x = header.center().x - group / 2.0;
+    ui.put(
+        Rect::from_min_size(
+            egui::pos2(x, header.center().y - view_size.y / 2.0),
+            view_size,
+        ),
+        view_switch,
+    );
+    if turn_mode {
+        x += view_size.x + TURN_GAP;
+        ui.painter_at(header).text(
+            egui::pos2(x, header.center().y),
+            Align2::LEFT_CENTER,
+            "Tour",
+            text::label_font(ui.ctx(), 13.0),
+            tokens::OVERLAY_TEXT_MUTED,
         );
-        ui.add_space(16.0);
-        // « Cumulé » / « Tour » puis, en vue « Tour », le tour affiché (`damage-view-switch`).
-        let view = detail.view.entry(fight.id).or_default();
-        ui.add(
-            design::switch(view)
-                .slot(ViewMode::Cumulative, "Cumulé")
-                .slot(ViewMode::Turn, "Tour")
-                .width(VIEW_SWITCH_WIDTH)
-                .log_name("historique.combats.vue"),
+        x += TURN_LABEL_WIDTH;
+        ui.put(
+            Rect::from_min_size(
+                egui::pos2(x, header.center().y - 15.0),
+                egui::vec2(stepper_width, 30.0),
+            ),
+            stepper,
         );
-        if *view == ViewMode::Turn {
-            let last = fight.turns.max(1);
-            let turn = detail.turn.entry(fight.id).or_insert(last);
-            *turn = (*turn).clamp(1, last);
-            ui.add_space(12.0);
-            ui.add(
-                design::label("Tour")
-                    .width(34.0)
-                    .align(egui::Align::Min)
-                    .color(tokens::OVERLAY_TEXT_MUTED),
-            );
-            ui.add(
-                design::stepper(turn)
-                    .range(1..=last)
-                    .size(30.0)
-                    .field_width(48.0)
-                    .log_name("historique.combats.tour"),
-            );
-        }
-    });
-    ui.add_space(8.0);
+    }
+}
+
+/// En-tête repliable d'une section du détail (`collapsible-header` du site) : médaillon, titre en
+/// or, chevron à droite. Rend la ligne, le bord droit du titre et le clic.
+fn collapsible_header(
+    ui: &mut Ui,
+    width: f32,
+    height: f32,
+    icon: design::DsIcon,
+    title: &str,
+    open: bool,
+) -> (Rect, f32, bool) {
+    let (row, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::click());
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let painter = ui.painter_at(row);
+    if response.hovered() {
+        painter.rect_filled(row, 4.0, Color32::from_white_alpha(8));
+    }
+    super::paint_icon(
+        ui,
+        &painter,
+        egui::pos2(row.left() + 12.0 + SECTION_ICON / 2.0, row.center().y),
+        icon,
+        SECTION_ICON,
+        Color32::WHITE,
+    );
+    let title_rect = painter.text(
+        egui::pos2(row.left() + 18.0 + SECTION_ICON, row.center().y),
+        Align2::LEFT_CENTER,
+        title,
+        text::label_strong_font(ui.ctx(), 13.0),
+        tokens::TEXT_GOLD,
+    );
+    super::paint_caret(
+        ui,
+        &painter,
+        egui::pos2(row.right() - 16.0, row.center().y),
+        open,
+        tokens::TEXT_GOLD,
+    );
+    if response.clicked() {
+        tracing::info!(
+            ">>> clic historique.combats.section {title} ({})",
+            if open { "repliée" } else { "dépliée" }
+        );
+    }
+    (row, title_rect.right(), response.clicked())
+}
+
+/// Les colonnes Alliés / Ennemis d'un combat, dans la grandeur et la vue choisies.
+fn combat_columns(
+    ui: &mut Ui,
+    width: f32,
+    inner_width: f32,
+    fight: &FightRow,
+    detail: &mut DetailState,
+    ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
+) {
     let column_gap = 16.0;
     let column_width = (inner_width - column_gap) / 2.0;
     let metric = detail.metric.get(&fight.id).copied().unwrap_or_default();
@@ -1022,6 +1234,7 @@ fn fight_detail(
         side.iter()
             .map(|p| PARTICIPANT_ROW + spell_rows(p) as f32 * SPELL_ROW)
             .sum::<f32>()
+            .max(PARTICIPANT_ROW)
     };
     let (columns, _) = ui.allocate_exact_size(
         egui::vec2(
@@ -1031,9 +1244,9 @@ fn fight_detail(
         Sense::hover(),
     );
     let mut toggled = None;
-    for (index, (title, side, bar)) in [
-        ("Alliés", &allies, ALLY_BAR),
-        ("Ennemis", &enemies, ENEMY_BAR),
+    for (index, (title, side, bar, icon)) in [
+        ("Alliés", &allies, ALLY_BAR, design::DsIcon::Allies),
+        ("Ennemis", &enemies, ENEMY_BAR, design::DsIcon::Enemies),
     ]
     .into_iter()
     .enumerate()
@@ -1050,6 +1263,7 @@ fn fight_detail(
             column,
             Column {
                 title,
+                icon,
                 side,
                 metric,
                 bar,
@@ -1067,73 +1281,163 @@ fn fight_detail(
             detail.open_participants.insert(key);
         }
     }
-    if fight.won && (fight.kamas_gained.unwrap_or(0) > 0 || !fight.loot.is_empty()) {
-        ui.add_space(10.0);
-        let kamas = fight.kamas_gained.filter(|&kamas| kamas > 0);
-        let count = if fight.loot.is_empty() {
-            String::new()
-        } else {
-            format!("{} objet(s)", fight.loot.len())
-        };
-        section_title(ui, width, "Butin", kamas, &count);
-        if fight.loot.len() > 1 {
-            loot_controls(ui, inner_width, detail, ctx, textures);
-            ui.add_space(6.0);
-        }
-        let query = normalize_wakfu_name(detail.loot_query.trim());
-        let mut lines = sorted_loot(&fight.loot, &query, detail.loot_sort, ctx.catalog);
-        if detail.loot_reverse {
-            lines.reverse();
-        }
-        if lines.is_empty() {
-            ui.horizontal(|ui| {
-                ui.add_space(18.0);
-                ui.add(
-                    design::label("Aucun objet ne correspond à cette recherche.")
-                        .color(tokens::TEXT_DISABLED),
-                );
-            });
-        }
-        for line in lines {
-            let (row, _) =
-                ui.allocate_exact_size(egui::vec2(width, LOOT_ROW.height + 2.0), Sense::hover());
-            let row = Rect::from_min_size(
-                row.min + egui::vec2(12.0, 1.0),
-                egui::vec2(inner_width, LOOT_ROW.height),
-            );
-            items::paint_compact_item(ui, ui.painter(), row, line, LOOT_ROW, ctx, textures);
-        }
+}
+
+/// La section Butin d'une victoire (`loot-section` du site) : repliable, kamas et nombre d'objets
+/// dans l'en-tête, recherche et tri dès deux objets, « Aucun butin ramassé. » sans rien.
+fn loot_section(
+    ui: &mut Ui,
+    width: f32,
+    inner_width: f32,
+    fight: &FightRow,
+    detail: &mut DetailState,
+    ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
+) {
+    ui.add_space(6.0);
+    let open = !detail.collapsed_loot.contains(&fight.id);
+    let (row, title_right, clicked) = collapsible_header(
+        ui,
+        width,
+        SECTION_HEADER_HEIGHT,
+        design::DsIcon::HeaderLoot,
+        "Butin",
+        open,
+    );
+    if clicked {
+        toggle(&mut detail.collapsed_loot, fight.id);
     }
-    let xp: Vec<&ParticipantRow> = allies.iter().copied().filter(|p| p.xp_gained > 0).collect();
-    if !xp.is_empty() {
-        ui.add_space(10.0);
-        section_title(ui, width, "Expérience", None, "");
-        for participant in xp {
-            let (row, _) = ui.allocate_exact_size(egui::vec2(width, 24.0), Sense::hover());
-            let painter = ui.painter_at(row);
-            painter.text(
-                egui::pos2(row.left() + 18.0, row.center().y),
-                Align2::LEFT_CENTER,
-                &participant.name,
-                text::label_font(ui.ctx(), 13.0),
+    let painter = ui.painter_at(row);
+    let mut x = title_right + 10.0;
+    if let Some(kamas) = fight.kamas_gained.filter(|&kamas| kamas > 0) {
+        x = super::paint_amount_left(
+            ui,
+            &painter,
+            egui::pos2(x, row.center().y),
+            &format::thousands(kamas),
+            text::label_strong_font(ui.ctx(), 13.0),
+            tokens::TEXT_GOLD,
+        ) + 10.0;
+    }
+    if !fight.loot.is_empty() {
+        painter.text(
+            egui::pos2(x, row.center().y),
+            Align2::LEFT_CENTER,
+            format!("{} objet(s)", fight.loot.len()),
+            text::label_font(ui.ctx(), 13.0),
+            tokens::OVERLAY_TEXT_MUTED,
+        );
+    }
+    if !open {
+        return;
+    }
+    if fight.loot.is_empty() {
+        empty_line(ui, "Aucun butin ramassé.");
+        return;
+    }
+    if fight.loot.len() > 1 {
+        loot_controls(ui, inner_width, detail, ctx, textures);
+        ui.add_space(6.0);
+    }
+    let query = normalize_wakfu_name(detail.loot_query.trim());
+    let mut lines = sorted_loot(&fight.loot, &query, detail.loot_sort, ctx.catalog);
+    if detail.loot_reverse {
+        lines.reverse();
+    }
+    if lines.is_empty() {
+        empty_line(ui, "Aucun objet ne correspond à cette recherche.");
+    }
+    for line in lines {
+        let (row, _) =
+            ui.allocate_exact_size(egui::vec2(width, LOOT_ROW.height + 2.0), Sense::hover());
+        let row = Rect::from_min_size(
+            row.min + egui::vec2(12.0, 1.0),
+            egui::vec2(inner_width, LOOT_ROW.height),
+        );
+        items::paint_compact_item(ui, ui.painter(), row, line, LOOT_ROW, ctx, textures);
+    }
+}
+
+/// Un message grisé, aligné sous un titre de section.
+fn empty_line(ui: &mut Ui, message: &str) {
+    let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), Sense::hover());
+    ui.painter_at(row).text(
+        egui::pos2(row.left() + 18.0 + SECTION_ICON, row.center().y),
+        Align2::LEFT_CENTER,
+        message,
+        text::label_font(ui.ctx(), 13.0),
+        tokens::TEXT_DISABLED,
+    );
+}
+
+/// La section Expérience (`collapsible-section` du site) : repliable, une ligne par allié qui a
+/// gagné de l'expérience — portrait de sa classe, nom, gain.
+fn xp_section(
+    ui: &mut Ui,
+    width: f32,
+    fight: &FightRow,
+    detail: &mut DetailState,
+    ctx: &HistoryContext<'_>,
+) {
+    let xp: Vec<&ParticipantRow> = fight
+        .participants
+        .iter()
+        .filter(|p| p.is_ally && p.xp_gained > 0)
+        .collect();
+    if xp.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
+    let open = !detail.collapsed_xp.contains(&fight.id);
+    let (_, _, clicked) = collapsible_header(
+        ui,
+        width,
+        SECTION_HEADER_HEIGHT,
+        design::DsIcon::HeaderXp,
+        "Expérience",
+        open,
+    );
+    if clicked {
+        toggle(&mut detail.collapsed_xp, fight.id);
+    }
+    if !open {
+        return;
+    }
+    for participant in xp {
+        let (row, _) = ui.allocate_exact_size(egui::vec2(width, 26.0), Sense::hover());
+        let painter = ui.painter_at(row);
+        let icon = Rect::from_center_size(
+            egui::pos2(row.left() + 12.0 + SECTION_ICON / 2.0, row.center().y),
+            egui::vec2(20.0, 20.0),
+        );
+        if let Some(texture) = participant
+            .class_name
+            .as_deref()
+            .zip(ctx.portraits)
+            .and_then(|(class, atlas)| atlas.texture(class, overlay_engine::Gender::M, false))
+        {
+            painter.image(
+                texture.id(),
+                icon,
+                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 Color32::WHITE,
             );
-            painter.text(
-                egui::pos2(row.right() - 18.0, row.center().y),
-                Align2::RIGHT_CENTER,
-                format!("+{}", format::thousands(participant.xp_gained)),
-                text::label_strong_font(ui.ctx(), 13.0),
-                WON,
-            );
         }
+        painter.text(
+            egui::pos2(row.left() + 18.0 + SECTION_ICON, row.center().y),
+            Align2::LEFT_CENTER,
+            &participant.name,
+            text::label_font(ui.ctx(), 13.0),
+            Color32::WHITE,
+        );
+        painter.text(
+            egui::pos2(row.right() - 18.0, row.center().y),
+            Align2::RIGHT_CENTER,
+            format!("+{}", format::thousands(participant.xp_gained)),
+            text::label_strong_font(ui.ctx(), 13.0),
+            WON,
+        );
     }
-    ui.add_space(10.0);
-    let frame = Rect::from_min_max(
-        egui::pos2(ui.max_rect().left(), frame_top),
-        egui::pos2(ui.max_rect().left() + width, ui.cursor().top()),
-    );
-    ui.painter()
-        .set(shape, egui::Shape::rect_filled(frame, 0.0, DETAIL_FILL));
 }
 
 /// Recherche et tri du butin (`loot-controls-row` du site) : le champ prend toute la largeur
@@ -1193,43 +1497,14 @@ fn loot_controls(
     }
 }
 
-/// Titre de section : le titre, puis les kamas (icône comprise) et `tail`.
-fn section_title(ui: &mut Ui, width: f32, title: &str, kamas: Option<i64>, tail: &str) {
-    let (row, _) = ui.allocate_exact_size(egui::vec2(width, 22.0), Sense::hover());
-    let painter = ui.painter_at(row);
-    let title = painter.text(
-        egui::pos2(row.left() + 12.0, row.center().y),
-        Align2::LEFT_CENTER,
-        title,
-        text::label_strong_font(ui.ctx(), 13.0),
-        tokens::TEXT_GOLD,
-    );
-    let mut x = title.right() + 10.0;
-    if let Some(kamas) = kamas {
-        x = super::paint_amount_left(
-            ui,
-            &painter,
-            egui::pos2(x, row.center().y),
-            &format::thousands(kamas),
-            text::label_strong_font(ui.ctx(), 13.0),
-            tokens::TEXT_GOLD,
-        ) + 10.0;
-    }
-    painter.text(
-        egui::pos2(x, row.center().y),
-        Align2::LEFT_CENTER,
-        tail,
-        text::label_font(ui.ctx(), 13.0),
-        tokens::OVERLAY_TEXT_MUTED,
-    );
-}
-
 /// Une colonne de combattants : titre, puis une ligne par combattant (icône, nom, valeur, part du
 /// camp et barre proportionnelle), triés par valeur décroissante.
 #[allow(clippy::too_many_arguments)]
 /// Ce qu'une colonne Alliés / Ennemis peint.
 struct Column<'a> {
     title: &'a str,
+    /// Médaillon du camp (`header-allies` / `header-enemies` du site).
+    icon: design::DsIcon,
     side: &'a [&'a ParticipantRow],
     metric: Metric,
     bar: Color32,
@@ -1245,6 +1520,7 @@ fn participants_column(
     column: Rect,
     Column {
         title,
+        icon,
         side,
         metric,
         bar,
@@ -1257,13 +1533,6 @@ fn participants_column(
 ) -> Option<ParticipantKey> {
     let mut clicked = None;
     let painter = ui.painter_at(column.expand(2.0));
-    painter.text(
-        column.left_top() + egui::vec2(0.0, 9.0),
-        Align2::LEFT_CENTER,
-        title,
-        text::label_strong_font(ui.ctx(), 12.0),
-        tokens::OVERLAY_TEXT_MUTED,
-    );
     let turn_row = |p: &ParticipantRow| {
         turn_rows.map(|rows| {
             rows.get(&(p.name.clone(), p.instance_index))
@@ -1280,6 +1549,54 @@ fn participants_column(
         .max()
         .unwrap_or(0)
         .max(1);
+    // En-tête : médaillon du camp, titre, total du camp (`half-header` du site).
+    let header_y = column.top() + 9.0;
+    super::paint_icon(
+        ui,
+        &painter,
+        egui::pos2(column.left() + 9.0, header_y),
+        icon,
+        16.0,
+        Color32::WHITE,
+    );
+    painter.text(
+        egui::pos2(column.left() + 22.0, header_y),
+        Align2::LEFT_CENTER,
+        title,
+        text::label_strong_font(ui.ctx(), 12.0),
+        tokens::OVERLAY_TEXT_MUTED,
+    );
+    painter.text(
+        egui::pos2(column.right() - 6.0, header_y),
+        Align2::RIGHT_CENTER,
+        format::thousands(total),
+        text::label_strong_font(ui.ctx(), 12.0),
+        Color32::WHITE,
+    );
+    if rows.is_empty() {
+        painter.text(
+            egui::pos2(
+                column.left() + 6.0,
+                column.top() + 22.0 + PARTICIPANT_ROW / 2.0 - 2.0,
+            ),
+            Align2::LEFT_CENTER,
+            empty_message(metric, icon == design::DsIcon::Allies),
+            text::label_font(ui.ctx(), 12.0),
+            tokens::TEXT_DISABLED,
+        );
+        return None;
+    }
+    // Plusieurs combattants du même nom : « #i » les distingue (`displayName` du site), `i`
+    // compté à partir de 1 dans l'ordre des instances — la base mêle les rangs de l'overlay (à
+    // partir de 0) et ceux importés du site (à partir de 1).
+    let homonym_rank = |p: &ParticipantRow| -> Option<usize> {
+        let same = side.iter().filter(|other| other.name == p.name);
+        (same.clone().count() > 1).then(|| {
+            1 + same
+                .filter(|other| other.instance_index < p.instance_index)
+                .count()
+        })
+    };
     let mut top = column.top() + 22.0;
     for participant in rows {
         let row = Rect::from_min_size(
@@ -1288,14 +1605,25 @@ fn participants_column(
         );
         let value = value_of(participant);
         let key = participant_key(fight_id, participant);
-        let open = detail.open_participants.contains(&key);
-        let response = ui
-            .interact(
-                row,
-                ui.id().with(("historique.combattant", &key)),
-                Sense::click(),
-            )
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        // Dépliable s'il a des sorts à montrer (`hasDetail`) : en vue « Tour » on le sait ; en
+        // cumulé, un total nul n'a pas de sort derrière lui.
+        let has_detail = match turn_row(participant) {
+            Some((_, spells)) => !spells.is_empty(),
+            None => value != 0,
+        };
+        let open = has_detail && detail.open_participants.contains(&key);
+        let mut response = ui.interact(
+            row,
+            ui.id().with(("historique.combattant", &key)),
+            if has_detail {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        if has_detail {
+            response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        }
         if response.clicked() {
             tracing::info!(
                 ">>> clic historique.combats.combattant {} ({})",
@@ -1314,8 +1642,31 @@ fn participants_column(
             egui::vec2(row.width() * value.abs() as f32 / best as f32, row.height()),
         );
         painter.rect_filled(fill, 3.0, bar.gamma_multiply(0.45));
+        // KO ou fuite : un pictogramme avant l'icône, avec son infobulle (`ko-icon`, `fled-icon`).
+        let status = if participant.defeated {
+            Some((Status::Ko, "KO"))
+        } else if participant.fled {
+            Some((Status::Fled, "A fui"))
+        } else {
+            None
+        };
+        let mut left = row.left() + 4.0;
+        if let Some((kind, tip)) = status {
+            let glyph = Rect::from_min_size(
+                egui::pos2(left, row.center().y - 8.0),
+                egui::vec2(16.0, 16.0),
+            );
+            paint_status(&painter, glyph, kind);
+            ui.interact(
+                glyph,
+                ui.id().with(("historique.statut", &key)),
+                Sense::hover(),
+            )
+            .on_hover_text(tip);
+            left = glyph.right() + 2.0;
+        }
         let icon_rect = Rect::from_center_size(
-            egui::pos2(row.left() + 14.0, row.center().y),
+            egui::pos2(left + 10.0, row.center().y),
             egui::vec2(20.0, 20.0),
         );
         // Un allié : le portrait de sa classe (grisé s'il est KO) ; un ennemi, ou un allié sans
@@ -1340,49 +1691,39 @@ fn participants_column(
         {
             super::paint_remote_icon(ui, &painter, icon_rect, &icon, ctx.remote_icons, textures);
         }
-        let share = if total > 0 {
-            format!("{:.0} %", value as f64 * 100.0 / total as f64)
-        } else {
-            "0 %".to_string()
-        };
-        let share_rect = painter.text(
-            egui::pos2(row.right() - 6.0, row.center().y),
-            Align2::RIGHT_CENTER,
-            share,
-            text::label_font(ui.ctx(), 12.0),
-            tokens::OVERLAY_TEXT_MUTED,
-        );
         let value_rect = painter.text(
-            egui::pos2(share_rect.left() - 10.0, row.center().y),
+            egui::pos2(row.right() - 6.0, row.center().y),
             Align2::RIGHT_CENTER,
             format::thousands(value),
             text::label_strong_font(ui.ctx(), 13.0),
             Color32::WHITE,
         );
-        super::paint_caret(
-            ui,
-            &painter,
-            egui::pos2(icon_rect.right() + 12.0, row.center().y),
-            open,
-            tokens::OVERLAY_TEXT_MUTED,
-        );
+        let mut name_left = icon_rect.right() + 8.0;
+        if has_detail {
+            super::paint_caret(
+                ui,
+                &painter,
+                egui::pos2(icon_rect.right() + 12.0, row.center().y),
+                open,
+                tokens::OVERLAY_TEXT_MUTED,
+            );
+            name_left += 14.0;
+        }
         let name_rect = Rect::from_min_max(
-            egui::pos2(icon_rect.right() + 22.0, row.top()),
+            egui::pos2(name_left, row.top()),
             egui::pos2(value_rect.left() - 8.0, row.bottom()),
         );
-        let name = if participant.defeated {
-            format!("{} (KO)", participant.name)
-        } else if participant.fled {
-            format!("{} (fuite)", participant.name)
-        } else {
-            participant.name.clone()
+        let name = match homonym_rank(participant) {
+            Some(rank) => format!("{} #{rank}", participant.name),
+            None => participant.name.clone(),
         };
         painter.with_clip_rect(name_rect).text(
             name_rect.left_center(),
             Align2::LEFT_CENTER,
             name,
             text::label_font(ui.ctx(), 13.0),
-            if participant.defeated {
+            // KO ou en fuite sans rien fait : la ligne s'efface (`ko-zero`, `fled-zero`).
+            if value == 0 && (participant.defeated || participant.fled) {
                 tokens::OVERLAY_TEXT_MUTED
             } else {
                 Color32::WHITE
@@ -1404,6 +1745,7 @@ fn participants_column(
                 top,
                 participant,
                 spells,
+                metric != Metric::Armor,
                 ctx,
                 textures,
             );
@@ -1422,6 +1764,7 @@ fn paint_spells(
     mut top: f32,
     caster: &ParticipantRow,
     spells: &[SpellLine],
+    show_elements: bool,
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
 ) -> f32 {
@@ -1449,9 +1792,8 @@ fn paint_spells(
         let mut x = total_rect.left() - 10.0;
         let mut elements = spell.by_element.clone();
         elements.sort_by_key(|(_, value)| std::cmp::Reverse(*value));
-        // Un seul élément égal au total n'apprend rien : sa couleur suffit, sur le nom du sort.
-        let single = elements.len() == 1;
-        if !single {
+        // L'armure n'a pas d'élément (`showElements` du site) : rien entre le nom et le total.
+        if show_elements {
             for (element, value) in elements.iter().rev() {
                 let rect = painter.text(
                     egui::pos2(x, center_y),
@@ -1488,12 +1830,7 @@ fn paint_spells(
             egui::pos2(name_left, top),
             egui::pos2(x, top + SPELL_ROW - 2.0),
         );
-        let tint = elements
-            .first()
-            .filter(|_| single)
-            .map_or(tokens::OVERLAY_TEXT_MUTED, |(element, _)| {
-                element_color(element)
-            });
+        let tint = tokens::OVERLAY_TEXT_MUTED;
         painter.with_clip_rect(name_rect).text(
             egui::pos2(name_left, center_y),
             Align2::LEFT_CENTER,

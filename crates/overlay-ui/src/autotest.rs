@@ -209,15 +209,15 @@ pub fn history_scenario() -> Vec<Step> {
                 // Le premier allié du combat déplié : ses sorts.
                 Step::Click {
                     x: 200.0,
-                    y: 387.0,
+                    y: 383.0,
                     label: "premier allié",
                 },
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("combats-sorts"),
                 // La vue « Tour » du combat déplié.
                 Step::Click {
-                    x: 313.0,
-                    y: 327.0,
+                    x: 591.0,
+                    y: 325.0,
                     label: "vue tour",
                 },
                 Step::Pause(Duration::from_secs(1)),

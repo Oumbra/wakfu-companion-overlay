@@ -447,4 +447,27 @@ ds_icons! {
         /// Cœur rouge à croix (`icons/icon-metric-heal.png`, 22 × 20) — soins prodigués, dernière
         /// case. `aptitudes/12.png` du même dépôt ; même statut que [`DsIcon::MetricDamage`].
         MetricHeal => "icon-metric-heal", couleur;
+
+        /// Médaillon doré « XP » (`icons/icon-header-xp.png`, 38 × 33) — en-tête des sections
+        /// Expérience de la fenêtre d'historique. Fichier du dépôt web (`header-xp.png`, 64 × 64,
+        /// `HEADER_ICON_XP_DATA_URI`), rogné à sa boîte d'encre et ramené à 40 px de grand côté,
+        /// entré le 2026-11-27 avec le portage de l'historique. En couleurs, comme
+        /// [`DsIcon::Allies`], qui vient de la même série.
+        HeaderXp => "icon-header-xp", couleur;
+
+        /// Médaillon des kamas (`icons/icon-header-kamas.png`, 40 × 35) — même série, même
+        /// traitement que [`DsIcon::HeaderXp`] (`header-kamas.png`).
+        HeaderKamas => "icon-header-kamas", couleur;
+
+        /// Médaillon aux épées croisées (`icons/icon-header-combat.png`, 38 × 33) — en-tête
+        /// « Informations de combat » et section Combats du Récap (`header-combat.png`).
+        HeaderCombat => "icon-header-combat", couleur;
+
+        /// Médaillon des défis (`icons/icon-header-challenges.png`, 40 × 39) — section Défis du
+        /// Récap (`header-challenges.png`).
+        HeaderChallenges => "icon-header-challenges", couleur;
+
+        /// Médaillon du butin (`icons/icon-header-loot.png`, 37 × 40) — en-tête des sections Butin
+        /// (`header-loot.png`).
+        HeaderLoot => "icon-header-loot", couleur;
 }
