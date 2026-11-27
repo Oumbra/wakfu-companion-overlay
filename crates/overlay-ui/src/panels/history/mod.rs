@@ -70,6 +70,41 @@ pub(crate) fn paint_caret(
     paint_icon(ui, painter, center, icon, CARET_SIZE, tint);
 }
 
+/// Une **pastille** (`.fight-group-count`, `.dungeon-run-meta` du site) : texte clair sur fond
+/// arrondi, bord droit en `right_center`. Rend son rectangle.
+pub(crate) fn paint_pill(
+    ui: &Ui,
+    painter: &egui::Painter,
+    right_center: egui::Pos2,
+    label: &str,
+) -> egui::Rect {
+    let galley = painter.layout_no_wrap(
+        label.to_string(),
+        design::text::label_strong_font(ui.ctx(), PILL_TEXT),
+        PILL_COLOR,
+    );
+    let size = galley.size() + egui::vec2(2.0 * PILL_PAD_X, 2.0 * PILL_PAD_Y);
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(right_center.x - size.x, right_center.y - size.y / 2.0),
+        size,
+    );
+    painter.rect_filled(rect, size.y / 2.0, PILL_FILL);
+    painter.galley(
+        rect.min + egui::vec2(PILL_PAD_X, PILL_PAD_Y),
+        galley,
+        PILL_COLOR,
+    );
+    rect
+}
+
+/// Pastille : corps (0,7 rem à l'échelle), marges (`padding: 1px 8px`), texte `--text-color`
+/// sur `--surface-raised`.
+const PILL_TEXT: f32 = 11.5;
+const PILL_PAD_X: f32 = 8.0;
+const PILL_PAD_Y: f32 = 2.0;
+const PILL_COLOR: egui::Color32 = egui::Color32::from_rgb(0xE0, 0xE0, 0xE0);
+const PILL_FILL: egui::Color32 = egui::Color32::from_rgb(0x26, 0x26, 0x26);
+
 /// Côté du chevron d'une ligne repliable.
 const CARET_SIZE: f32 = 12.0;
 
@@ -80,8 +115,13 @@ pub(crate) const CONTROL_HEIGHT: f32 = 36.0;
 /// Corps des libellés de switch (`.icon-switch-option` du site, 0,68 à 0,72 rem en gras, à
 /// l'échelle de la fenêtre).
 pub(crate) const SWITCH_TEXT: f32 = 12.0;
+/// Côté d'un pictogramme posé à côté d'un libellé de switch (`.icon-switch-option svg`, 13 px) —
+/// et du glyphe des boutons icônes voisins.
+pub(crate) const SWITCH_ICON: f32 = 13.0;
 /// Corps du texte d'un champ de recherche (`.search-input`, 0,78 à 0,82 rem).
 const SEARCH_TEXT: f32 = 14.0;
+/// Côté de la loupe d'un champ de recherche.
+const SEARCH_ICON: f32 = 15.0;
 
 /// **Le champ de recherche de la fenêtre** (`app-loot-search`, `.search-input` du site) : loupe
 /// dans le champ, verre à gauche ; texte indicatif gris ; à la hauteur des switches voisins.
@@ -91,6 +131,7 @@ pub(crate) fn search_field<'a>(query: &'a mut String, placeholder: &str) -> desi
         .placeholder(placeholder)
         .leading_icon(DsIcon::Search)
         .leading_icon_mirrored(false)
+        .leading_icon_side(SEARCH_ICON)
         .box_height(CONTROL_HEIGHT)
         .text_size(SEARCH_TEXT)
         .placeholder_color(design::tokens::OVERLAY_TEXT_MUTED)
@@ -102,6 +143,7 @@ pub(crate) fn switch<T: PartialEq + Copy>(value: &mut T) -> design::Switch<'_, T
     design::switch(value)
         .variant(design::SwitchVariant::FirstPlan)
         .text_size(SWITCH_TEXT)
+        .beside_icon_size(SWITCH_ICON)
 }
 
 /// Un montant en kamas aligné à droite sur `right` : le nombre, puis l'icône Kamas — la police du
@@ -446,6 +488,30 @@ pub(crate) fn paint_remote_icon(
         painter.image(
             texture.id(),
             drawn,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
+}
+
+/// Comme [`paint_remote_icon`], mais l'image posée **en bas** de `rect` (tuiles de donjon du
+/// Récap : `align-items: flex-end`, le personnage pose au sol).
+pub(crate) fn paint_remote_icon_bottom(
+    ui: &Ui,
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    icon: &overlay_engine::IconRef,
+    store: &RemoteIconStore,
+    textures: &mut RemoteIconTextures,
+) {
+    if let Some(texture) = textures.resolve(ui.ctx(), store, icon) {
+        let size = texture.size_vec2();
+        let scale = (rect.width() / size.x).min(rect.height() / size.y);
+        let drawn = size * scale;
+        let min = egui::pos2(rect.center().x - drawn.x / 2.0, rect.bottom() - drawn.y);
+        painter.image(
+            texture.id(),
+            egui::Rect::from_min_size(min, drawn),
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );

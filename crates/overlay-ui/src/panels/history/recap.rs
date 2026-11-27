@@ -148,6 +148,8 @@ pub struct RecapGroup<'a> {
     pub key: String,
     pub label: String,
     pub kind: GroupKind,
+    /// Mode Type : le type de la ligne (vignette des brèches).
+    pub dungeon_type: Option<WakfuDungeonType>,
     /// Titre de section à peindre AVANT cette ligne (mode Donjon & Famille).
     pub section: Option<&'static str>,
     /// Illustration du donjon ou vignette de la famille (`pictureUrl`).
@@ -214,6 +216,7 @@ pub fn group_rows<'a>(stats: &'a PeriodStats, dungeons: &DungeonIndex) -> Vec<Re
                     key: format!("donjon:{id}"),
                     label: dungeon_label(dungeons, *id),
                     kind: GroupKind::Dungeon,
+                    dungeon_type: None,
                     section: None,
                     picture: dungeon_picture(dungeons, *id),
                     stone: None,
@@ -233,6 +236,7 @@ pub fn group_rows<'a>(stats: &'a PeriodStats, dungeons: &DungeonIndex) -> Vec<Re
                     ),
                     label: family_label(*family),
                     kind: GroupKind::Family,
+                    dungeon_type: None,
                     section: None,
                     picture: family.and_then(super::family_picture),
                     stone: None,
@@ -340,6 +344,7 @@ pub fn type_rows<'a>(stats: &'a PeriodStats, dungeons: &DungeonIndex) -> Vec<Rec
             key: format!("type:{title}"),
             label: title.to_string(),
             kind: GroupKind::Type,
+            dungeon_type: Some(dungeon_type),
             section: None,
             picture: None,
             stone: stone_for_type(dungeon_type),
@@ -353,6 +358,7 @@ pub fn type_rows<'a>(stats: &'a PeriodStats, dungeons: &DungeonIndex) -> Vec<Rec
             key: "type:autres".to_string(),
             label: "Autres".to_string(),
             kind: GroupKind::Other,
+            dungeon_type: None,
             section: None,
             picture: None,
             stone: None,
@@ -437,7 +443,17 @@ const NAV_WIDTH: f32 = super::CONTROL_HEIGHT;
 /// La période entre précédent et suivant : place fixe, le libellé le plus long (« septembre 2026 »)
 /// compris — le sélecteur ne s'étire pas sur la ligne.
 const PERIOD_LABEL_WIDTH: f32 = 170.0;
-const GROUP_ROW: f32 = 36.0;
+/// Ligne d'en-tête d'un groupe (`.dungeon-row` : vignette de 24 px), dans sa boîte.
+const GROUP_ROW: f32 = 26.0;
+/// La boîte d'un groupe (`.group-item` du site) : fond, bordure, marges intérieures, et l'écart
+/// entre deux boîtes (`.group-list`, `gap: 6px`).
+const GROUP_FILL: Color32 = Color32::from_rgb(0x18, 0x18, 0x18);
+const GROUP_BORDER: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
+const GROUP_PAD_X: i8 = 12;
+const GROUP_PAD_Y: i8 = 8;
+const GROUP_GAP: f32 = 6.0;
+/// Écart entre l'en-tête d'une section dépliée et son contenu.
+const SECTION_GAP: f32 = 6.0;
 const BAND_HEIGHT: f32 = 64.0;
 /// Côté des médaillons d'en-tête de section.
 const SECTION_ICON: f32 = 20.0;
@@ -447,10 +463,21 @@ const ITEM_ROW: CompactRow = CompactRow {
     gap: 6.0,
     font_size: 13.0,
 };
-/// Une tuile de donjon (mode Type) : largeur, hauteur, et pas quand elles se chevauchent.
-const TILE_WIDTH: f32 = 72.0;
-const TILE_HEIGHT: f32 = 62.0;
-const TILE_STACK_STEP: f32 = 46.0;
+/// Une tuile de donjon (`.dungeon-tile` du site) : l'illustration (`.dungeon-tile-thumb`, 62 px de
+/// haut, image à 88 % posée en bas) et 3 px de marge haute et basse ; écart de 10 px, et 26 px de
+/// recouvrement quand elles se chevauchent. La largeur est celle que le navigateur déduit de
+/// l'illustration (391 × 194) mise à la hauteur de la vignette : 62 × 0,88 × 391 / 194 ≈ 110.
+const TILE_WIDTH: f32 = 112.0;
+const TILE_THUMB: f32 = 62.0;
+const TILE_HEIGHT: f32 = TILE_THUMB + 6.0;
+const TILE_GAP: f32 = 10.0;
+const TILE_STACK_STEP: f32 = TILE_WIDTH - 26.0;
+const TILE_FILL: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
+/// Pastille du compte (`.dungeon-tile-count`) : fond, et l'or des kamas (`--kama-color`).
+const TILE_BADGE_FILL: Color32 = Color32::from_rgb(0x1B, 0x1B, 0x1B);
+const KAMA_GOLD: Color32 = Color32::from_rgb(255, 215, 0);
+/// Texte courant du site (`--text-color`).
+const SITE_TEXT: Color32 = Color32::from_rgb(0xE0, 0xE0, 0xE0);
 /// Au-delà, les tuiles se chevauchent (`DUNGEON_TILE_STACK_THRESHOLD` du site).
 const TILE_STACK_THRESHOLD: usize = 5;
 
@@ -529,8 +556,9 @@ pub fn show(
             start = shift(state.granularity, start, 1);
         }
         let calendar = ui.add(
-            design::icon_button(DsIcon::Calendar)
+            design::icon_button(DsIcon::CalendarLine)
                 .size(NAV_WIDTH)
+                .glyph_side(super::SWITCH_ICON)
                 .tooltip("Choisir une date")
                 .log_name("historique.recap.calendrier"),
         );
@@ -963,6 +991,9 @@ fn section_header(
         open,
         tokens::TEXT_GOLD,
     );
+    if open {
+        ui.add_space(SECTION_GAP);
+    }
     open
 }
 
@@ -1141,7 +1172,32 @@ fn paint_thumb(
     } else {
         tokens::OVERLAY_TEXT_MUTED
     };
-    if let Some(picture) = &group.picture {
+    let fixed = match (group.kind, group.dungeon_type) {
+        (GroupKind::Other, _) => Some(DsIcon::UnknownEntity),
+        (GroupKind::Type, Some(WakfuDungeonType::Breach)) => Some(DsIcon::Breach),
+        (GroupKind::Type, Some(WakfuDungeonType::UltimateBreach)) => Some(DsIcon::UltimateBreach),
+        _ => None,
+    };
+    if let Some(icon) = fixed {
+        let native = design::DesignSystem::get(ui.ctx()).icon_native_size(icon);
+        // Jamais agrandie (`max-height: 24px` du site) : l'entité inconnue fait 15 px.
+        let drawn = if native.x <= rect.width() && native.y <= rect.height() {
+            native
+        } else {
+            crate::design::fit::contain(rect.size(), native)
+        };
+        let tint = if group.disabled {
+            Color32::from_white_alpha(115)
+        } else {
+            Color32::WHITE
+        };
+        design::DesignSystem::get(ui.ctx()).paint_icon(
+            painter,
+            Rect::from_center_size(rect.center(), drawn),
+            icon,
+            tint,
+        );
+    } else if let Some(picture) = &group.picture {
         super::paint_remote_icon(ui, painter, rect, picture, ctx.remote_icons, textures);
     } else if let Some(stone) = group
         .stone
@@ -1158,8 +1214,9 @@ fn paint_thumb(
     }
 }
 
-/// Une ligne Donjon / Famille / Type : chevron, vignette, libellé, compte ; dépliée, sa bande
-/// (Expérience, Kamas, Victoire, Défaite), ses donjons (mode Type), l'expérience et le butin.
+/// Une ligne Donjon / Famille / Type, dans sa boîte (`.group-item` du site) : chevron, vignette,
+/// libellé, compte ; dépliée, sa bande (Expérience, Kamas, Victoire, Défaite), ses donjons (mode
+/// Type), l'expérience et le butin — dans la même boîte.
 #[allow(clippy::too_many_arguments)]
 fn group_block(
     ui: &mut Ui,
@@ -1183,6 +1240,34 @@ fn group_block(
             tokens::OVERLAY_TEXT_MUTED,
         );
     }
+    let inner = width - 2.0 * (f32::from(GROUP_PAD_X) + 1.0);
+    egui::Frame::new()
+        .fill(GROUP_FILL)
+        .stroke(egui::Stroke::new(1.0, GROUP_BORDER))
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(GROUP_PAD_X, GROUP_PAD_Y))
+        .show(ui, |ui| {
+            ui.set_width(inner);
+            group_content(
+                ui, inner, group, expanded, collapsed, loot, classes, ctx, textures,
+            );
+        });
+    ui.add_space(GROUP_GAP);
+}
+
+/// Le contenu de la boîte d'un groupe — voir [`group_block`].
+#[allow(clippy::too_many_arguments)]
+fn group_content(
+    ui: &mut Ui,
+    width: f32,
+    group: &RecapGroup<'_>,
+    expanded: &mut HashSet<String>,
+    collapsed: &mut HashSet<String>,
+    loot: &mut LootFilter,
+    classes: &HashMap<String, String>,
+    ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
+) {
     let open = !group.disabled && expanded.contains(&group.key);
     let sense = if group.disabled {
         Sense::hover()
@@ -1201,61 +1286,56 @@ fn group_block(
             expanded.insert(group.key.clone());
         }
     }
-    let painter = ui.painter_at(row);
-    let fill = if response.hovered() && !group.disabled {
-        Color32::from_rgba_premultiplied(30, 30, 30, 120)
-    } else {
-        Color32::from_rgba_premultiplied(0, 0, 0, 70)
+    let painter = ui.painter_at(row.expand(2.0));
+    // Ligne grisée : tout à 45 % (`.dungeon-row.disabled`).
+    let dim = |color: Color32| {
+        if group.disabled {
+            color.gamma_multiply(0.45)
+        } else {
+            color
+        }
     };
-    painter.rect_filled(row.shrink2(egui::vec2(0.0, 1.0)), 4.0, fill);
-    let tint = if group.disabled {
-        tokens::TEXT_DISABLED
+    let caret_color = if open {
+        tokens::OVERLAY_ACCENT
     } else {
-        tokens::TEXT_GOLD
+        tokens::OVERLAY_TEXT_MUTED
     };
     super::paint_caret(
         ui,
         &painter,
-        egui::pos2(row.left() + 14.0, row.center().y),
+        egui::pos2(row.left() + 5.0, row.center().y),
         open,
-        tint,
+        dim(caret_color),
     );
-    let thumb = Rect::from_center_size(
-        egui::pos2(row.left() + 44.0, row.center().y),
-        egui::vec2(32.0, 26.0),
+    // Vignette de 24 px de haut (`.dungeon-thumb`), 9 px après le chevron (`gap: 9px`).
+    let thumb = Rect::from_min_size(
+        egui::pos2(row.left() + 19.0, row.center().y - 13.0),
+        egui::vec2(34.0, 26.0),
     );
     paint_thumb(ui, &painter, thumb, group, ctx, textures);
     let count = painter.text(
-        egui::pos2(row.right() - 14.0, row.center().y),
+        egui::pos2(row.right(), row.center().y),
         Align2::RIGHT_CENTER,
         format!("×{}", format::thousands(row_count(&group.totals))),
-        text::label_strong_font(ui.ctx(), 13.0),
-        if group.disabled {
-            tokens::TEXT_DISABLED
-        } else {
-            tokens::OVERLAY_ACCENT
-        },
+        text::label_font(ui.ctx(), 13.0),
+        dim(tokens::OVERLAY_TEXT_MUTED),
     );
     let name_rect = Rect::from_min_max(
-        egui::pos2(thumb.right() + 10.0, row.top()),
-        egui::pos2(count.left() - 10.0, row.bottom()),
+        egui::pos2(thumb.right() + 9.0, row.top()),
+        egui::pos2(count.left() - 9.0, row.bottom()),
     );
     painter.with_clip_rect(name_rect).text(
         name_rect.left_center(),
         Align2::LEFT_CENTER,
         &group.label,
         text::label_strong_font(ui.ctx(), 14.0),
-        if group.disabled {
-            tokens::TEXT_DISABLED
-        } else {
-            Color32::WHITE
-        },
+        dim(SITE_TEXT),
     );
     if !open {
         return;
     }
     let totals = &group.totals;
-    ui.add_space(6.0);
+    ui.add_space(8.0);
     band_cells(
         ui,
         width,
@@ -1335,12 +1415,12 @@ fn group_block(
         ctx,
         textures,
     );
-    ui.add_space(10.0);
 }
 
 /// Les donjons d'une ligne Type (`dungeon-tile-stack` du site) : une tuile par donjon, son
-/// illustration et son compte en pastille ; au-delà de cinq, elles se chevauchent et celle qu'on
-/// survole passe devant. Le nom du donjon est l'infobulle de sa tuile.
+/// illustration posée en bas et son compte en pastille dorée ; au-delà de cinq, elles se
+/// chevauchent et celle qu'on survole remonte, grossit et passe devant. Le nom du donjon est
+/// l'infobulle de sa tuile.
 fn tiles(
     ui: &mut Ui,
     width: f32,
@@ -1352,20 +1432,26 @@ fn tiles(
     let step = if stacked {
         TILE_STACK_STEP
     } else {
-        TILE_WIDTH + 10.0
+        TILE_WIDTH + TILE_GAP
     };
+    // La pastille déborde de 6 px à droite et 4 px en haut : on lui garde la place.
+    let usable = width - 8.0;
     let per_row = if stacked {
         usize::MAX
     } else {
-        (((width - 10.0) / step).floor() as usize).max(1)
+        (((usable + TILE_GAP) / step).floor() as usize).max(1)
     };
     let rows = if stacked {
         1
     } else {
         list.len().div_ceil(per_row)
     };
+    let top_pad = if stacked { 8.0 } else { 6.0 };
     let (area, _) = ui.allocate_exact_size(
-        egui::vec2(width, rows as f32 * (TILE_HEIGHT + 8.0) + 6.0),
+        egui::vec2(
+            width,
+            top_pad + rows as f32 * TILE_HEIGHT + (rows - 1) as f32 * TILE_GAP + 4.0,
+        ),
         Sense::hover(),
     );
     let rect_of = |index: usize| {
@@ -1376,65 +1462,88 @@ fn tiles(
         };
         Rect::from_min_size(
             egui::pos2(
-                area.left() + 10.0 + column as f32 * step,
-                area.top() + 6.0 + row as f32 * (TILE_HEIGHT + 8.0),
+                area.left() + column as f32 * step,
+                area.top() + top_pad + row as f32 * (TILE_HEIGHT + TILE_GAP),
             ),
             egui::vec2(TILE_WIDTH, TILE_HEIGHT),
         )
     };
-    // La tuile survolée : la dernière dont le rectangle contient le pointeur (celle du dessus).
+    // La tuile survolée : en pile, la première dont le rectangle contient le pointeur (le site
+    // empile la première au-dessus : `z-index` décroissant).
     let pointer = ui.ctx().pointer_hover_pos();
-    let hovered = (0..list.len())
-        .rev()
-        .find(|&index| pointer.is_some_and(|p| rect_of(index).contains(p)));
-    let painter = ui.painter_at(area.expand(8.0));
+    let hovered =
+        (0..list.len()).find(|&index| pointer.is_some_and(|p| rect_of(index).contains(p)));
+    let painter = ui.painter_at(area.expand(10.0));
+    // Ordre de peinture : de la dernière à la première (la première au-dessus), la survolée en
+    // dernier.
     let order = (0..list.len())
+        .rev()
         .filter(|&index| Some(index) != hovered)
         .chain(hovered);
     for index in order {
         let tile = &list[index];
         let mut rect = rect_of(index);
         if Some(index) == hovered && stacked {
-            rect = Rect::from_center_size(rect.center() - egui::vec2(0.0, 4.0), rect.size() * 1.08);
+            rect = Rect::from_center_size(rect.center() - egui::vec2(0.0, 4.0), rect.size() * 1.12);
         }
-        painter.rect_filled(rect, 6.0, Color32::from_rgb(0x1B, 0x1B, 0x1B));
+        let scale = rect.height() / TILE_HEIGHT;
+        painter.rect_filled(rect, 7.0, TILE_FILL);
         painter.rect_stroke(
             rect,
-            6.0,
-            egui::Stroke::new(1.0, Color32::from_white_alpha(30)),
+            7.0,
+            egui::Stroke::new(1.0, Color32::from_white_alpha(31)),
             egui::StrokeKind::Inside,
         );
-        let thumb = rect.shrink(6.0);
+        // L'illustration : 88 % de la vignette, posée en bas (`align-items: flex-end`).
+        let thumb = Rect::from_min_size(
+            rect.min + egui::vec2(0.0, 3.0 * scale),
+            egui::vec2(rect.width(), TILE_THUMB * scale),
+        );
+        let image = Rect::from_min_max(
+            egui::pos2(
+                thumb.center().x - thumb.width() * 0.44,
+                thumb.bottom() - thumb.height() * 0.88,
+            ),
+            egui::pos2(thumb.center().x + thumb.width() * 0.44, thumb.bottom()),
+        );
         match &tile.picture {
-            Some(picture) => {
-                super::paint_remote_icon(ui, &painter, thumb, picture, ctx.remote_icons, textures)
-            }
+            Some(picture) => super::paint_remote_icon_bottom(
+                ui,
+                &painter,
+                image,
+                picture,
+                ctx.remote_icons,
+                textures,
+            ),
             None => super::paint_icon(
                 ui,
                 &painter,
-                thumb.center(),
+                image.center(),
                 DsIcon::Dungeon,
                 22.0,
                 tokens::OVERLAY_TEXT_MUTED,
             ),
         }
-        // Pastille du compte, en haut à droite.
+        // Pastille du compte, en haut à droite et hors du cadre (`top: -4px; right: -6px`).
         let font = text::label_strong_font(ui.ctx(), 11.0);
         let galley = painter.layout_no_wrap(
             format!("×{}", format::thousands(tile.count)),
             font,
-            tokens::OVERLAY_ACCENT,
+            KAMA_GOLD,
         );
+        let size = galley.size() + egui::vec2(10.0, 2.0);
         let badge = Rect::from_min_size(
-            egui::pos2(rect.right() - galley.size().x - 6.0, rect.top() - 4.0),
-            galley.size() + egui::vec2(10.0, 2.0),
+            egui::pos2(rect.right() + 6.0 - size.x, rect.top() - 4.0),
+            size,
         );
-        painter.rect_filled(badge, 8.0, Color32::from_rgb(0x1B, 0x1B, 0x1B));
-        painter.galley(
-            badge.min + egui::vec2(5.0, 1.0),
-            galley,
-            tokens::OVERLAY_ACCENT,
+        painter.rect_filled(badge, 8.0, TILE_BADGE_FILL);
+        painter.rect_stroke(
+            badge,
+            8.0,
+            egui::Stroke::new(1.0, Color32::from_white_alpha(46)),
+            egui::StrokeKind::Inside,
         );
+        painter.galley(badge.min + egui::vec2(5.0, 1.0), galley, KAMA_GOLD);
     }
     if let Some(index) = hovered {
         ui.interact(

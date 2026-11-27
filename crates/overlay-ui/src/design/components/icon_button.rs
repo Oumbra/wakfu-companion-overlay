@@ -282,6 +282,8 @@ pub struct IconButton {
     forced_state: Option<IconButtonState>,
     mirrored: bool,
     danger: bool,
+    /// Grand côté du glyphe imposé — voir [`IconButton::glyph_side`].
+    glyph_side: Option<f32>,
 }
 
 impl IconButton {
@@ -296,7 +298,16 @@ impl IconButton {
             forced_state: None,
             mirrored: false,
             danger: false,
+            glyph_side: None,
         }
+    }
+
+    /// **Grand côté du glyphe imposé**, proportions gardées — sans lui, la taille du contexte. Le
+    /// bouton calendrier du Récap aligne ainsi son glyphe sur ceux du switch voisin (retour
+    /// utilisateur du 2026-11-27).
+    pub fn glyph_side(mut self, side: f32) -> Self {
+        self.glyph_side = Some(side);
+        self
     }
 
     /// **Bouton icône destructif** (2026-09-30, suppression d'un groupe d'éléments suivis) — le
@@ -429,12 +440,15 @@ impl Widget for IconButton {
                 }
             }
 
-            let icon_size = icon_draw_size(
-                design.icon_native_size(self.icon),
-                self.context.content_size(self.icon),
-                rect.width(),
-                self.context.native_size(),
-            );
+            let icon_size = match self.glyph_side {
+                Some(side) => glyph_fit(design.icon_native_size(self.icon), side),
+                None => icon_draw_size(
+                    design.icon_native_size(self.icon),
+                    self.context.content_size(self.icon),
+                    rect.width(),
+                    self.context.native_size(),
+                ),
+            };
             let icon_rect = egui::Rect::from_center_size(rect.center(), icon_size);
             design.paint_icon_flipped(ui.painter(), icon_rect, self.icon, icon_tint, self.mirrored);
         }

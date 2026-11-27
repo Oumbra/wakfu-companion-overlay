@@ -532,16 +532,22 @@ const LOOT_SWITCH_TEXT: f32 = 11.0;
 /// Retrait d'un combat sous son run de donjon — le détail déplié le garde aussi.
 const RUN_INDENT: f32 = 24.0;
 /// Côté de la vignette d'une ligne de groupe (`.fight-group-image`, 18 px sur le site).
-const GROUP_IMAGE: f32 = 20.0;
+const GROUP_IMAGE: f32 = 18.0;
+/// Ligne d'un groupe (`.fight-group-row` : `padding: 8px 15px`), son fond, son survol, son filet
+/// et le corps de son libellé (0,72 rem à l'échelle).
+const GROUP_ROW_HEIGHT: f32 = 32.0;
+const GROUP_ROW_FILL: Color32 = Color32::from_rgb(0x18, 0x18, 0x18);
+const GROUP_ROW_HOVER: Color32 = Color32::from_rgb(0x26, 0x26, 0x26);
+const GROUP_ROW_BORDER: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
+const GROUP_LABEL_TEXT: f32 = 12.5;
 const IMAGE_SIZE: f32 = 28.0;
 /// Côté du bouton « Tout replier » / « Tout déplier ».
 const TOGGLE_ALL_SIZE: f32 = super::CONTROL_HEIGHT;
 const MODE_SWITCH_WIDTH: f32 = 320.0;
 /// Switch « Cumulé » / « Tour ».
 const VIEW_SWITCH_WIDTH: f32 = 150.0;
-/// Écart entre le switch de vue et le libellé « Tour », et largeur de ce libellé.
+/// Écart entre le switch de vue et le compteur de tours.
 const TURN_GAP: f32 = 12.0;
-const TURN_LABEL_WIDTH: f32 = 36.0;
 /// Hauteur de l'en-tête « Informations de combat » (il porte les switches).
 const INFO_HEADER_HEIGHT: f32 = 40.0;
 /// Hauteur des en-têtes Butin et Expérience.
@@ -702,7 +708,7 @@ pub fn show(
         ui.add(
             super::switch(mode)
                 .slot(GroupMode::Day, "Jour")
-                .icon_beside_label(design::DsIcon::Calendar)
+                .icon_beside_label(design::DsIcon::CalendarLine)
                 .slot(GroupMode::Type, "Donjons & familles")
                 .icon_beside_label(design::DsIcon::Dungeon)
                 .width(MODE_SWITCH_WIDTH)
@@ -809,22 +815,35 @@ fn group_row(
     textures: &mut RemoteIconTextures,
 ) -> bool {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(width, items::DAY_HEADER_HEIGHT), Sense::click());
+        ui.allocate_exact_size(egui::vec2(width, GROUP_ROW_HEIGHT), Sense::click());
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     let painter = ui.painter_at(rect);
+    // `.fight-group-row` : fond `--surface-well`, `--surface-raised` au survol, filet du bas.
     let fill = if response.hovered() {
-        Color32::from_rgba_unmultiplied(255, 255, 255, 18)
+        GROUP_ROW_HOVER
     } else {
-        Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+        GROUP_ROW_FILL
     };
-    painter.rect_filled(rect, 4.0, fill);
+    painter.rect_filled(rect, 0.0, fill);
+    painter.hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, GROUP_ROW_BORDER),
+    );
+    // Chevron gris, bleu une fois déplié (`.fight-group-caret.expanded`).
+    let caret = if open {
+        tokens::OVERLAY_ACCENT
+    } else {
+        tokens::OVERLAY_TEXT_MUTED
+    };
     super::paint_caret(
         ui,
         &painter,
-        egui::pos2(rect.left() + 14.0, rect.center().y),
+        egui::pos2(rect.left() + 15.0 + 5.0, rect.center().y),
         open,
-        tokens::TEXT_GOLD,
+        caret,
     );
-    let mut left = rect.left() + 26.0;
+    let mut left = rect.left() + 15.0 + 18.0;
     if let Some(image) = &group.image {
         let image_rect = Rect::from_min_size(
             egui::pos2(left, rect.center().y - GROUP_IMAGE / 2.0),
@@ -833,20 +852,29 @@ fn group_row(
         super::paint_remote_icon(ui, &painter, image_rect, image, ctx.remote_icons, textures);
         left = image_rect.right() + 8.0;
     }
-    let font = text::label_strong_font(ui.ctx(), items::FONT_SIZE + 1.0);
-    painter.text(
-        egui::pos2(left, rect.center().y),
-        Align2::LEFT_CENTER,
-        &group.label,
-        font.clone(),
-        tokens::TEXT_GOLD,
+    // Libellé en petites capitales grises, espacées (`.fight-group-label`).
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        &group.label.to_uppercase(),
+        0.0,
+        egui::TextFormat {
+            font_id: text::label_font(ui.ctx(), GROUP_LABEL_TEXT),
+            color: tokens::OVERLAY_TEXT_MUTED,
+            extra_letter_spacing: 0.5,
+            ..Default::default()
+        },
     );
-    painter.text(
-        egui::pos2(rect.right() - 12.0, rect.center().y),
-        Align2::RIGHT_CENTER,
+    let galley = painter.layout_job(job);
+    painter.galley(
+        egui::pos2(left, rect.center().y - galley.size().y / 2.0),
+        galley,
+        tokens::OVERLAY_TEXT_MUTED,
+    );
+    super::paint_pill(
+        ui,
+        &painter,
+        egui::pos2(rect.right() - 15.0, rect.center().y),
         &group.count,
-        font,
-        items::ACCENT,
     );
     if response.clicked() {
         tracing::info!(
@@ -1057,20 +1085,24 @@ fn run_summary(
     let name = dungeon_id
         .and_then(|id| ctx.dungeons.find_by_id(id))
         .map_or("Donjon", |dungeon| dungeon.fr.as_str());
-    let title = painter.text(
-        egui::pos2(image_right + 12.0, rect.center().y),
+    // `N combats - durée` en pastille, à droite, juste avant le chevron (`.dungeon-run-meta`).
+    let total: i64 = fights.iter().filter_map(|fight| fight.duration_ms).sum();
+    let meta = super::paint_pill(
+        ui,
+        &painter,
+        egui::pos2(rect.right() - 32.0, rect.center().y),
+        &format!("{} - {}", fight_count(fights.len()), duration(total)),
+    );
+    let title_rect = Rect::from_min_max(
+        egui::pos2(image_right + 12.0, rect.top()),
+        egui::pos2(meta.left() - 12.0, rect.bottom()),
+    );
+    painter.with_clip_rect(title_rect).text(
+        title_rect.left_center(),
         Align2::LEFT_CENTER,
         name,
         text::label_strong_font(ui.ctx(), items::FONT_SIZE),
         tokens::TEXT_GOLD,
-    );
-    let total: i64 = fights.iter().filter_map(|fight| fight.duration_ms).sum();
-    painter.text(
-        egui::pos2(title.right() + 12.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        format!("{} - {}", fight_count(fights.len()), duration(total)),
-        text::label_font(ui.ctx(), items::FONT_SIZE),
-        tokens::OVERLAY_TEXT_MUTED,
     );
     paint_caret(ui, &painter, rect, open);
     response.clicked()
@@ -1168,15 +1200,10 @@ fn header_switches(ui: &mut Ui, header: Rect, fight: &FightRow, detail: &mut Det
     let last = fight.turns.max(1);
     let turn = detail.turn.entry(fight.id).or_insert(last);
     *turn = (*turn).clamp(1, last);
-    let stepper = design::stepper(turn)
-        .range(1..=last)
-        .size(30.0)
-        .field_width(48.0)
-        .log_name("historique.combats.tour");
-    let stepper_width = stepper.desired_size().0.unwrap_or(130.0);
+    let stepper_width = turn_stepper_width(ui, last);
     let group = view_size.x
         + if turn_mode {
-            TURN_GAP + TURN_LABEL_WIDTH + stepper_width
+            TURN_GAP + stepper_width
         } else {
             0.0
         };
@@ -1190,21 +1217,103 @@ fn header_switches(ui: &mut Ui, header: Rect, fight: &FightRow, detail: &mut Det
     );
     if turn_mode {
         x += view_size.x + TURN_GAP;
-        ui.painter_at(header).text(
+        turn_stepper(
+            ui,
             egui::pos2(x, header.center().y),
-            Align2::LEFT_CENTER,
-            "Tour",
-            text::label_font(ui.ctx(), 13.0),
-            tokens::OVERLAY_TEXT_MUTED,
+            turn,
+            last,
+            ui.id().with(("tour", fight.id)),
         );
-        x += TURN_LABEL_WIDTH;
-        ui.put(
-            Rect::from_min_size(
-                egui::pos2(x, header.center().y - 15.0),
-                egui::vec2(stepper_width, 30.0),
-            ),
-            stepper,
+    }
+}
+
+/// Compteur de tours (`app-stepper` du site) : `‹`, « Tour N » sur fond creux, `›` — pas de saisie.
+const STEPPER_HEIGHT: f32 = 28.0;
+const STEPPER_BUTTON: f32 = 24.0;
+const STEPPER_LABEL_PAD: f32 = 9.0;
+const STEPPER_TEXT: f32 = 12.5;
+const STEPPER_FILL: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
+const STEPPER_WELL: Color32 = Color32::from_rgb(0x18, 0x18, 0x18);
+const STEPPER_BORDER: Color32 = Color32::from_rgb(0x4D, 0x4D, 0x4D);
+
+/// Largeur du libellé : celle du plus long (« Tour <dernier> »), pour qu'il ne bouge pas.
+fn turn_label_width(ui: &Ui, last: i64) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            format!("Tour {last}"),
+            text::label_strong_font(ui.ctx(), STEPPER_TEXT),
+            Color32::WHITE,
+        )
+        .size()
+        .x
+        + 2.0 * STEPPER_LABEL_PAD
+}
+
+fn turn_stepper_width(ui: &Ui, last: i64) -> f32 {
+    2.0 * STEPPER_BUTTON + turn_label_width(ui, last)
+}
+
+/// Le compteur, bord gauche au milieu en `left_center`.
+fn turn_stepper(ui: &mut Ui, left_center: egui::Pos2, turn: &mut i64, last: i64, id: egui::Id) {
+    let label_width = turn_label_width(ui, last);
+    let rect = Rect::from_min_size(
+        egui::pos2(left_center.x, left_center.y - STEPPER_HEIGHT / 2.0),
+        egui::vec2(2.0 * STEPPER_BUTTON + label_width, STEPPER_HEIGHT),
+    );
+    let painter = ui.painter_at(rect.expand(1.0));
+    painter.rect_filled(rect, 6.0, STEPPER_FILL);
+    let label = Rect::from_min_size(
+        rect.min + egui::vec2(STEPPER_BUTTON, 0.0),
+        egui::vec2(label_width, STEPPER_HEIGHT),
+    );
+    painter.rect_filled(label, 0.0, STEPPER_WELL);
+    let stroke = egui::Stroke::new(1.0, STEPPER_BORDER);
+    painter.vline(label.left(), label.y_range(), stroke);
+    painter.vline(label.right(), label.y_range(), stroke);
+    painter.rect_stroke(rect, 6.0, stroke, egui::StrokeKind::Inside);
+    painter.text(
+        label.center(),
+        Align2::CENTER_CENTER,
+        format!("Tour {turn}"),
+        text::label_strong_font(ui.ctx(), STEPPER_TEXT),
+        tokens::OVERLAY_ACCENT,
+    );
+    for (side, step, glyph, tooltip) in [
+        (0.0, -1, "‹", "Tour précédent"),
+        (STEPPER_BUTTON + label_width, 1, "›", "Tour suivant"),
+    ] {
+        let button = Rect::from_min_size(
+            rect.min + egui::vec2(side, 0.0),
+            egui::vec2(STEPPER_BUTTON, STEPPER_HEIGHT),
         );
+        let target = *turn + step;
+        let enabled = (1..=last).contains(&target);
+        let response = ui.interact(button, id.with(step), Sense::click());
+        let response = if enabled {
+            response
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(tooltip)
+        } else {
+            response
+        };
+        let color = if !enabled {
+            tokens::TEXT_DISABLED
+        } else if response.hovered() {
+            tokens::OVERLAY_ACCENT
+        } else {
+            tokens::OVERLAY_TEXT_MUTED
+        };
+        painter.text(
+            button.center() - egui::vec2(0.0, 1.0),
+            Align2::CENTER_CENTER,
+            glyph,
+            text::label_strong_font(ui.ctx(), 16.0),
+            color,
+        );
+        if response.clicked() && enabled {
+            *turn = target;
+            tracing::info!(">>> clic historique.combats.tour {target}");
+        }
     }
 }
 

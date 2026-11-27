@@ -157,6 +157,8 @@ pub struct Input<'a> {
     leading_icon: Option<crate::design::DsIcon>,
     /// L'icône de tête est peinte en miroir (le sens du jeu) — voir [`Input::leading_icon_mirrored`].
     leading_mirrored: bool,
+    /// Côté de l'icône de tête imposé — voir [`Input::leading_icon_side`].
+    leading_side: Option<f32>,
     clearable: bool,
     /// Corps du texte imposé — voir [`Input::text_size`].
     text_size: Option<f32>,
@@ -181,6 +183,7 @@ impl<'a> Input<'a> {
             request_focus: false,
             leading_icon: None,
             leading_mirrored: true,
+            leading_side: None,
             clearable: false,
             text_size: None,
             placeholder_color: None,
@@ -203,6 +206,15 @@ impl<'a> Input<'a> {
 
     /// `false` peint l'icône de tête dans le sens de son fichier — la loupe du site, verre à
     /// gauche et manche en bas à droite — au lieu du miroir que le jeu emploie (le défaut).
+    /// **Côté de l'icône de tête imposé**, et son retrait à gauche égal à sa marge haute et basse
+    /// (champs de recherche de la fenêtre d'historique, retour utilisateur du 2026-11-27 : la
+    /// loupe était plus près du bord gauche que des bords haut et bas). Sans cet appel, les
+    /// rapports du jeu.
+    pub fn leading_icon_side(mut self, side: f32) -> Self {
+        self.leading_side = Some(side);
+        self
+    }
+
     pub fn leading_icon_mirrored(mut self, mirrored: bool) -> Self {
         self.leading_mirrored = mirrored;
         self
@@ -450,14 +462,19 @@ impl Widget for Input<'_> {
         // Ornement de gauche — peint AVANT le texte, et surtout : la place qu'il occupe est
         // retirée de celle du texte juste après. Voir `Input::leading_icon`.
         let leading = self.leading_icon.map(|icon| {
-            let side = height * tokens::INPUT_LEADING_ICON_RATIO;
-            let inset = height * tokens::INPUT_LEADING_ICON_INSET_RATIO;
+            let side = self
+                .leading_side
+                .unwrap_or(height * tokens::INPUT_LEADING_ICON_RATIO);
             let gap = height * tokens::INPUT_LEADING_ICON_GAP_RATIO;
             // `glyph_fit` et non `Vec2::splat` : le paramètre accepte n'importe quel
             // `DsTexture`, et un carré déformerait tout glyphe qui n'en est pas un. La règle est
             // celle du design system, partagée avec le bouton icône — il ne doit y en avoir
             // qu'une.
             let native = crate::design::DesignSystem::get(ui.ctx()).icon_native_size(icon);
+            let inset = match self.leading_side {
+                Some(_) => (rect.height() - super::icon_button::glyph_fit(native, side).y) / 2.0,
+                None => height * tokens::INPUT_LEADING_ICON_INSET_RATIO,
+            };
             let icon_rect = egui::Rect::from_center_size(
                 egui::pos2(rect.left() + inset + side / 2.0, rect.center().y),
                 super::icon_button::glyph_fit(native, side),

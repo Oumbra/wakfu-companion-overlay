@@ -401,6 +401,8 @@ pub struct Switch<'a, T> {
     reclickable: bool,
     /// Corps des libellés imposé — voir [`Switch::text_size`].
     text_size: Option<f32>,
+    /// Côté du pictogramme posé à côté d'un libellé — voir [`Switch::beside_icon_size`].
+    beside_icon_size: Option<f32>,
     log_name: Option<String>,
 }
 
@@ -416,8 +418,18 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
             enabled: true,
             reclickable: false,
             text_size: None,
+            beside_icon_size: None,
             log_name: None,
         }
+    }
+
+    /// **Pictogramme d'une case « icône + libellé » à la manière du site** : son grand côté vaut
+    /// `size`, et il se pose sur la **ligne de base** du libellé au lieu d'être centré dans la
+    /// case (`.icon-switch-option svg` du site : 13 px, `vertical-align` sur le texte). Retour
+    /// utilisateur du 2026-11-27 sur la fenêtre d'historique ; sans cet appel, rendu du jeu.
+    pub fn beside_icon_size(mut self, size: f32) -> Self {
+        self.beside_icon_size = Some(size);
+        self
     }
 
     /// **Corps des libellés imposé**, en graisse appuyée — sans lui, le corps des libellés du jeu
@@ -732,24 +744,36 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                     // Pictogramme puis libellé, l'ensemble centré dans la case.
                     let color = self.variant.glyph_color(state, false);
                     let icon_color = self.variant.glyph_color(state, icon.native_color());
-                    let drawn = self.variant.glyph_size(&design, icon) * self.scale;
+                    let mut drawn = self.variant.glyph_size(&design, icon) * self.scale;
+                    if let Some(side) = self.beside_icon_size {
+                        drawn *= side / drawn.x.max(drawn.y).max(1.0);
+                    }
                     let font = self.label_font(ui.ctx());
                     let galley = painter.layout_no_wrap(slot.label.clone(), font, color);
                     let gap = 6.0 * self.scale;
                     let total = drawn.x + gap + galley.size().x;
                     let left = slot_rect.center().x - total / 2.0;
-                    let min = egui::pos2(left, slot_rect.center().y - drawn.y / 2.0)
-                        .round_to_pixels(ui.pixels_per_point());
+                    let text_top = slot_rect.center().y - galley.size().y / 2.0;
+                    let icon_top = match self.beside_icon_size {
+                        // Bas du pictogramme sur la ligne de base du libellé.
+                        Some(_) => {
+                            let baseline = galley
+                                .rows
+                                .first()
+                                .and_then(|row| row.glyphs.first().map(|g| row.pos.y + g.pos.y))
+                                .unwrap_or(galley.size().y * 0.8);
+                            text_top + baseline + 1.0 - drawn.y
+                        }
+                        None => slot_rect.center().y - drawn.y / 2.0,
+                    };
+                    let min = egui::pos2(left, icon_top).round_to_pixels(ui.pixels_per_point());
                     design.paint_icon(
                         &painter,
                         egui::Rect::from_min_size(min, drawn),
                         icon,
                         icon_color,
                     );
-                    let pos = egui::pos2(
-                        left + drawn.x + gap,
-                        slot_rect.center().y - galley.size().y / 2.0,
-                    );
+                    let pos = egui::pos2(left + drawn.x + gap, text_top);
                     painter.galley(pos, galley, color);
                 } else if let Some(icon) = slot.icon {
                     let color = self.variant.glyph_color(state, icon.native_color());

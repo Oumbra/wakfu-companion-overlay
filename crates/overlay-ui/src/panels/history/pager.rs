@@ -123,37 +123,49 @@ impl Pager {
             egui::pos2(main.right(), band.top()),
             egui::vec2(CARET_WIDTH, band.height()),
         );
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(band));
-        child.set_clip_rect(band.expand(2.0));
-        if child
+        // Les deux moitiés se touchent sans arrondi entre elles (`border-radius: 4px 0 0 4px` et
+        // `0 4px 4px 0` du site) : chaque bouton est peint plus large, du côté de la jointure, et
+        // écrêté à sa moitié — ses coins arrondis de ce côté tombent hors champ.
+        let mut main_ui = ui.new_child(egui::UiBuilder::new().max_rect(band));
+        main_ui.set_clip_rect(main);
+        if main_ui
             .put(
-                main,
+                Rect::from_min_size(main.min, main.size() + egui::vec2(GLUE, 0.0)),
                 design::button("Charger plus")
                     .size(design::ButtonSize::Height(band.height()))
-                    .width(LOAD_WIDTH)
+                    .width(LOAD_WIDTH + GLUE)
                     .log_name(format!("{log_name}.charger-plus")),
             )
             .clicked()
         {
             self.load_more(shown);
         }
-        let caret_response = child
+        let mut caret_ui = ui.new_child(egui::UiBuilder::new().max_rect(band));
+        caret_ui.set_clip_rect(caret);
+        let caret_response = caret_ui
             .put(
-                caret,
+                Rect::from_min_max(caret.min - egui::vec2(GLUE, 0.0), caret.max),
                 design::button("")
                     .size(design::ButtonSize::Height(band.height()))
-                    .width(CARET_WIDTH)
+                    .width(CARET_WIDTH + GLUE)
                     .log_name(format!("{log_name}.portee")),
             )
             .on_hover_text("Choisir la portée du chargement");
+        // Fin filet doré entre les deux, et le chevron à la couleur du libellé.
+        caret_ui.painter().vline(
+            caret.left() + 0.5,
+            caret.y_range().shrink(5.0),
+            egui::Stroke::new(1.0, tokens::TEXT_GOLD.gamma_multiply(0.8)),
+        );
         super::paint_icon(
-            &child,
-            child.painter(),
+            &caret_ui,
+            caret_ui.painter(),
             caret.center(),
             DsIcon::ChevronDown,
             11.0,
-            tokens::TEXT_GOLD,
+            tokens::BUTTON_TEXT_ON_KHAKI,
         );
+        let child = caret_ui;
         if let Some(span) = span_menu(&child, &caret_response, log_name) {
             let now_ms = chrono::Utc::now().timestamp_millis();
             self.load_span(span, times, now_ms);
@@ -168,6 +180,8 @@ const FOOTER_MARGIN: f32 = 8.0;
 /// La partie « Charger plus » du contrôle scindé, et celle du chevron accolée à sa droite.
 const LOAD_WIDTH: f32 = 150.0;
 const CARET_WIDTH: f32 = 30.0;
+/// Ce que chaque moitié déborde sous l'autre, le temps d'y cacher ses coins arrondis.
+const GLUE: f32 = 8.0;
 /// Largeur du menu des portées.
 const MENU_WIDTH: f32 = 140.0;
 

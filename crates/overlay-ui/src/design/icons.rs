@@ -520,4 +520,22 @@ ds_icons! {
         /// Flèche vers le bas (`icons/icon-arrow-down.png`, 12 × 12) — tri « plus ancien en
         /// premier ».
         ArrowDown => "icon-arrow-down", libre;
+
+        /// Calendrier au trait (`icons/icon-calendar-line.png`, 14 × 14) — symbole `calendar` du
+        /// sprite du site (trait 1,8), rastérisé à 16 px le 2026-11-27 : bouton de choix de
+        /// période du Récap et case « Jour » des Combats. Préféré à [`DsIcon::Calendar`], l'icône
+        /// du jeu, à la demande de l'utilisateur.
+        CalendarLine => "icon-calendar-line", libre;
+
+        /// Brèche (`icons/icon-breach.png`, 40 × 37) — vignette du type « Brèche » du Récap.
+        /// Fichier du dépôt web (`breach-74a8ca57.png`), rogné à son encre et ramené à 40 px.
+        Breach => "icon-breach", couleur;
+
+        /// Brèche ultime (`icons/icon-ultimate-breach.png`, 40 × 40) — même traitement
+        /// (`ultimate-breach-8010573f.png`).
+        UltimateBreach => "icon-ultimate-breach", couleur;
+
+        /// Entité inconnue (`icons/icon-unknown-entity.png`, 15 × 13) — vignette de la ligne
+        /// « Autres » du Récap (`unknown-entity-236e6908.png` du site, rogné à son encre).
+        UnknownEntity => "icon-unknown-entity", couleur;
 }
