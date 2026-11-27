@@ -350,8 +350,32 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
   Identique au site (empreinte du texte du DOM) sur la partie que le site affiche.
 - **Essai automatique** de la vraie fenêtre, invisible et sans la souris : `--autotest=<dossier>`
   (`.claude/rules/captures.md`).
-- Reste : vues Combats, Récap, Échanges, Pactes, À propos ; taille et position mémorisées ; hôte
-  Linux (le binaire X11 n'ouvre pas encore la fenêtre).
+- **Échanges** et **Pactes** : ports des vues du site — recherche (personnage, objet, date), tri,
+  jours repliables avec leur nombre d'entrées, cartes « moi ⇄ partenaire » avec kamas et colonnes
+  Acquis / Cédés (empilées sous 480 px), extractions avec leurs objets ; « Charger plus ». Les
+  briques communes aux trois listes (barre de recherche et tri, en-tête de jour, ligne d'objet avec
+  icône et rareté) sont dans `panels/history/items.rs`.
+- **Combats** : lecture des combats avec combattants et butin (`HistoryStore::fights`, sans le JSON
+  des sorts). Recherche sur les combattants et le butin, groupes par jour, « Tout replier », runs de
+  donjon réunis par leur clé de run, résumé (illustration : boss > archimonstre > dominant > plus
+  gros dégâts ; Victoire / Défaite ; tours et durée) et détail déplié : alliés et ennemis en dégâts,
+  armure ou soins avec barres proportionnelles, butin, XP. **Écart voulu** : le détail est propre à
+  la fenêtre, pas celui du panneau Combat (taillé pour une colonne étroite posée sur le jeu).
+- **Récap**, mode cumulé : jour, mois ou année dans le calendrier local, précédent / suivant, bande
+  kamas nets / XP / combats / challenges (dessinée pour la fenêtre, pas celle du bandeau Récap),
+  détail des kamas, XP par personnage, butin et pacte (`HistoryStore::period_stats`).
+- **À propos** : les sections d'information et leurs liens, partagées avec l'onglet des Options
+  (`a_propos_tab::show_sections`), sans mise à jour, redémarrage ni effacement.
+- **Taille et position** retrouvées d'une ouverture à l'autre (`historique-fenetre.json`, à part de
+  `config.toml` puisque deux processus tournent), ignorées si la bannière ne tombe plus sur un écran.
+- Le symbole ₭ manque dans la police du design system : un montant est toujours suivi de l'icône
+  Kamas (`paint_amount`, `paint_amount_left`).
+- Reste :
+  - Combats : regroupement « Donjons & familles », vue par tour, ventilation par sort (relire le
+    JSON des sorts à la demande), portraits de classe des alliés, tri et recherche du butin ;
+  - Récap : granularité « session », sélecteur calendrier, modes par donjon et famille et par type ;
+  - hôte Linux : le binaire X11 n'a ni le mode `--historique` ni l'entrée de menu ;
+  - rafraîchir la fenêtre quand la base change (l'overlay écrit pendant qu'elle est ouverte).
 
 ## 8. Import de l'historique en ligne
 
