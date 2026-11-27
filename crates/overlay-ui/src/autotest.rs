@@ -242,6 +242,30 @@ pub fn history_scenario() -> Vec<Step> {
                     Step::Capture(capture),
                 ]);
             }
+            // L'année par donjon et famille, sa première ligne dépliée, puis par type.
+            steps.extend([
+                Step::Click {
+                    x: 838.0,
+                    y: 165.0,
+                    label: "donjon et famille",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("recap-donjons"),
+                Step::Click {
+                    x: 550.0,
+                    y: 314.0,
+                    label: "premier groupe",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("recap-donjons-deplie"),
+                Step::Click {
+                    x: 968.0,
+                    y: 165.0,
+                    label: "type",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("recap-types"),
+            ]);
         }
         if name == "echanges" {
             // Plus bas dans la liste : kamas et objets cédés.
@@ -509,7 +533,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            16
+            19
         );
     }
 

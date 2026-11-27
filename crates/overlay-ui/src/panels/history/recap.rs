@@ -3,13 +3,23 @@
 //! agrégats (`HistoryStore::period_stats`) — bande d'indicateurs (kamas nets, XP, combats gagnés –
 //! perdus, challenges réussis – échoués), détail des kamas, XP par personnage, butin et pactes.
 //!
-//! **Pas encore porté** : la granularité « session », le sélecteur calendrier, et les modes « par
-//! donjon et famille » et « par type de donjon ».
+//! Trois affichages du détail (`detailMode` du site) : **Cumulé** (les sections ci-dessus),
+//! **Donjon & Famille** (une ligne par donjon, rangée sous son type, puis une par famille de
+//! monstres hors donjon) et **Type** (les types de donjon fusionnés, puis « Autres »). Chaque ligne
+//! se déplie sur ses totaux, ses donjons (mode Type), l'XP par personnage et son butin.
+//!
+//! **Écarts** : pas de granularité « session » (le récap de la session en cours vit sur le jeu,
+//! dans l'overlay), pas de sélecteur calendrier, pas de pierre de donjon épinglée en tête du butin
+//! d'un type.
+
+use std::borrow::Cow;
+use std::collections::HashSet;
 
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use egui::{Align2, Color32, Rect, Sense, Ui};
+use overlay_engine::{DungeonIndex, WakfuDungeonType};
 use overlay_history::read::ItemLine;
-use overlay_history::stats::{ItemTotal, PeriodStats};
+use overlay_history::stats::{GroupTotals, ItemTotal, PeriodStats, XpTotal};
 
 use super::items::{self, CompactRow};
 use super::{format, HistoryContext};
@@ -95,10 +105,212 @@ pub fn net_kamas(stats: &PeriodStats) -> i64 {
     k.from_combat + k.from_hdv_sales + k.trades_acquired - k.spent_on_purchases - k.trades_given
 }
 
+/// L'affichage du détail (`DetailMode` du site).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DetailMode {
+    #[default]
+    Cumulative,
+    ByGroup,
+    ByType,
+}
+
+/// Une ligne dépliable des modes Donjon & Famille et Type (`RecapGroupRow` du site).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecapGroup<'a> {
+    pub key: String,
+    pub label: String,
+    /// Titre de section à peindre AVANT cette ligne (mode Donjon & Famille).
+    pub section: Option<&'static str>,
+    /// L'id du donjon (son illustration : le boss).
+    pub dungeon_id: Option<i64>,
+    pub totals: Cow<'a, GroupTotals>,
+    /// Type de donjon sans aucun combat sur la période : ligne grisée, non dépliable.
+    pub disabled: bool,
+    /// Mode Type : les donjons fusionnés et leur compte, du plus fréquent au moins fréquent.
+    pub tiles: Vec<(String, i64)>,
+}
+
+/// `rowCount` du site : les donjons terminés, sinon les combats.
+pub fn row_count(totals: &GroupTotals) -> i64 {
+    if totals.dungeon_runs > 0 {
+        totals.dungeon_runs
+    } else {
+        totals.fights
+    }
+}
+
+fn dungeon_label(dungeons: &DungeonIndex, id: i64) -> String {
+    dungeons
+        .find_by_id(id)
+        .map_or_else(|| "Donjon inconnu".to_string(), |d| d.fr.clone())
+}
+
+fn family_label(family: Option<i64>) -> String {
+    family
+        .and_then(super::family_name)
+        .map_or_else(|| "Sans famille".to_string(), str::to_string)
+}
+
+/// Mode Donjon & Famille (`groupSections`) : lignes triées par compte décroissant, rangées sous le
+/// type de leur donjon dans l'ordre fixe du site ; un donjon de type inconnu et les familles vont
+/// sous « Familles », en dernier.
+pub fn group_rows<'a>(stats: &'a PeriodStats, dungeons: &DungeonIndex) -> Vec<RecapGroup<'a>> {
+    let mut rows: Vec<(Option<WakfuDungeonType>, RecapGroup)> = stats
+        .dungeons
+        .iter()
+        .map(|(id, totals)| {
+            (
+                dungeons.find_by_id(*id).map(|d| d.dungeon_type),
+                RecapGroup {
+                    key: format!("donjon:{id}"),
+                    label: dungeon_label(dungeons, *id),
+                    section: None,
+                    dungeon_id: Some(*id),
+                    totals: Cow::Borrowed(totals),
+                    disabled: false,
+                    tiles: Vec::new(),
+                },
+            )
+        })
+        .chain(stats.families.iter().map(|(family, totals)| {
+            (
+                None,
+                RecapGroup {
+                    key: format!(
+                        "famille:{}",
+                        family.map_or("aucune".to_string(), |f| f.to_string())
+                    ),
+                    label: family_label(*family),
+                    section: None,
+                    dungeon_id: None,
+                    totals: Cow::Borrowed(totals),
+                    disabled: false,
+                    tiles: Vec::new(),
+                },
+            )
+        }))
+        .collect();
+    // Tri stable : à égalité, l'ordre des agrégats (combats décroissants).
+    rows.sort_by_key(|(_, row)| std::cmp::Reverse(row_count(&row.totals)));
+    let mut out = Vec::new();
+    for (dungeon_type, title) in super::combats::DUNGEON_SECTIONS {
+        let mut first = true;
+        for (_, row) in rows.iter().filter(|(t, _)| *t == Some(dungeon_type)) {
+            out.push(RecapGroup {
+                section: first.then_some(title),
+                ..row.clone()
+            });
+            first = false;
+        }
+    }
+    let mut first = true;
+    for (_, row) in rows.iter().filter(|(t, _)| t.is_none()) {
+        out.push(RecapGroup {
+            section: first.then_some("Familles"),
+            ..row.clone()
+        });
+        first = false;
+    }
+    out
+}
+
+/// Fusionne des totaux (`mergeGroupTotals` du site) : sommes, XP par personnage et butin
+/// additionnés (par id d'objet, sinon par nom).
+pub fn merge_totals<'t>(rows: impl IntoIterator<Item = &'t GroupTotals>) -> GroupTotals {
+    let mut merged = GroupTotals::default();
+    let mut xp: Vec<XpTotal> = Vec::new();
+    let mut loot: Vec<ItemTotal> = Vec::new();
+    for row in rows {
+        merged.fights += row.fights;
+        merged.dungeon_runs += row.dungeon_runs;
+        merged.won += row.won;
+        merged.lost += row.lost;
+        merged.kamas_gained += row.kamas_gained;
+        merged.xp_gained += row.xp_gained;
+        for entry in &row.xp_by_character {
+            match xp.iter_mut().find(|x| x.name == entry.name) {
+                Some(found) => found.amount += entry.amount,
+                None => xp.push(entry.clone()),
+            }
+        }
+        for item in &row.loot {
+            let same = |other: &ItemTotal| match (item.item_id, other.item_id) {
+                (Some(a), Some(b)) => a == b,
+                (None, None) => item.item_name == other.item_name,
+                _ => false,
+            };
+            match loot.iter_mut().find(|other| same(other)) {
+                Some(found) => found.quantity += item.quantity,
+                None => loot.push(item.clone()),
+            }
+        }
+    }
+    xp.sort_by_key(|x| std::cmp::Reverse(x.amount));
+    merged.xp_by_character = xp;
+    merged.loot = loot;
+    merged
+}
+
+/// Mode Type (`typeRows`) : les sept types de donjon dans l'ordre du site, même vides (grisés) ;
+/// l'arcade seulement si la période en compte ; puis « Autres », toutes les familles fusionnées,
+/// s'il y en a. Un donjon de type inconnu est ignoré, comme sur le site.
+pub fn type_rows<'a>(stats: &'a PeriodStats, dungeons: &DungeonIndex) -> Vec<RecapGroup<'a>> {
+    let known: Vec<(WakfuDungeonType, i64, &GroupTotals)> = stats
+        .dungeons
+        .iter()
+        .filter_map(|(id, totals)| {
+            dungeons
+                .find_by_id(*id)
+                .map(|entry| (entry.dungeon_type, *id, totals))
+        })
+        .collect();
+    let mut rows = Vec::new();
+    for (dungeon_type, title) in super::combats::DUNGEON_SECTIONS {
+        let bucket: Vec<(i64, &GroupTotals)> = known
+            .iter()
+            .filter(|(t, _, _)| *t == dungeon_type)
+            .map(|(_, id, totals)| (*id, *totals))
+            .collect();
+        if dungeon_type == WakfuDungeonType::Arcade && bucket.is_empty() {
+            continue;
+        }
+        let mut tiles: Vec<(String, i64)> = bucket
+            .iter()
+            .map(|(id, totals)| (dungeon_label(dungeons, *id), row_count(totals)))
+            .collect();
+        tiles.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        rows.push(RecapGroup {
+            key: format!("type:{title}"),
+            label: title.to_string(),
+            section: None,
+            dungeon_id: None,
+            disabled: bucket.is_empty(),
+            totals: Cow::Owned(merge_totals(bucket.iter().map(|(_, totals)| *totals))),
+            tiles,
+        });
+    }
+    if !stats.families.is_empty() {
+        rows.push(RecapGroup {
+            key: "type:autres".to_string(),
+            label: "Autres".to_string(),
+            section: None,
+            dungeon_id: None,
+            disabled: false,
+            totals: Cow::Owned(merge_totals(stats.families.iter().map(|(_, t)| t))),
+            tiles: Vec::new(),
+        });
+    }
+    rows
+}
+
 /// État de la vue.
 #[derive(Default)]
 pub struct RecapState {
     pub granularity: Granularity,
+    /// Affichage du détail.
+    pub mode: DetailMode,
+    /// Lignes dépliées (clé : [`RecapGroup::key`]).
+    pub expanded: HashSet<String>,
     /// Premier jour de la période affichée ; `None` : celle d'aujourd'hui.
     pub start: Option<NaiveDate>,
     /// Les agrégats de la période affichée, et ce qui les a produits.
@@ -114,6 +326,8 @@ impl RecapState {
 
 const NAV_WIDTH: f32 = 36.0;
 const GRANULARITY_WIDTH: f32 = 270.0;
+const MODE_WIDTH: f32 = 390.0;
+const GROUP_ROW: f32 = 36.0;
 const BAND_HEIGHT: f32 = 64.0;
 const ITEM_ROW: CompactRow = CompactRow {
     height: 26.0,
@@ -160,7 +374,8 @@ pub fn show(
         {
             start = shift(state.granularity, start, -1);
         }
-        let label_width = zones.inner.width() - GRANULARITY_WIDTH - 2.0 * NAV_WIDTH - 60.0;
+        let label_width =
+            zones.inner.width() - GRANULARITY_WIDTH - MODE_WIDTH - 2.0 * NAV_WIDTH - 84.0;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(label_width, NAV_WIDTH), Sense::hover());
         ui.painter().text(
             rect.center(),
@@ -185,6 +400,15 @@ pub fn show(
         {
             start = shift(state.granularity, start, 1);
         }
+        ui.add_space(16.0);
+        ui.add(
+            design::switch(&mut state.mode)
+                .slot(DetailMode::Cumulative, "Cumulé")
+                .slot(DetailMode::ByGroup, "Donjon & Famille")
+                .slot(DetailMode::ByType, "Type")
+                .width(MODE_WIDTH)
+                .log_name("historique.recap.detail"),
+        );
     });
     ui.add_space(8.0);
     state.start = (start != current).then_some(start);
@@ -213,10 +437,27 @@ pub fn show(
     let Some((_, _, _, stats)) = &state.cache else {
         return;
     };
+    let (mode, expanded) = (state.mode, &mut state.expanded);
 
     zones.scroll_area(ui, "historique-recap", |ui, width| {
         band(ui, width, stats);
         ui.add_space(12.0);
+        if mode != DetailMode::Cumulative {
+            let groups = if mode == DetailMode::ByGroup {
+                group_rows(stats, ctx.dungeons)
+            } else {
+                type_rows(stats, ctx.dungeons)
+            };
+            if groups.is_empty() {
+                ui.add(
+                    design::label("Aucun combat sur cette période.").color(tokens::TEXT_DISABLED),
+                );
+            }
+            for group in &groups {
+                group_block(ui, width, group, expanded, ctx, textures);
+            }
+            return;
+        }
         kamas_detail(ui, width, stats);
         ui.add_space(12.0);
         section_title(ui, width, "Expérience", "");
@@ -263,6 +504,10 @@ struct Cell<'a> {
 }
 
 fn band(ui: &mut Ui, width: f32, stats: &PeriodStats) {
+    band_cells(ui, width, &period_cells(stats));
+}
+
+fn period_cells(stats: &PeriodStats) -> [Cell<'static>; 4] {
     let c = &stats.combats;
     let net = net_kamas(stats);
     let xp: i64 = stats.xp_by_character.iter().map(|xp| xp.amount).sum();
@@ -303,6 +548,11 @@ fn band(ui: &mut Ui, width: f32, stats: &PeriodStats) {
             ],
         },
     ];
+    cells
+}
+
+/// La bande d'indicateurs : une case par entrée, séparées d'un filet.
+fn band_cells(ui: &mut Ui, width: f32, cells: &[Cell<'_>]) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, BAND_HEIGHT), Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 6.0, Color32::from_rgba_premultiplied(0, 0, 0, 80));
@@ -448,6 +698,68 @@ mod tests {
         NaiveDate::from_ymd_opt(y, m, d).unwrap()
     }
 
+    fn totals(fights: i64, runs: i64, item: Option<i64>, quantity: i64) -> GroupTotals {
+        GroupTotals {
+            fights,
+            dungeon_runs: runs,
+            won: fights,
+            xp_gained: 10 * fights,
+            xp_by_character: vec![XpTotal {
+                name: "Iop".to_string(),
+                amount: 10 * fights,
+            }],
+            loot: item
+                .map(|id| ItemTotal {
+                    item_id: Some(id),
+                    item_name: None,
+                    quantity,
+                })
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn la_fusion_additionne_xp_et_butin() {
+        let a = totals(3, 1, Some(7), 2);
+        let b = totals(5, 2, Some(7), 4);
+        let merged = merge_totals([&a, &b]);
+        assert_eq!((merged.fights, merged.dungeon_runs), (8, 3));
+        assert_eq!(merged.xp_by_character[0].amount, 80);
+        assert_eq!(merged.loot.len(), 1);
+        assert_eq!(merged.loot[0].quantity, 6);
+        assert_eq!(row_count(&merged), 3, "les donjons terminés priment");
+        assert_eq!(row_count(&totals(4, 0, None, 0)), 4);
+    }
+
+    #[test]
+    fn sans_donjon_connu_tout_va_sous_familles_et_autres() {
+        let dungeons = DungeonIndex::default();
+        let stats = PeriodStats {
+            dungeons: vec![(99, totals(2, 1, None, 0))],
+            families: vec![
+                (Some(1), totals(6, 0, None, 0)),
+                (None, totals(1, 0, None, 0)),
+            ],
+            ..Default::default()
+        };
+        let groups = group_rows(&stats, &dungeons);
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].section, Some("Familles"));
+        assert_eq!(
+            row_count(&groups[0].totals),
+            6,
+            "tri par compte décroissant"
+        );
+        let types = type_rows(&stats, &dungeons);
+        // Sept types grisés (l'arcade vide est omise), puis « Autres ».
+        assert_eq!(types.len(), 8);
+        assert!(types[..7].iter().all(|t| t.disabled));
+        assert_eq!(types[7].label, "Autres");
+        assert_eq!(types[7].totals.fights, 7);
+    }
+
     #[test]
     fn periodes_du_calendrier_local() {
         let today = day(2026, 11, 27);
@@ -475,4 +787,199 @@ mod tests {
         // 23, 24 ou 25 heures selon l'heure d'été.
         assert!((23 * 3_600_000..=25 * 3_600_000).contains(&(until - since)));
     }
+}
+
+/// Une ligne Donjon / Famille / Type : caret, illustration, libellé, compte ; dépliée, ses totaux,
+/// ses donjons (mode Type), l'XP par personnage et le butin.
+fn group_block(
+    ui: &mut Ui,
+    width: f32,
+    group: &RecapGroup<'_>,
+    expanded: &mut HashSet<String>,
+    ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
+) {
+    if let Some(section) = group.section {
+        ui.add_space(6.0);
+        let (row, _) = ui.allocate_exact_size(egui::vec2(width, 24.0), Sense::hover());
+        ui.painter_at(row).text(
+            egui::pos2(row.left() + 4.0, row.center().y),
+            Align2::LEFT_CENTER,
+            section.to_uppercase(),
+            text::label_strong_font(ui.ctx(), 12.0),
+            tokens::OVERLAY_TEXT_MUTED,
+        );
+    }
+    let open = !group.disabled && expanded.contains(&group.key);
+    let sense = if group.disabled {
+        Sense::hover()
+    } else {
+        Sense::click()
+    };
+    let (row, response) = ui.allocate_exact_size(egui::vec2(width, GROUP_ROW), sense);
+    let response = if group.disabled {
+        response
+    } else {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    };
+    if response.clicked() {
+        tracing::info!(">>> clic historique.recap.groupe {}", group.label);
+        if !expanded.remove(&group.key) {
+            expanded.insert(group.key.clone());
+        }
+    }
+    let painter = ui.painter_at(row);
+    let fill = if response.hovered() && !group.disabled {
+        Color32::from_rgba_premultiplied(30, 30, 30, 120)
+    } else {
+        Color32::from_rgba_premultiplied(0, 0, 0, 70)
+    };
+    painter.rect_filled(row.shrink2(egui::vec2(0.0, 1.0)), 4.0, fill);
+    let tint = if group.disabled {
+        tokens::TEXT_DISABLED
+    } else {
+        tokens::TEXT_GOLD
+    };
+    super::paint_caret(
+        ui,
+        &painter,
+        egui::pos2(row.left() + 14.0, row.center().y),
+        open,
+        tint,
+    );
+    let icon_rect = Rect::from_center_size(
+        egui::pos2(row.left() + 40.0, row.center().y),
+        egui::vec2(24.0, 24.0),
+    );
+    let boss = group
+        .dungeon_id
+        .and_then(|id| ctx.dungeons.find_by_id(id))
+        .and_then(|dungeon| dungeon.boss_monster_ids.first().copied())
+        .and_then(|boss| ctx.catalog.find_monster_icon("", Some(boss)));
+    if let Some(icon) = boss {
+        super::paint_remote_icon(ui, &painter, icon_rect, &icon, ctx.remote_icons, textures);
+    }
+    let count = painter.text(
+        egui::pos2(row.right() - 14.0, row.center().y),
+        Align2::RIGHT_CENTER,
+        format!("×{}", format::thousands(row_count(&group.totals))),
+        text::label_strong_font(ui.ctx(), 13.0),
+        if group.disabled {
+            tokens::TEXT_DISABLED
+        } else {
+            tokens::OVERLAY_ACCENT
+        },
+    );
+    let name_rect = Rect::from_min_max(
+        egui::pos2(icon_rect.right() + 10.0, row.top()),
+        egui::pos2(count.left() - 10.0, row.bottom()),
+    );
+    painter.with_clip_rect(name_rect).text(
+        name_rect.left_center(),
+        Align2::LEFT_CENTER,
+        &group.label,
+        text::label_strong_font(ui.ctx(), 14.0),
+        if group.disabled {
+            tokens::TEXT_DISABLED
+        } else {
+            Color32::WHITE
+        },
+    );
+    if !open {
+        return;
+    }
+    let totals = &group.totals;
+    ui.add_space(6.0);
+    band_cells(
+        ui,
+        width,
+        &[
+            Cell {
+                icon: DsIcon::Xp,
+                label: "Expérience",
+                parts: vec![(
+                    format!("+{}", format::thousands(totals.xp_gained)),
+                    tokens::OVERLAY_ACCENT,
+                )],
+            },
+            Cell {
+                icon: DsIcon::Kamas,
+                label: "Kamas",
+                parts: vec![(
+                    format!("+{}", format::thousands(totals.kamas_gained)),
+                    tokens::TEXT_GOLD,
+                )],
+            },
+            Cell {
+                icon: DsIcon::Trophy,
+                label: "Victoires",
+                parts: vec![(format::thousands(totals.won), items::GAIN)],
+            },
+            Cell {
+                icon: DsIcon::Sword,
+                label: "Défaites",
+                parts: vec![(format::thousands(totals.lost), items::LOSS)],
+            },
+        ],
+    );
+    if !group.tiles.is_empty() {
+        ui.add_space(8.0);
+        section_title(ui, width, "Donjons", "");
+        for (name, count) in &group.tiles {
+            let (row, _) = ui.allocate_exact_size(egui::vec2(width, 22.0), Sense::hover());
+            let painter = ui.painter_at(row);
+            painter.text(
+                egui::pos2(row.left() + 12.0, row.center().y),
+                Align2::LEFT_CENTER,
+                name,
+                text::label_font(ui.ctx(), 13.0),
+                Color32::WHITE,
+            );
+            painter.text(
+                egui::pos2(row.right() - 12.0, row.center().y),
+                Align2::RIGHT_CENTER,
+                format!("×{}", format::thousands(*count)),
+                text::label_strong_font(ui.ctx(), 13.0),
+                tokens::OVERLAY_ACCENT,
+            );
+        }
+    }
+    let xp: Vec<&XpTotal> = totals
+        .xp_by_character
+        .iter()
+        .filter(|xp| xp.amount > 0)
+        .collect();
+    if !xp.is_empty() {
+        ui.add_space(8.0);
+        section_title(ui, width, "Expérience", "");
+        for entry in xp {
+            let (row, _) = ui.allocate_exact_size(egui::vec2(width, 22.0), Sense::hover());
+            let painter = ui.painter_at(row);
+            painter.text(
+                egui::pos2(row.left() + 12.0, row.center().y),
+                Align2::LEFT_CENTER,
+                &entry.name,
+                text::label_font(ui.ctx(), 13.0),
+                Color32::WHITE,
+            );
+            painter.text(
+                egui::pos2(row.right() - 12.0, row.center().y),
+                Align2::RIGHT_CENTER,
+                format!("+{}", format::thousands(entry.amount)),
+                text::label_strong_font(ui.ctx(), 13.0),
+                tokens::OVERLAY_ACCENT,
+            );
+        }
+    }
+    if !totals.loot.is_empty() {
+        ui.add_space(8.0);
+        section_title(
+            ui,
+            width,
+            "Butin",
+            &format!("{} objet(s)", totals.loot.len()),
+        );
+        item_list(ui, width, &totals.loot, ctx, textures);
+    }
+    ui.add_space(10.0);
 }
