@@ -53,6 +53,7 @@ pub fn spawn_referentiel_thread(
             );
             catalog.store(Arc::new(referentiel.catalog));
             dungeons.store(Arc::new(referentiel.dungeons));
+            crate::panels::history::publish_monster_families(referentiel.monster_families);
             startup.mark_catalog();
             startup.mark_dungeons();
             let _ = proxy.send_event(UserEvent::NewSnapshot);

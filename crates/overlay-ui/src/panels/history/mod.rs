@@ -128,6 +128,27 @@ pub(crate) fn paint_amount_left(
     icon_center.x + KAMAS_ICON_SIZE / 2.0
 }
 
+/// Noms des familles de monstres (`monsterFamilies` du référentiel embarqué), publiés une fois
+/// par le thread Référentiel (`background::spawn_referentiel_thread`). Un `OnceLock` plutôt qu'un
+/// `ArcSwap` de plus à faire passer par les deux hôtes : l'index ne change jamais après son
+/// chargement, et seule la fenêtre d'historique le lit.
+static MONSTER_FAMILIES: std::sync::OnceLock<overlay_engine::MonsterFamilyIndex> =
+    std::sync::OnceLock::new();
+
+/// Publie l'index des familles — sans effet après le premier appel.
+pub fn publish_monster_families(index: overlay_engine::MonsterFamilyIndex) {
+    let _ = MONSTER_FAMILIES.set(index);
+}
+
+/// Nom français d'une famille de monstres ; `None` avant le chargement du référentiel, ou pour un
+/// id inconnu.
+pub(crate) fn family_name(id: i64) -> Option<&'static str> {
+    MONSTER_FAMILIES
+        .get()?
+        .find_by_id(id)
+        .map(|family| family.fr.as_str())
+}
+
 /// Les onglets, dans l'ordre de la barre (demande de l'utilisateur, 2026-11-27 : le Récap
 /// d'abord). Pas d'onglet « À propos » : il existe déjà dans les Options de l'overlay, et les
 /// pages légales sont au menu de l'icône de notification — la fenêtre d'historique ne le redit pas.

@@ -188,7 +188,7 @@ pub fn day_groups<'e, 'a>(entries: &[&'e Entry<'a>], today: NaiveDate) -> Vec<Fi
 }
 
 /// Ordre des sections de donjon (`DUNGEON_TYPE_ORDER`) et leurs titres.
-const DUNGEON_SECTIONS: [(WakfuDungeonType, &str); 8] = [
+pub(super) const DUNGEON_SECTIONS: [(WakfuDungeonType, &str); 8] = [
     (WakfuDungeonType::TwoRooms, "Donjon 2 salles"),
     (WakfuDungeonType::ThreeRooms, "Donjon 3 salles"),
     (WakfuDungeonType::FourRooms, "Donjon 4 salles"),
@@ -204,9 +204,8 @@ const DUNGEON_SECTIONS: [(WakfuDungeonType, &str); 8] = [
 /// famille de monstres de l'illustration du combat. Dans une section, les groupes gardent l'ordre
 /// chronologique de leur première entrée.
 ///
-/// **Écart** : le site nomme un groupe de famille par le nom de la famille ; la fenêtre n'a pas
-/// encore le référentiel des familles, et prend le repli du site — le monstre représentatif le
-/// plus fréquent du groupe.
+/// Un groupe de famille porte le nom de la famille ; sans lui (référentiel pas encore chargé,
+/// monstre sans famille), le repli du site : le monstre représentatif le plus fréquent du groupe.
 pub fn type_groups<'e, 'a>(
     entries: &[&'e Entry<'a>],
     catalog: &CatalogIndex,
@@ -215,6 +214,7 @@ pub fn type_groups<'e, 'a>(
     struct Bucket<'e, 'a> {
         key: String,
         dungeon: Option<(WakfuDungeonType, String)>,
+        family: Option<i64>,
         names: Vec<(String, usize)>,
         entries: Vec<&'e Entry<'a>>,
     }
@@ -226,14 +226,15 @@ pub fn type_groups<'e, 'a>(
         };
         let dungeon = dungeon_id.and_then(|id| dungeons.find_by_id(id));
         let face = illustration(entry.representative(), catalog, dungeons);
-        let key = match (dungeon, face) {
-            (Some(dungeon), _) => format!("donjon:{}", dungeon.id),
-            (None, Some(face)) => match catalog.find_monster_family_id(&face.name, face.monster_id)
-            {
-                Some(family) => format!("famille:{family}"),
-                None => format!("monstre:{}", face.name),
-            },
-            (None, None) => "autre".to_string(),
+        let family = match (dungeon, face) {
+            (None, Some(face)) => catalog.find_monster_family_id(&face.name, face.monster_id),
+            _ => None,
+        };
+        let key = match (dungeon, face, family) {
+            (Some(dungeon), _, _) => format!("donjon:{}", dungeon.id),
+            (None, _, Some(family)) => format!("famille:{family}"),
+            (None, Some(face), None) => format!("monstre:{}", face.name),
+            (None, None, _) => "autre".to_string(),
         };
         let position = match buckets.iter().position(|bucket| bucket.key == key) {
             Some(position) => position,
@@ -241,6 +242,7 @@ pub fn type_groups<'e, 'a>(
                 buckets.push(Bucket {
                     key,
                     dungeon: dungeon.map(|d| (d.dungeon_type, d.fr.clone())),
+                    family,
                     names: Vec::new(),
                     entries: Vec::new(),
                 });
@@ -283,15 +285,22 @@ pub fn type_groups<'e, 'a>(
     }
     let mut first = true;
     for bucket in buckets.iter().filter(|bucket| bucket.dungeon.is_none()) {
-        // Le premier nom le plus fréquent (ordre d'apparition à égalité).
+        // Le nom de la famille, sinon le premier nom le plus fréquent (ordre d'apparition à
+        // égalité).
+        let most_frequent = || {
+            bucket
+                .names
+                .iter()
+                .fold(None::<&(String, usize)>, |best, candidate| match best {
+                    Some(best) if best.1 >= candidate.1 => Some(best),
+                    _ => Some(candidate),
+                })
+                .map_or_else(|| "Autres combats".to_string(), |(name, _)| name.clone())
+        };
         let label = bucket
-            .names
-            .iter()
-            .fold(None::<&(String, usize)>, |best, candidate| match best {
-                Some(best) if best.1 >= candidate.1 => Some(best),
-                _ => Some(candidate),
-            })
-            .map_or_else(|| "Autres combats".to_string(), |(name, _)| name.clone());
+            .family
+            .and_then(super::family_name)
+            .map_or_else(most_frequent, str::to_string);
         groups.push(FightGroup {
             key: format!("type:{}", bucket.key),
             label,
