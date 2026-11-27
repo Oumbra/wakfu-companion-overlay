@@ -10,15 +10,19 @@
 //! la demande ([`HistoryStore::participant_spells`]) puis gardés jusqu'au prochain changement de la
 //! base.
 //!
-//! **Pas encore porté** : la vue par tour, le tri et la recherche du butin.
+//! Le butin d'un combat se filtre et se trie (nom, quantité, rareté) ; la recherche et le tri sont
+//! partagés par tous les combats dépliés, comme sur le site.
+//!
+//! **Écarts** : pas de vue par tour (la base locale ne garde pas les dégâts tour par tour) ; un
+//! reclic sur le tri actif n'en inverse pas le sens (`design::switch` ne signale pas ce clic).
 
 use std::collections::{HashMap, HashSet};
 
 use chrono::NaiveDate;
 use egui::{Align2, Color32, Rect, Sense, Ui};
 use overlay_engine::roster::normalize_wakfu_name;
-use overlay_engine::{CatalogIndex, DungeonIndex, IconRef, WakfuDungeonType};
-use overlay_history::read::{FightRow, ParticipantRow, SpellColumn, SpellLine};
+use overlay_engine::{CatalogIndex, DungeonIndex, IconRef, WakfuDungeonType, WakfuRarity};
+use overlay_history::read::{FightRow, ItemLine, ParticipantRow, SpellColumn, SpellLine};
 use overlay_history::HistoryStore;
 
 use super::items::{self, CompactRow, DayTail, ListState};
@@ -364,6 +368,62 @@ pub struct DetailState {
     pub open_participants: HashSet<ParticipantKey>,
     /// Sorts lus, par combattant et grandeur — vidé quand la base change.
     pub spells: HashMap<(ParticipantKey, Metric), Vec<SpellLine>>,
+    /// Recherche dans le butin, partagée par tous les combats dépliés.
+    pub loot_query: String,
+    /// Tri du butin, partagé de même.
+    pub loot_sort: LootSort,
+}
+
+/// Le tri du butin d'un combat (`LootSort` du site).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LootSort {
+    /// Ordre alphabétique — le défaut du site.
+    #[default]
+    Name,
+    /// Plus grosse quantité d'abord.
+    Quantity,
+    /// Plus rare d'abord, puis par nom.
+    Rarity,
+}
+
+/// Rang de tri d'une rareté (`RARITY_SORT_ORDER` du site) : ancienne 0 … relique 7.
+fn rarity_rank(rarity: WakfuRarity) -> u8 {
+    match rarity {
+        WakfuRarity::Old => 0,
+        WakfuRarity::Common => 1,
+        WakfuRarity::Rare => 2,
+        WakfuRarity::Mythical => 3,
+        WakfuRarity::Legendary => 4,
+        WakfuRarity::Memory => 5,
+        WakfuRarity::Epic => 6,
+        WakfuRarity::Relic => 7,
+    }
+}
+
+/// Le butin filtré par `query` (déjà normalisée) et trié (`sortLootRows` du site).
+pub fn sorted_loot<'a>(
+    loot: &'a [ItemLine],
+    query: &str,
+    sort: LootSort,
+    catalog: &CatalogIndex,
+) -> Vec<&'a ItemLine> {
+    let mut lines: Vec<(String, &ItemLine)> = loot
+        .iter()
+        .map(|line| (items::item_name(line, catalog), line))
+        .filter(|(name, _)| query.is_empty() || normalize_wakfu_name(name).contains(query))
+        .collect();
+    let key = |name: &str| normalize_wakfu_name(name);
+    match sort {
+        LootSort::Name => lines.sort_by_cached_key(|(name, _)| key(name)),
+        LootSort::Quantity => lines.sort_by_key(|(_, line)| std::cmp::Reverse(line.quantity)),
+        LootSort::Rarity => lines.sort_by_cached_key(|(name, line)| {
+            (
+                std::cmp::Reverse(rarity_rank(catalog.find_item_rarity(name, line.item_id))),
+                key(name),
+            )
+        }),
+    }
+    lines.into_iter().map(|(_, line)| line).collect()
 }
 
 /// État de la vue.
@@ -872,7 +932,40 @@ fn fight_detail(
             format!("{} objet(s)", fight.loot.len())
         };
         section_title(ui, width, "Butin", kamas, &count);
-        for line in &fight.loot {
+        if fight.loot.len() > 1 {
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.add(
+                    design::input(&mut detail.loot_query)
+                        .placeholder("Rechercher un objet...")
+                        .clearable(true)
+                        .width(280.0)
+                        .log_name("historique.combats.butin.recherche"),
+                );
+                ui.add_space(8.0);
+                ui.add(
+                    design::switch(&mut detail.loot_sort)
+                        .slot(LootSort::Name, "Nom")
+                        .slot(LootSort::Quantity, "Quantité")
+                        .slot(LootSort::Rarity, "Rareté")
+                        .width(300.0)
+                        .log_name("historique.combats.butin.tri"),
+                );
+            });
+            ui.add_space(6.0);
+        }
+        let query = normalize_wakfu_name(detail.loot_query.trim());
+        let lines = sorted_loot(&fight.loot, &query, detail.loot_sort, ctx.catalog);
+        if lines.is_empty() {
+            ui.horizontal(|ui| {
+                ui.add_space(18.0);
+                ui.add(
+                    design::label("Aucun objet ne correspond à cette recherche.")
+                        .color(tokens::TEXT_DISABLED),
+                );
+            });
+        }
+        for line in lines {
             let (row, _) =
                 ui.allocate_exact_size(egui::vec2(width, LOOT_ROW.height + 2.0), Sense::hover());
             let row = Rect::from_min_size(
@@ -1238,6 +1331,41 @@ mod tests {
         let lone = [fight(4, 4_000, Some("seul"), &[])];
         let refs: Vec<&FightRow> = lone.iter().collect();
         assert!(matches!(super::entries(&refs)[0], Entry::Single(_)));
+    }
+
+    #[test]
+    fn le_butin_se_filtre_et_se_trie() {
+        let catalog = CatalogIndex::default();
+        let line = |name: &str, quantity| ItemLine {
+            item_id: None,
+            item_name: Some(name.to_string()),
+            quantity,
+        };
+        let loot = [line("Plume", 2), line("Étoffe", 9), line("Bave", 5)];
+        let names = |lines: Vec<&ItemLine>| -> Vec<String> {
+            lines
+                .iter()
+                .map(|l| l.item_name.clone().unwrap_or_default())
+                .collect()
+        };
+        assert_eq!(
+            names(sorted_loot(&loot, "", LootSort::Quantity, &catalog)),
+            vec!["Étoffe", "Bave", "Plume"]
+        );
+        assert_eq!(
+            names(sorted_loot(&loot, "", LootSort::Name, &catalog)),
+            vec!["Bave", "Étoffe", "Plume"],
+            "accents ignorés"
+        );
+        assert_eq!(
+            names(sorted_loot(
+                &loot,
+                &normalize_wakfu_name("étof"),
+                LootSort::Name,
+                &catalog
+            )),
+            vec!["Étoffe"]
+        );
     }
 
     #[test]
