@@ -67,6 +67,8 @@ struct RawDungeonRow {
     dungeon_type: WakfuDungeonType,
     #[serde(rename = "hasPreBossArchi", default)]
     has_pre_boss_archi: bool,
+    #[serde(default)]
+    picture: Option<String>,
 }
 
 /// Un donjon résolu — nom en français seulement (l'overlay ne parle que français).
@@ -82,6 +84,9 @@ pub struct DungeonEntry {
     /// Vrai pour les rares donjons avec un combat d'archimonstre supplémentaire avant le boss (ex.
     /// Kokokolantha) — voir `dungeon_run.rs::group_dungeon_runs`.
     pub has_pre_boss_archi: bool,
+    /// Son illustration (`bossIllustrations/{n}.png`), quand le référentiel en donne une — l'image
+    /// d'un groupe ou d'un run de donjon dans la fenêtre d'historique.
+    pub picture: Option<crate::IconRef>,
 }
 
 impl DungeonEntry {
@@ -125,6 +130,7 @@ impl DungeonIndex {
                     monster_family_ids: row.monster_family_id,
                     dungeon_type: row.dungeon_type,
                     has_pre_boss_archi: row.has_pre_boss_archi,
+                    picture: row.picture.as_deref().and_then(crate::spells::picture_icon),
                 },
             );
         }

@@ -18,14 +18,14 @@ use crate::remote_icons::RemoteIconTextures;
 /// Taille de police des lignes de liste.
 pub(crate) const FONT_SIZE: f32 = 14.0;
 const SORT_SWITCH_WIDTH: f32 = 180.0;
-const DAY_HEADER_HEIGHT: f32 = 30.0;
+pub(super) const DAY_HEADER_HEIGHT: f32 = 30.0;
 
 /// `--btn-active-green` du site : kamas et objets acquis.
 pub(crate) const GAIN: Color32 = Color32::from_rgb(0x2E, 0xCC, 0x71);
 /// `--btn-active-red` du site : kamas et objets cédés.
 pub(crate) const LOSS: Color32 = Color32::from_rgb(0xE7, 0x4C, 0x3C);
 /// `--accent` du site : nombre d'entrées d'un jour.
-const ACCENT: Color32 = tokens::OVERLAY_ACCENT;
+pub(super) const ACCENT: Color32 = tokens::OVERLAY_ACCENT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortOrder {

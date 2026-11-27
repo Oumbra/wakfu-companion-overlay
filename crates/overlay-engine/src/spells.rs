@@ -358,6 +358,8 @@ pub fn picture_icon(picture: &str) -> Option<IconRef> {
 pub const PICTURE_FOLDERS: &[(&str, IconKind)] = &[
     ("spells", IconKind::Spell),
     ("timePointBonus", IconKind::TimePointBonus),
+    ("monstersfamily", IconKind::MonsterFamily),
+    ("bossIllustrations", IconKind::BossIllustration),
 ];
 
 #[cfg(test)]

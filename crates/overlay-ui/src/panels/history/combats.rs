@@ -25,7 +25,7 @@ use overlay_engine::{CatalogIndex, DungeonIndex, IconRef, WakfuDungeonType, Wakf
 use overlay_history::read::{FightRow, ItemLine, ParticipantRow, SpellColumn, SpellLine};
 use overlay_history::HistoryStore;
 
-use super::items::{self, CompactRow, DayTail, ListState};
+use super::items::{self, CompactRow, ListState};
 use super::{format, HistoryContext};
 use crate::design::{self, text, tokens};
 use crate::remote_icons::RemoteIconTextures;
@@ -162,6 +162,9 @@ pub struct FightGroup<'e, 'a> {
     pub count: String,
     /// Titre de section à peindre AVANT ce groupe (premier groupe d'une section).
     pub section: Option<String>,
+    /// Vignette de la ligne (`imageUrl` du site) : l'illustration du donjon ou de la famille ;
+    /// aucune pour un jour.
+    pub image: Option<IconRef>,
     pub entries: Vec<&'e Entry<'a>>,
 }
 
@@ -182,6 +185,7 @@ pub fn day_groups<'e, 'a>(entries: &[&'e Entry<'a>], today: NaiveDate) -> Vec<Fi
         label: format::relative_day(day, today),
         count: fight_count(fights_in(&entries)),
         section: None,
+        image: None,
         entries,
     })
     .collect()
@@ -214,6 +218,7 @@ pub fn type_groups<'e, 'a>(
     struct Bucket<'e, 'a> {
         key: String,
         dungeon: Option<(WakfuDungeonType, String)>,
+        picture: Option<IconRef>,
         family: Option<i64>,
         names: Vec<(String, usize)>,
         entries: Vec<&'e Entry<'a>>,
@@ -242,6 +247,7 @@ pub fn type_groups<'e, 'a>(
                 buckets.push(Bucket {
                     key,
                     dungeon: dungeon.map(|d| (d.dungeon_type, d.fr.clone())),
+                    picture: dungeon.and_then(|d| d.picture.clone()),
                     family,
                     names: Vec::new(),
                     entries: Vec::new(),
@@ -278,6 +284,7 @@ pub fn type_groups<'e, 'a>(
                     format!("{count} donjons")
                 },
                 section: first.then(|| title.to_string()),
+                image: bucket.picture.clone(),
                 entries: bucket.entries.clone(),
             });
             first = false;
@@ -306,6 +313,7 @@ pub fn type_groups<'e, 'a>(
             label,
             count: fight_count(fights_in(&bucket.entries)),
             section: first.then(|| "Familles".to_string()),
+            image: bucket.family.and_then(super::family_picture),
             entries: bucket.entries.clone(),
         });
         first = false;
@@ -501,9 +509,12 @@ pub struct CombatsState {
 }
 
 const SUMMARY_HEIGHT: f32 = 40.0;
+/// Côté de la vignette d'une ligne de groupe (`.fight-group-image`, 18 px sur le site).
+const GROUP_IMAGE: f32 = 20.0;
 const IMAGE_SIZE: f32 = 28.0;
-const TOGGLE_ALL_WIDTH: f32 = 140.0;
-const MODE_SWITCH_WIDTH: f32 = 300.0;
+/// Côté du bouton « Tout replier » / « Tout déplier ».
+const TOGGLE_ALL_SIZE: f32 = 32.0;
+const MODE_SWITCH_WIDTH: f32 = 380.0;
 /// Switch « Cumulé » / « Tour ».
 const VIEW_SWITCH_WIDTH: f32 = 180.0;
 /// Écart entre le switch de vue et le libellé « Tour », et largeur de ce libellé.
@@ -656,19 +667,22 @@ pub fn show(
         GroupMode::Type => type_groups(&kept, ctx.catalog, ctx.dungeons),
     };
 
-    // Recherche, regroupement, puis « Tout replier » / « Tout déplier ».
+    // Recherche, regroupement (pictogramme + libellé), puis le bouton « Tout replier » /
+    // « Tout déplier » aux deux chevrons (`fight-group-controls` du site).
     ui.horizontal(|ui| {
         ui.add(
             design::input(search)
                 .placeholder("Rechercher un ennemi, un allié, un objet...")
                 .clearable(true)
-                .width(zones.inner.width() - MODE_SWITCH_WIDTH - TOGGLE_ALL_WIDTH - 24.0)
+                .width(zones.inner.width() - MODE_SWITCH_WIDTH - TOGGLE_ALL_SIZE - 24.0)
                 .log_name("historique.combats.recherche"),
         );
         ui.add(
             design::switch(mode)
                 .slot(GroupMode::Day, "Jour")
+                .icon_beside_label(design::DsIcon::Calendar)
                 .slot(GroupMode::Type, "Donjons & familles")
+                .icon_beside_label(design::DsIcon::Dungeon)
                 .width(MODE_SWITCH_WIDTH)
                 .log_name("historique.combats.regroupement"),
         );
@@ -678,19 +692,27 @@ pub fn show(
         if !groups.is_empty()
             && ui
                 .add(
-                    design::button(if any_open {
+                    design::icon_button(if any_open {
+                        design::DsIcon::ChevronsCollapse
+                    } else {
+                        design::DsIcon::ChevronsExpand
+                    })
+                    .size(TOGGLE_ALL_SIZE)
+                    .tooltip(if any_open {
                         "Tout replier"
                     } else {
                         "Tout déplier"
                     })
-                    .size(design::ButtonSize::Compact)
-                    .width(TOGGLE_ALL_WIDTH)
                     .log_name("historique.combats.tout"),
                 )
                 .clicked()
         {
             if any_open {
+                // Replier referme aussi les combats et les runs dépliés (`toggleAllGroups` du
+                // site) ; déplier ne rouvre que les groupes.
                 collapsed_groups.extend(groups.iter().map(|group| group.key.clone()));
+                detail.expanded.clear();
+                expanded_runs.clear();
             } else {
                 for group in &groups {
                     collapsed_groups.remove(&group.key);
@@ -716,13 +738,8 @@ pub fn show(
                 section_header(ui, width, section);
             }
             let collapsed = collapsed_groups.contains(&group.key);
-            if items::day_header(
-                ui,
-                width,
-                &group.label,
-                DayTail::Text(&group.count),
-                !collapsed,
-            ) && !collapsed_groups.remove(&group.key)
+            if group_row(ui, width, group, !collapsed, ctx, textures)
+                && !collapsed_groups.remove(&group.key)
             {
                 collapsed_groups.insert(group.key.clone());
             }
@@ -756,6 +773,66 @@ pub fn show(
         }
         pager.footer(ui, width, &times, shown, "historique.combats");
     });
+}
+
+/// La ligne d'un groupe (`fight-group-row` du site) : chevron à gauche, vignette, libellé, puis le
+/// nombre à droite. Rend `true` au clic.
+fn group_row(
+    ui: &mut Ui,
+    width: f32,
+    group: &FightGroup,
+    open: bool,
+    ctx: &HistoryContext<'_>,
+    textures: &mut RemoteIconTextures,
+) -> bool {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, items::DAY_HEADER_HEIGHT), Sense::click());
+    let painter = ui.painter_at(rect);
+    let fill = if response.hovered() {
+        Color32::from_rgba_unmultiplied(255, 255, 255, 18)
+    } else {
+        Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+    };
+    painter.rect_filled(rect, 4.0, fill);
+    super::paint_caret(
+        ui,
+        &painter,
+        egui::pos2(rect.left() + 14.0, rect.center().y),
+        open,
+        tokens::TEXT_GOLD,
+    );
+    let mut left = rect.left() + 26.0;
+    if let Some(image) = &group.image {
+        let image_rect = Rect::from_min_size(
+            egui::pos2(left, rect.center().y - GROUP_IMAGE / 2.0),
+            egui::vec2(GROUP_IMAGE, GROUP_IMAGE),
+        );
+        super::paint_remote_icon(ui, &painter, image_rect, image, ctx.remote_icons, textures);
+        left = image_rect.right() + 8.0;
+    }
+    let font = text::label_strong_font(ui.ctx(), items::FONT_SIZE + 1.0);
+    painter.text(
+        egui::pos2(left, rect.center().y),
+        Align2::LEFT_CENTER,
+        &group.label,
+        font.clone(),
+        tokens::TEXT_GOLD,
+    );
+    painter.text(
+        egui::pos2(rect.right() - 12.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        &group.count,
+        font,
+        items::ACCENT,
+    );
+    if response.clicked() {
+        tracing::info!(
+            ">>> clic historique.combats.groupe {} ({})",
+            group.label,
+            if open { "replié" } else { "déplié" }
+        );
+    }
+    response.clicked()
 }
 
 /// Titre d'une section du regroupement « Donjons & familles » (non cliquable).
@@ -804,6 +881,7 @@ fn summary_frame(
     indent: f32,
     started_at: i64,
     icon: Option<IconRef>,
+    tooltip: Option<String>,
     id: egui::Id,
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
@@ -831,6 +909,10 @@ fn summary_frame(
     );
     if let Some(icon) = &icon {
         super::paint_remote_icon(ui, &painter, image, icon, ctx.remote_icons, textures);
+        if let Some(tooltip) = tooltip {
+            ui.interact(image, id.with("illustration"), Sense::hover())
+                .on_hover_text(tooltip);
+        }
     }
     (rect, image.right(), response)
 }
@@ -856,14 +938,15 @@ fn fight_summary(
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
 ) -> bool {
-    let icon = illustration(fight, ctx.catalog, ctx.dungeons)
-        .and_then(|p| ctx.catalog.find_monster_icon(&p.name, p.monster_id));
+    let face = illustration(fight, ctx.catalog, ctx.dungeons);
+    let icon = face.and_then(|p| ctx.catalog.find_monster_icon(&p.name, p.monster_id));
     let (rect, image_right, response) = summary_frame(
         ui,
         width,
         if in_run { 24.0 } else { 0.0 },
         fight.started_at,
         icon,
+        face.map(|p| p.name.clone()),
         ui.id().with(("combat-horloge", fight.id)),
         ctx,
         textures,
@@ -919,14 +1002,19 @@ fn run_summary(
         .find(|fight| fight.dungeon_id.is_some())
         .copied()
         .unwrap_or(representative);
-    let icon = illustration(boss, ctx.catalog, ctx.dungeons)
-        .and_then(|p| ctx.catalog.find_monster_icon(&p.name, p.monster_id));
+    // L'illustration du donjon (`entry.dungeon.pictureUrl` du site), sinon son boss.
+    let dungeon = dungeon_id.and_then(|id| ctx.dungeons.find_by_id(id));
+    let icon = dungeon.and_then(|d| d.picture.clone()).or_else(|| {
+        illustration(boss, ctx.catalog, ctx.dungeons)
+            .and_then(|p| ctx.catalog.find_monster_icon(&p.name, p.monster_id))
+    });
     let (rect, image_right, response) = summary_frame(
         ui,
         width,
         0.0,
         representative.started_at,
         icon,
+        dungeon.map(|d| d.fr.clone()),
         ui.id().with(("run-horloge", representative.id)),
         ctx,
         textures,

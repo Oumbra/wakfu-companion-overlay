@@ -368,6 +368,9 @@ struct Slot<T> {
     label: String,
     /// Pictogramme qui **remplace** le libellé au rendu — voir [`Switch::icon`].
     icon: Option<DsIcon>,
+    /// Le pictogramme se pose **devant** le libellé au lieu de le remplacer — voir
+    /// [`Switch::icon_beside_label`].
+    beside: bool,
     /// Texte court qui **remplace** le libellé au rendu (`Az`, `Nb`) — voir [`Switch::glyph`].
     glyph: Option<String>,
     /// Image (texture déjà chargée, ex. une icône distante) qui **remplace** le libellé au rendu —
@@ -421,6 +424,7 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
             value,
             label: label.into(),
             icon: None,
+            beside: false,
             glyph: None,
             image: None,
             forced_state: None,
@@ -459,6 +463,17 @@ impl<'a, T: PartialEq + Copy> Switch<'a, T> {
     pub fn icon(mut self, icon: DsIcon) -> Self {
         if let Some(last) = self.slots.last_mut() {
             last.icon = Some(icon);
+        }
+        self
+    }
+
+    /// Donne à **la dernière case déclarée** un pictogramme posé **devant** son libellé, qui reste
+    /// affiché (`fight-group-switch` du site : calendrier + « Jour »). Pas d'infobulle : le
+    /// libellé se lit déjà. Sans effet avant le premier `slot`.
+    pub fn icon_beside_label(mut self, icon: DsIcon) -> Self {
+        if let Some(last) = self.slots.last_mut() {
+            last.icon = Some(icon);
+            last.beside = true;
         }
         self
     }
@@ -682,6 +697,29 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
                         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                         tint,
                     );
+                } else if let Some(icon) = slot.icon.filter(|_| slot.beside) {
+                    // Pictogramme puis libellé, l'ensemble centré dans la case.
+                    let color = self.variant.glyph_color(state, false);
+                    let icon_color = self.variant.glyph_color(state, icon.native_color());
+                    let drawn = self.variant.glyph_size(&design, icon) * self.scale;
+                    let font = text::label_font(ui.ctx(), tokens::SWITCH_FONT_SIZE);
+                    let galley = painter.layout_no_wrap(slot.label.clone(), font, color);
+                    let gap = 6.0 * self.scale;
+                    let total = drawn.x + gap + galley.size().x;
+                    let left = slot_rect.center().x - total / 2.0;
+                    let min = egui::pos2(left, slot_rect.center().y - drawn.y / 2.0)
+                        .round_to_pixels(ui.pixels_per_point());
+                    design.paint_icon(
+                        &painter,
+                        egui::Rect::from_min_size(min, drawn),
+                        icon,
+                        icon_color,
+                    );
+                    let pos = egui::pos2(
+                        left + drawn.x + gap,
+                        slot_rect.center().y - galley.size().y / 2.0,
+                    );
+                    painter.galley(pos, galley, color);
                 } else if let Some(icon) = slot.icon {
                     let color = self.variant.glyph_color(state, icon.native_color());
                     // `self.scale` et non `effective_scale` : le glyphe ne suit pas la réduction
@@ -747,7 +785,8 @@ impl<T: PartialEq + Copy> Widget for Switch<'_, T> {
 
             // L'infobulle d'une case à pictogramme porte son libellé — posée hors du test de
             // visibilité, une infobulle s'affiche sur interaction, pas sur peinture.
-            if slot.icon.is_some() || slot.glyph.is_some() || slot.image.is_some() {
+            if (slot.icon.is_some() && !slot.beside) || slot.glyph.is_some() || slot.image.is_some()
+            {
                 crate::design::tooltip(&slot_response).text(slot.label.clone());
             }
 

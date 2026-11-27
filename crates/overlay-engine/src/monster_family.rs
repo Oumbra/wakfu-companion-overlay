@@ -16,15 +16,18 @@ use serde::Deserialize;
 struct RawMonsterFamilyRow {
     id: i64,
     fr: String,
+    #[serde(default)]
+    picture: Option<String>,
 }
 
-/// Une famille de monstre résolue — nom en français seulement. `picture` (pas garanti pour toute
-/// famille) volontairement absent : aucun consommateur overlay n'affiche encore d'illustration de
-/// famille.
+/// Une famille de monstre résolue — nom en français seulement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MonsterFamilyEntry {
     pub id: i64,
     pub fr: String,
+    /// Sa vignette (`monstersfamily/{n}.png`), quand le référentiel en donne une — l'image d'un
+    /// groupe « famille » de la fenêtre d'historique.
+    pub picture: Option<crate::IconRef>,
 }
 
 /// Index en RAM des familles de monstres — O(1) par id, même politique de tolérance aux lignes mal
@@ -45,6 +48,7 @@ impl MonsterFamilyIndex {
                 MonsterFamilyEntry {
                     id: row.id,
                     fr: row.fr,
+                    picture: row.picture.as_deref().and_then(crate::spells::picture_icon),
                 },
             );
         }

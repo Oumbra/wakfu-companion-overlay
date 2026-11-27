@@ -58,6 +58,14 @@ pub enum IconKind {
     /// change, et c'est le dossier du chemin `picture` qui choisit entre les deux
     /// (`crate::spells::picture_icon`).
     TimePointBonus,
+    /// Vignette d'une famille de monstres (`wakassets/monstersfamily/{n}.png`) — le champ
+    /// `picture` de la section `monsterFamilies` du référentiel, l'image d'un groupe « famille »
+    /// de la fenêtre d'historique (`typeGroupImageUrl` du site). Même circuit que les autres.
+    MonsterFamily,
+    /// Illustration d'un donjon (`wakassets/bossIllustrations/{n}.png`, paysage ~2:1) — le champ
+    /// `picture` de la section `dungeons`, l'image d'un groupe ou d'un run de donjon
+    /// (`dungeonGroupImageUrl` du site).
+    BossIllustration,
 }
 
 /// Référence suffisante pour construire le chemin de l'icône réelle — voir `image_path`. `gfx_id` est
@@ -79,6 +87,8 @@ impl IconRef {
             IconKind::ItemCategory => "itemTypes",
             IconKind::Spell => "spells",
             IconKind::TimePointBonus => "timePointBonus",
+            IconKind::MonsterFamily => "monstersfamily",
+            IconKind::BossIllustration => "bossIllustrations",
         }
     }
 

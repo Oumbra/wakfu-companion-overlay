@@ -35,6 +35,8 @@ fn file_path(kind: IconKind, gfx_id: &str) -> Option<PathBuf> {
         // Même dossier que le CDN, là encore — voir `overlay_engine::spells`.
         IconKind::Spell => "spells",
         IconKind::TimePointBonus => "timePointBonus",
+        IconKind::MonsterFamily => "monstersfamily",
+        IconKind::BossIllustration => "bossIllustrations",
     };
     // `gfx_id` vient du catalogue serveur, jamais construit à partir d'une entrée non fiable —
     // mais un id qui contiendrait par accident un séparateur de chemin ne doit quand même jamais

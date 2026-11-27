@@ -470,4 +470,19 @@ ds_icons! {
         /// Médaillon du butin (`icons/icon-header-loot.png`, 37 × 40) — en-tête des sections Butin
         /// (`header-loot.png`).
         HeaderLoot => "icon-header-loot", couleur;
+
+        /// Porte de donjon en arche (`icons/icon-dungeon.png`, 10 × 13) — regroupement « Donjons
+        /// & familles » des Combats et du Récap. Icône au trait du dépôt web (symbole `dungeon` du
+        /// sprite `icons-*.svg`, viewBox 24, trait 2, bouts ronds), rastérisée à 16 px et rognée à
+        /// son encre le 2026-11-27. Blanche, teintée par l'appelant.
+        Dungeon => "icon-dungeon", libre;
+
+        /// Deux chevrons qui se rejoignent (`icons/icon-chevrons-collapse.png`, 9 × 12) — « Tout
+        /// replier ». Symbole `chevrons-collapse` du même sprite, même traitement que
+        /// [`DsIcon::Dungeon`].
+        ChevronsCollapse => "icon-chevrons-collapse", libre;
+
+        /// Deux chevrons qui s'écartent (`icons/icon-chevrons-expand.png`, 8 × 12) — « Tout
+        /// déplier ». Symbole `chevrons-expand`, même traitement.
+        ChevronsExpand => "icon-chevrons-expand", libre;
 }

@@ -411,13 +411,24 @@ pub(crate) fn paint_remote_icon(
     textures: &mut RemoteIconTextures,
 ) {
     if let Some(texture) = textures.resolve(ui.ctx(), store, icon) {
+        // Proportions gardées, image centrée (`object-fit: contain` du site) : une illustration
+        // de donjon est en paysage, une icône de monstre carrée.
+        let size = texture.size_vec2();
+        let scale = (rect.width() / size.x).min(rect.height() / size.y);
+        let drawn = egui::Rect::from_center_size(rect.center(), size * scale);
         painter.image(
             texture.id(),
-            rect,
+            drawn,
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
     }
+}
+
+/// La vignette d'une famille de monstres ; `None` avant le chargement du référentiel, pour un id
+/// inconnu ou une famille sans image.
+pub(crate) fn family_picture(id: i64) -> Option<overlay_engine::IconRef> {
+    MONSTER_FAMILIES.get()?.find_by_id(id)?.picture.clone()
 }
 
 pub fn show(
