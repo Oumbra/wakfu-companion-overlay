@@ -9,8 +9,7 @@
 //! `wakfu-companion`) qu'il faut répercuter délibérément dans ce crate — jamais une simple
 //! coïncidence de fixture locale.
 //!
-//! ⚠️ Contenu placeholder (voir `overlay_sync::catalog_cache` pour la même mise en garde côté
-//! repli embarqué) : ce sandbox ne peut pas atteindre la vraie base Neon pour capturer un VRAI
+//! ⚠️ Contenu placeholder : ce sandbox ne peut pas atteindre la vraie base Neon pour capturer un VRAI
 //! extrait du référentiel de production — seuls id 65 (Larventura) et id 24029 (Larme d'Ogrest)
 //! sont des ancrages réels documentés ailleurs dans ce dépôt (voir `docs/plan-architecture.md` et
 //! le CLAUDE.md de `wakfu-companion`, carte Récap) ; le reste (gfxId, rareté, ids de monstres/
@@ -29,7 +28,7 @@ fn load_golden(name: &str) -> serde_json::Value {
 
 #[test]
 fn resolution_du_catalogue_objets_monstres_stable() {
-    let catalog = CatalogIndex::from_compact_json(&load_golden("catalog-index.json"));
+    let catalog = CatalogIndex::from_json(&load_golden("catalog-index.json"));
     assert!(!catalog.is_empty());
 
     // Objet résolu par id — icône ET rareté.
@@ -102,7 +101,6 @@ fn resolution_des_familles_de_monstres_stable() {
         .find_by_id(42)
         .expect("famille 42 doit être résolue");
     assert_eq!(bworks.fr, "Bworks");
-    assert_eq!(bworks.en, "Bworks");
 }
 
 /// Vérifie la cohérence CROISÉE entre les trois fichiers golden : le donjon Larventura (65)
@@ -113,7 +111,7 @@ fn resolution_des_familles_de_monstres_stable() {
 /// pas de l'autre).
 #[test]
 fn les_trois_referentiels_golden_restent_croises_de_facon_coherente() {
-    let catalog = CatalogIndex::from_compact_json(&load_golden("catalog-index.json"));
+    let catalog = CatalogIndex::from_json(&load_golden("catalog-index.json"));
     let dungeons = DungeonIndex::from_json(&load_golden("dungeons.json"));
     let families = MonsterFamilyIndex::from_json(&load_golden("monster-families.json"));
 

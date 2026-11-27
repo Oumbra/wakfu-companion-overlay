@@ -1,5 +1,5 @@
 //! Téléchargement d'un asset **en flux** vers un fichier, avec progression — ce que
-//! `client::fetch_bytes` ne sait pas faire (tout en mémoire, sans rappel).
+//! `client::fetch_public_bytes` ne sait pas faire (tout en mémoire, sans rappel).
 //!
 //! Le fichier est écrit sous `<dest>.part` puis renommé une fois complet : un `.part` orphelin
 //! est un téléchargement interrompu, jamais un asset qu'on pourrait prendre pour valide. Le

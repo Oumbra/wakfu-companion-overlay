@@ -407,7 +407,6 @@ pub struct RenderContent<'a> {
     pub watchlist_counter_edit: Option<&'a mut panels::counter_edit::CounterEditState>,
     pub watchlist_toast: Option<&'a WatchlistToast>,
     pub catalog: &'a CatalogIndex,
-    pub catalog_stale: bool,
     pub remote_icons: &'a RemoteIconStore,
     pub remote_icon_textures: &'a mut RemoteIconTextures,
     pub auth_status: &'a AuthStatus,
@@ -715,7 +714,6 @@ pub fn build_ui(
                 watchlist_counter_edit: content.watchlist_counter_edit.as_deref_mut(),
                 watchlist_toast: content.watchlist_toast,
                 catalog: content.catalog,
-                catalog_stale: content.catalog_stale,
                 remote_icons: content.remote_icons,
                 remote_icon_textures: &mut *content.remote_icon_textures,
                 auth_status: content.auth_status,
@@ -772,7 +770,6 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         watchlist_counter_edit,
         watchlist_toast,
         catalog,
-        catalog_stale,
         remote_icons,
         remote_icon_textures,
         auth_status,
@@ -884,32 +881,6 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                     // zone ont été remplacés par la fenêtre de connexion (`OverlayKind::Login`,
                     // `panels::login`). Cette fenêtre-ci n'existe plus que compte lié — voir
                     // `main.rs::App::sync_session_windows`.
-                    // Indicateur « catalogue daté » (§7.4/§9 du plan, lot L3) — visible UNIQUEMENT
-                    // quand `catalog` provient du repli hors-ligne embarqué (ni cache disque ni
-                    // réseau au démarrage, voir `spawn_catalog_thread`) : les icônes/classements
-                    // affichés peuvent alors dater du dernier build de l'overlay plutôt que du vrai
-                    // catalogue serveur. Avant ce lot, seul un `tracing::warn!` signalait ce cas —
-                    // invisible pour qui ne regarde pas les logs en jouant.
-                    if catalog_stale {
-                        ui.horizontal(|ui| {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    // `combat::show_tooltip_above` plutôt qu'un `on_hover_text`
-                                    // brut (refonte 2026-09-06, design system tooltip) — voir sa
-                                    // doc.
-                                    let warning = ui.label("📦⚠");
-                                    crate::design::tooltip(&warning).text(
-                                        "Catalogue hors ligne : réseau et cache local tous deux \
-                                         indisponibles au démarrage, repli sur la base embarquée \
-                                         dans l'overlay (peut être datée).",
-                                    );
-                                },
-                            );
-                        });
-                        ui.add_space(4.0);
-                    }
-
                     let combat_outcome = panels::combat::show(
                         ui,
                         fight,

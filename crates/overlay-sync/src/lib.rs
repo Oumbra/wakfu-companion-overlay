@@ -1,22 +1,19 @@
 //! Auth native par appairage (lot L4, `docs/plan-architecture.md` §7.2) + récupération du roster
 //! de personnages (`GET /api/v1/settings`) + synchronisation de l'historique (lot L5, §7.1/§7.3 —
-//! `queue.rs`) — la brique réseau de l'overlay.
+//! `queue.rs`) + téléchargement des icônes (`client::icon_urls`, `icon_cache.rs`) + mise à jour
+//! signée (`update`) — la brique réseau de l'overlay. Le catalogue, les recettes, les donjons et
+//! les serveurs de jeu sont embarqués depuis le 2026-11-27 (`overlay_engine::referentiel`).
 
-pub mod catalog_cache;
 pub mod client;
 pub mod icon_cache;
 pub mod pairing;
 pub mod queue;
-pub mod reference_data_cache;
-pub mod session;
 pub mod token_store;
 pub mod update;
 
 pub use client::{
-    fetch_account_id, fetch_catalog_index, fetch_catalog_version, fetch_dungeons,
-    fetch_game_servers, fetch_item_detail, fetch_monster_families, fetch_settings,
-    patch_chat_filters, patch_json_authenticated, patch_roster, patch_watchlist, post_json,
-    post_json_authenticated, AccountSettings,
+    fetch_account_id, fetch_settings, patch_chat_filters, patch_json_authenticated, patch_roster,
+    patch_watchlist, post_json, post_json_authenticated, AccountSettings,
 };
 pub use pairing::{pair_and_wait, PairingHandle};
 pub use queue::{client_key, FlushOutcome, SyncQueue, MAX_PENDING_AGE};
@@ -46,8 +43,4 @@ pub enum SyncError {
     PairingCancelled,
     #[error("erreur d'accès au trousseau/fichier de jeton : {0}")]
     TokenStore(String),
-    /// Route réservée à l'overlay appelée sans session publiée (voir `session`) — l'appelant
-    /// garde son cache ou son repli ; ce n'est ni une panne réseau ni un refus du serveur.
-    #[error("aucune session : jeton non encore disponible")]
-    NoSession,
 }

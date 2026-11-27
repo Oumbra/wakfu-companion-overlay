@@ -1,22 +1,10 @@
 //! **Les ingrédients d'une recette**, résolus récursivement — ce que la fenêtre « Objets de la
 //! recette » de l'onglet « Suivi » affiche, et ce qu'elle ajoute au suivi quand on la valide.
 //!
-//! Miroir de `CatalogService.resolveRecipeIngredients` (dépôt web, `core/api/catalog.service.ts`),
-//! avec les deux mêmes contraintes :
-//!
-//! 1. **Un aller-retour réseau par NIVEAU de recette.** L'index compact du catalogue ne porte que
-//!    le drapeau `has_recipe` ([`CatalogIndex::find_item_has_recipe`]) — jamais les ingrédients,
-//!    qui alourdiraient un index chargé au démarrage pour un besoin qui ne concerne qu'un
-//!    dialogue. Le détail vient de `GET /api/v1/items/{id}`.
-//! 2. **Seuls les ingrédients qui ONT une recette déclenchent un appel de plus.** Le drapeau se lit
-//!    dans l'index, en mémoire : l'arbre n'est jamais exploré à l'aveugle.
-//!
-//! ## Le réseau n'entre pas ici
-//!
-//! [`resolve_recipe`] reçoit un **résolveur** — une closure qui rend le JSON d'un objet — plutôt
-//! que d'appeler `overlay_sync` elle-même. Deux raisons : `overlay-engine` ne dépend pas du
-//! transport (§3 du plan), et une résolution récursive avec garde anti-cycle se teste beaucoup
-//! mieux sur une table en mémoire que sur un serveur.
+//! Miroir de `CatalogService.resolveRecipeIngredients` (dépôt web, `core/api/catalog.service.ts`).
+//! Les ingrédients viennent du référentiel embarqué ([`CatalogIndex::recipe`], 2026-11-27) :
+//! plus d'aller-retour vers `GET /api/v1/items/{id}`, la résolution est instantanée et marche hors
+//! ligne. Seuls les ingrédients qui ONT une recette sont développés à leur tour.
 //!
 //! ## La garde anti-cycle
 //!
@@ -47,52 +35,31 @@ pub struct RecipeIngredient {
     pub children: Vec<RecipeIngredient>,
 }
 
-/// Résout les ingrédients de l'objet `id`, récursivement.
+/// Résout les ingrédients de l'objet `id`, récursivement, depuis le référentiel.
 ///
-/// `fetch` rend le JSON de `GET /api/v1/items/{id}` — `None` quand l'objet est injoignable, auquel
-/// cas ses ingrédients sont simplement absents plutôt qu'une erreur : une recette partiellement
-/// résolue reste plus utile qu'un dialogue vide.
-///
-/// Un ingrédient dont le nom n'a pas pu être résolu côté serveur (`name: null`, id absent de la
-/// table) est **silencieusement omis**, comme côté web : sans nom, il n'y a rien à suivre.
-pub fn resolve_recipe(
-    id: i64,
-    catalog: &CatalogIndex,
-    fetch: &mut dyn FnMut(i64) -> Option<serde_json::Value>,
-) -> Vec<RecipeIngredient> {
+/// Un ingrédient que le catalogue ne sait pas nommer (id absent du référentiel) est
+/// **silencieusement omis**, comme côté web : sans nom, il n'y a rien à suivre.
+pub fn resolve_recipe(id: i64, catalog: &CatalogIndex) -> Vec<RecipeIngredient> {
     let mut ancetres = HashSet::from([id]);
-    resolve_level(id, catalog, fetch, &mut ancetres)
+    resolve_level(id, catalog, &mut ancetres)
 }
 
 fn resolve_level(
     id: i64,
     catalog: &CatalogIndex,
-    fetch: &mut dyn FnMut(i64) -> Option<serde_json::Value>,
     ancetres: &mut HashSet<i64>,
 ) -> Vec<RecipeIngredient> {
-    let Some(detail) = fetch(id) else {
-        return Vec::new();
-    };
-    let Some(lignes) = detail.get("recipe").and_then(|v| v.as_array()) else {
-        return Vec::new();
-    };
-
     let mut resolus = Vec::new();
-    for ligne in lignes {
+    for &(ingredient_id, quantity) in catalog.recipe(id) {
         // Sans nom, rien à suivre — la ligne est omise, jamais rendue avec un libellé vide.
-        let Some(name) = ligne.get("name").and_then(|v| v.as_str()) else {
+        let Some(name) = catalog.item_name(ingredient_id) else {
             continue;
         };
-        let Some(ingredient_id) = ligne.get("itemId").and_then(|v| v.as_i64()) else {
-            continue;
-        };
-        let quantity = ligne.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
-
         let cycle = ancetres.contains(&ingredient_id);
         let has_recipe = catalog.find_item_has_recipe(name, Some(ingredient_id)) && !cycle;
         let children = if has_recipe {
             ancetres.insert(ingredient_id);
-            let enfants = resolve_level(ingredient_id, catalog, fetch, ancetres);
+            let enfants = resolve_level(ingredient_id, catalog, ancetres);
             ancetres.remove(&ingredient_id);
             enfants
         } else {
@@ -158,42 +125,28 @@ mod tests {
     use super::*;
 
     /// Un référentiel minimal : `10` (avec recette) → `20` (avec recette) → `30`.
-    fn catalogue() -> CatalogIndex {
-        CatalogIndex::from_compact_json(&serde_json::json!({
+    fn catalogue(recipes: serde_json::Value) -> CatalogIndex {
+        CatalogIndex::from_json(&serde_json::json!({
             "items": [
-                [10, "Coiffe", "Hat", "Gorro", "Chapeu", 1, 1, 1, 0],
-                [20, "Cuir", "Leather", "Cuero", "Couro", 2, 0, 1, 1],
-                [30, "Peau", "Hide", "Piel", "Pele", 3, 0, 0, 1],
+                [10, "Coiffe", 1, 1, 1, 0],
+                [20, "Cuir", 2, 0, 1, 1],
+                [30, "Peau", 3, 0, 0, 1],
             ],
-            "monsters": []
+            "recipes": recipes,
         }))
-    }
-
-    fn detail(id: i64, recipe: serde_json::Value) -> serde_json::Value {
-        serde_json::json!({ "id": id, "recipe": recipe })
     }
 
     #[test]
     fn la_recette_se_resout_sur_deux_niveaux() {
-        let catalog = catalogue();
-        let mut fetch = |id: i64| match id {
-            10 => Some(detail(
-                10,
-                serde_json::json!([{ "itemId": 20, "name": "Cuir", "quantity": 2 }]),
-            )),
-            20 => Some(detail(
-                20,
-                serde_json::json!([{ "itemId": 30, "name": "Peau", "quantity": 5 }]),
-            )),
-            _ => None,
-        };
-        let arbre = resolve_recipe(10, &catalog, &mut fetch);
+        let catalog = catalogue(serde_json::json!([[10, [[20, 2]]], [20, [[30, 5]]]]));
+        let arbre = resolve_recipe(10, &catalog);
         assert_eq!(arbre.len(), 1);
         assert_eq!(arbre[0].name, "Cuir");
+        assert_eq!(arbre[0].quantity, 2);
         assert!(arbre[0].has_recipe);
         assert_eq!(arbre[0].children.len(), 1);
         assert_eq!(arbre[0].children[0].name, "Peau");
-        // La feuille n'a pas de recette : aucun appel de plus n'a été tenté pour elle.
+        assert_eq!(arbre[0].children[0].quantity, 5);
         assert!(!arbre[0].children[0].has_recipe);
     }
 
@@ -201,19 +154,8 @@ mod tests {
     fn un_cycle_ne_boucle_pas_a_l_infini() {
         // **Cas réel du référentiel Ankama** : un objet ingrédient de lui-même. Sans la garde, la
         // résolution ne rendrait jamais la main.
-        let catalog = catalogue();
-        let mut fetch = |id: i64| match id {
-            10 => Some(detail(
-                10,
-                serde_json::json!([{ "itemId": 20, "name": "Cuir", "quantity": 1 }]),
-            )),
-            20 => Some(detail(
-                20,
-                serde_json::json!([{ "itemId": 20, "name": "Cuir", "quantity": 1 }]),
-            )),
-            _ => None,
-        };
-        let arbre = resolve_recipe(10, &catalog, &mut fetch);
+        let catalog = catalogue(serde_json::json!([[10, [[20, 1]]], [20, [[20, 1]]]]));
+        let arbre = resolve_recipe(10, &catalog);
         // La ligne s'affiche, mais sa propre recette n'est pas développée.
         assert_eq!(arbre[0].children.len(), 1);
         assert!(!arbre[0].children[0].has_recipe);
@@ -222,19 +164,16 @@ mod tests {
 
     #[test]
     fn un_ingredient_sans_nom_est_omis() {
-        let catalog = catalogue();
-        let mut fetch = |_: i64| {
-            Some(detail(
-                10,
-                serde_json::json!([
-                    { "itemId": 99, "name": null, "quantity": 1 },
-                    { "itemId": 30, "name": "Peau", "quantity": 3 },
-                ]),
-            ))
-        };
-        let arbre = resolve_recipe(10, &catalog, &mut fetch);
+        let catalog = catalogue(serde_json::json!([[10, [[99, 1], [30, 3]]]]));
+        let arbre = resolve_recipe(10, &catalog);
         assert_eq!(arbre.len(), 1);
         assert_eq!(arbre[0].name, "Peau");
+    }
+
+    #[test]
+    fn un_objet_sans_recette_ne_rend_rien() {
+        let catalog = catalogue(serde_json::json!([]));
+        assert!(resolve_recipe(30, &catalog).is_empty());
     }
 
     #[test]

@@ -260,13 +260,13 @@ mod tests {
     }
 
     fn catalog_fixture() -> CatalogIndex {
-        CatalogIndex::from_compact_json(&serde_json::json!({
+        CatalogIndex::from_json(&serde_json::json!({
             "monsters": [
-                [200, "Boss Larventura", "x", "x", "x", "1", -1, 1, 0, 0],
-                [201, "Salle Larventura", "x", "x", "x", "2", -1, 0, 0, 0],
-                [300, "Boss Koko", "x", "x", "x", "3", -1, 1, 0, 0],
-                [301, "Archi Koko", "x", "x", "x", "4", -1, 0, 1, 0],
-                [400, "Boss Ultime", "x", "x", "x", "5", -1, 1, 0, 0],
+                [200, "Boss Larventura", "1", -1, 1, 0, 0],
+                [201, "Salle Larventura", "2", -1, 0, 0, 0],
+                [300, "Boss Koko", "3", -1, 1, 0, 0],
+                [301, "Archi Koko", "4", -1, 0, 1, 0],
+                [400, "Boss Ultime", "5", -1, 1, 0, 0],
             ],
         }))
     }
@@ -536,10 +536,10 @@ mod tests {
 
     #[test]
     fn find_dungeon_for_enemies_priorite_0_breche_ultime_avant_priorite_1() {
-        let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
+        let catalog = CatalogIndex::from_json(&serde_json::json!({
             "monsters": [
-                [1, "BossA", "x", "x", "x", "1", -1, 1, 0, 0],
-                [2, "BossB", "x", "x", "x", "2", -1, 1, 0, 0],
+                [1, "BossA", "1", -1, 1, 0, 0],
+                [2, "BossB", "2", -1, 1, 0, 0],
             ],
         }));
         let dungeons = DungeonIndex::from_json(&serde_json::json!([
@@ -560,13 +560,13 @@ mod tests {
 
     #[test]
     fn find_dungeon_for_enemies_priorite_2_horde_heterogene() {
-        let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
+        let catalog = CatalogIndex::from_json(&serde_json::json!({
             "monsters": [
-                [1, "M1", "x", "x", "x", "1", 10, 0, 0, 0],
-                [2, "M2", "x", "x", "x", "2", 20, 0, 0, 0],
-                [3, "M3", "x", "x", "x", "3", 30, 0, 0, 0],
-                [4, "M4", "x", "x", "x", "4", 40, 0, 0, 0],
-                [5, "M5", "x", "x", "x", "5", 50, 0, 0, 0],
+                [1, "M1", "1", 10, 0, 0, 0],
+                [2, "M2", "2", 20, 0, 0, 0],
+                [3, "M3", "3", 30, 0, 0, 0],
+                [4, "M4", "4", 40, 0, 0, 0],
+                [5, "M5", "5", 50, 0, 0, 0],
             ],
         }));
         let dungeons = DungeonIndex::from_json(&serde_json::json!([
@@ -581,10 +581,10 @@ mod tests {
 
     #[test]
     fn find_dungeon_for_enemies_horde_sous_le_seuil_ne_declenche_pas_la_priorite_2() {
-        let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
+        let catalog = CatalogIndex::from_json(&serde_json::json!({
             "monsters": [
-                [1, "M1", "x", "x", "x", "1", 10, 0, 0, 0],
-                [2, "M2", "x", "x", "x", "2", 20, 0, 0, 0],
+                [1, "M1", "1", 10, 0, 0, 0],
+                [2, "M2", "2", 20, 0, 0, 0],
             ],
         }));
         let dungeons = DungeonIndex::from_json(&serde_json::json!([

@@ -4835,12 +4835,12 @@ mod tests {
     }
 
     fn sample_catalog() -> CatalogIndex {
-        CatalogIndex::from_compact_json(&serde_json::json!({
-            "items": [[100, "Larme d'Ogrest", "Ogrest's Tear", "x", "x", 1, 1, 0, 1]],
+        CatalogIndex::from_json(&serde_json::json!({
+            "items": [[100, "Larme d'Ogrest", 1, 1, 0, 1]],
             "monsters": [
-                [200, "El Pochito", "El Pochito", "x", "x", "1", -1, 1, 0, 0],
+                [200, "El Pochito", "1", -1, 1, 0, 0],
                 // Pas boss (isBoss=0) — sert de "salle" pour les tests de regroupement de donjon.
-                [201, "Salle Larventura", "Salle Larventura", "x", "x", "2", -1, 0, 0, 0],
+                [201, "Salle Larventura", "2", -1, 0, 0, 0],
             ],
         }))
     }

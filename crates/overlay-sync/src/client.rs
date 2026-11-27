@@ -220,58 +220,40 @@ pub fn patch_roster(token: &str, patch: &RosterPatch) -> Result<Value, SyncError
     patch_settings(token, roster_patch_entry(patch))
 }
 
-/// Jeton à poser sur une route **réservée à l'overlay** — catalogue, objets, monstres, donjons,
-/// familles, icônes (2026-09-20, voir la doc de tête de `session.rs`) : côté serveur, ces routes
-/// ne répondent plus qu'au site (`Sec-Fetch-Site: same-origin`) et à une session valide, 403
-/// sinon. `NoSession` tant que le thread Auth n'a rien publié : l'appelant garde son cache.
-fn session_token() -> Result<String, SyncError> {
-    crate::session::current().ok_or(SyncError::NoSession)
-}
+/// Origine des icônes du jeu : le CDN communautaire **wakassets** (GitHub Pages), source de la
+/// quasi-totalité des images (`docs/plan-historique-local.md` §5).
+pub const WAKASSETS_BASE_URL: &str = "https://vertylo.github.io/wakassets";
 
-/// `GET /api/v1/items/{id}` — le détail d'un objet, dont **sa recette** (`functions/api/v1/
-/// items/[id].ts` côté dépôt web).
+/// Origine des icônes que wakassets n'a pas : le **CDN de l'overlay**, publié depuis le dossier
+/// `cdn/` du dépôt par le workflow `pages.yml` (mêmes chemins que wakassets).
+pub const OVERLAY_CDN_BASE_URL: &str = "https://oumbra.github.io/wakfu-companion-overlay";
+
+/// Les URL à essayer, **dans l'ordre**, pour une icône dont les chemins candidats sont `paths`
+/// (`items/1234.png`, voir `overlay_engine::IconRef::image_paths`) : tous les chemins sur
+/// wakassets d'abord, puis tous sur le CDN de l'overlay. Wakassets sert ~97 % des icônes ; le CDN
+/// ne coûte donc une requête de plus (un 404 sur wakassets) qu'aux ~350 images récentes qu'il
+/// porte, une seule fois par poste grâce au cache disque.
 ///
-/// C'est le seul endroit où les ingrédients d'une recette sont disponibles : l'index compact du
-/// catalogue (`fetch_catalog_index`) n'en porte que le drapeau `hasRecipe`, volontairement — les
-/// embarquer alourdirait un index que tout l'overlay charge au démarrage, pour un besoin qui ne
-/// concerne qu'un dialogue.
-///
-/// Avec la session courante (voir [`session_token`]) : route réservée à l'overlay et au site.
-pub fn fetch_item_detail(id: i64) -> Result<Value, SyncError> {
-    let token = session_token()?;
-    let path = format!("/api/v1/items/{id}");
-    let url = format!("{}{path}", base_url());
-    let response = agent()
-        .get(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|err| SyncError::Network(err.to_string()))?;
-    parse_json_body(&path, response)
+/// Depuis le 2026-11-27, l'overlay ne passe plus par l'API du site (`/api/v1/icons/…`, réservé à
+/// une session) : les icônes se téléchargent sans compte, directement chez GitHub.
+pub fn icon_urls(paths: &[String]) -> Vec<String> {
+    [WAKASSETS_BASE_URL, OVERLAY_CDN_BASE_URL]
+        .iter()
+        .flat_map(|base| {
+            paths
+                .iter()
+                .map(move |path| format!("{base}/{}", path.trim_start_matches('/')))
+        })
+        .collect()
 }
 
-/// L'URL d'une icône `wakassets` **relayée par l'API** — `GET /api/v1/icons/{folder}/{gfxId}.png`
-/// sur [`base_url`], pour un chemin `items/1234.png` (`overlay_engine::catalog::IconRef::
-/// image_paths`). Depuis le 2026-09-19 (constat C10 de `docs/analyse-rgpd.md`) l'overlay ne
-/// contacte plus `vertylo.github.io` : c'est le service, qui connaît déjà le compte, qui va
-/// chercher l'image et la garde en cache à sa périphérie.
-pub fn icon_url(path: &str) -> String {
-    format!(
-        "{}/api/v1/icons/{}",
-        base_url().trim_end_matches('/'),
-        path.trim_start_matches('/')
-    )
-}
-
-/// Récupère les octets bruts d'une URL absolue (les icônes, voir [`icon_url`]), avec la session
-/// courante (voir [`session_token`] — le relais d'icônes est réservé à l'overlay et au site
-/// depuis le 2026-09-20). Toute réponse non 2xx est une erreur — pas de distinction faite ici
-/// entre "icône inconnue" et une vraie panne réseau, l'appelant traite les deux de la même façon
-/// (repli sur l'icône générique).
-pub fn fetch_bytes(url: &str) -> Result<Vec<u8>, SyncError> {
-    let token = session_token()?;
+/// Récupère les octets bruts d'une URL publique (les icônes, voir [`icon_urls`]), sans en-tête
+/// d'authentification. Toute réponse non 2xx est une erreur — pas de distinction faite ici entre
+/// « icône inconnue » et une vraie panne réseau, l'appelant traite les deux de la même façon
+/// (source suivante, puis repli sur l'icône générique).
+pub fn fetch_public_bytes(url: &str) -> Result<Vec<u8>, SyncError> {
     let response = agent()
         .get(url)
-        .header("Authorization", &format!("Bearer {token}"))
         .call()
         .map_err(|err| SyncError::Network(err.to_string()))?;
     let mut response = ensure_success(url, response)?;
@@ -597,93 +579,30 @@ pub fn fetch_settings(token: &str) -> Result<AccountSettings, SyncError> {
     })
 }
 
-/// `GET /api/v1/catalog/version` — juste assez pour détecter un changement (voir
-/// `functions/api/v1/catalog/version.ts`, dépôt `wakfu-companion`) : `indexHash`, une empreinte du
-/// contenu réellement servi par `fetch_catalog_index`, à comparer à celle du cache disque avant de
-/// retélécharger ~350 Ko pour rien (voir §7.4 du plan).
-pub fn fetch_catalog_version() -> Result<String, SyncError> {
-    let token = session_token()?;
-    let url = format!("{}/api/v1/catalog/version", base_url());
-    let response = agent()
-        .get(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|err| SyncError::Network(err.to_string()))?;
-    let body = parse_json_body("/api/v1/catalog/version", response)?;
-    body.get("indexHash")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| SyncError::Json("champ indexHash absent de /api/v1/catalog/version".into()))
-}
-
-/// `GET /api/v1/catalog/` — index compact objets+monstres tel quel (voir
-/// `overlay_engine::CatalogIndex::from_compact_json`, qui en attend exactement cette forme :
-/// `{ items: [...], monsters: [...] }`, tuples positionnels — voir `server/catalog/
-/// compact-index.ts` côté `wakfu-companion` pour le format exact). ~1,14 Mo bruts / ~348 Ko gzip
-/// mesurés côté serveur — jamais appelé sans avoir d'abord comparé `fetch_catalog_version` au
-/// cache disque (voir `catalog_cache.rs`).
-pub fn fetch_catalog_index() -> Result<Value, SyncError> {
-    let token = session_token()?;
-    let url = format!("{}/api/v1/catalog/", base_url());
-    let response = agent()
-        .get(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|err| SyncError::Network(err.to_string()))?;
-    parse_json_body("/api/v1/catalog/", response)
-}
-
-/// `GET /api/v1/dungeons` — liste complète des donjons (voir `overlay_engine::DungeonIndex::
-/// from_json`, qui en attend exactement cette forme : un tableau d'objets, pas de tuples compacts,
-/// voir `functions/api/v1/dungeons.ts` côté `wakfu-companion`). Pas de endpoint `/version` séparé
-/// pour ce référentiel (voir `reference_data_cache.rs`) — toujours rechargé en entier.
-pub fn fetch_dungeons() -> Result<Value, SyncError> {
-    let token = session_token()?;
-    let url = format!("{}/api/v1/dungeons", base_url());
-    let response = agent()
-        .get(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|err| SyncError::Network(err.to_string()))?;
-    parse_json_body("/api/v1/dungeons", response)
-}
-
-/// `GET /api/v1/monster-families` — miroir de `fetch_dungeons` pour les familles de monstres (voir
-/// `overlay_engine::MonsterFamilyIndex::from_json`).
-pub fn fetch_monster_families() -> Result<Value, SyncError> {
-    let token = session_token()?;
-    let url = format!("{}/api/v1/monster-families", base_url());
-    let response = agent()
-        .get(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|err| SyncError::Network(err.to_string()))?;
-    parse_json_body("/api/v1/monster-families", response)
-}
-
-/// `GET /api/v1/game-servers` — les serveurs de jeu (`game_servers`, voir
-/// `functions/api/v1/game-servers.ts` côté `wakfu-companion`), **jamais une liste en dur** : c'est
-/// la règle du dépôt web, et le code écrit dans `roster[].gameServer` doit être un `code` de cette
-/// table pour que le site le reconnaisse.
-///
-/// Sans authentification (contrairement au catalogue et aux donjons depuis le 2026-09-20 : cette
-/// table n'est pas une donnée du jeu sous licence) — minuscule et quasi statique, mise en cache
-/// disque au même titre (`reference_data_cache::ReferenceData::GameServers`).
-pub fn fetch_game_servers() -> Result<Value, SyncError> {
-    let url = format!("{}/api/v1/game-servers", base_url());
-    let response = agent()
-        .get(&url)
-        .call()
-        .map_err(|err| SyncError::Network(err.to_string()))?;
-    parse_json_body("/api/v1/game-servers", response)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         error_code, is_json_content_type, parse_retry_after, DEFAULT_BASE_URL, MAX_RETRY_AFTER,
     };
     use std::time::Duration;
+
+    /// Wakassets d'abord, le CDN de l'overlay ensuite, chacun avec tous les chemins candidats.
+    #[test]
+    fn les_icones_essaient_wakassets_puis_le_cdn_de_l_overlay() {
+        let urls = super::icon_urls(&[
+            "monsters/12.png".to_string(),
+            "monsterIllustrations/12.png".to_string(),
+        ]);
+        assert_eq!(
+            urls,
+            vec![
+                "https://vertylo.github.io/wakassets/monsters/12.png",
+                "https://vertylo.github.io/wakassets/monsterIllustrations/12.png",
+                "https://oumbra.github.io/wakfu-companion-overlay/monsters/12.png",
+                "https://oumbra.github.io/wakfu-companion-overlay/monsterIllustrations/12.png",
+            ]
+        );
+    }
 
     /// 1994-11-06T08:49:37Z — l'exemple de la RFC 9110.
     const RFC_EXAMPLE_MS: i64 = 784_111_777_000;

@@ -1,11 +1,11 @@
 //! Serveurs de jeu — miroir de `GameServerService` (dépôt web) réduit à ce dont l'overlay a besoin :
 //! proposer un serveur au compte dans l'onglet « Personnages », et afficher celui déjà déclaré.
 //!
-//! **Jamais une liste en dur** (règle du dépôt web, `functions/api/v1/game-servers.ts`) : le code
-//! écrit dans `roster[].gameServer` doit être un `code` de la table `game_servers`, sans quoi le
-//! site ne le reconnaît pas. La liste descend donc du réseau (`overlay_sync::client::
-//! fetch_game_servers`), avec cache disque pour qu'un lancement hors ligne ne perde pas le nom des
-//! serveurs (voir `background::spawn_game_servers_thread`).
+//! **Liste embarquée** depuis le 2026-11-27 ([`GameServers::embedded`], `docs/plan-historique-local.md`
+//! §4) : l'overlay ne demande plus `GET /api/v1/game-servers`. Les codes sont ceux de la table
+//! `game_servers` du site (`pandora`, `rubilax`, `ogrest`), pour que l'historique importé depuis le
+//! serveur garde les mêmes valeurs ; un nouveau serveur ouvert par Ankama s'ajoute ici, dans une
+//! release.
 
 use serde_json::Value;
 
@@ -25,8 +25,29 @@ pub struct GameServers {
     entries: Vec<GameServer>,
 }
 
+/// Les serveurs de jeu connus : `(code, nom affiché)`, tous ouverts.
+const EMBEDDED: [(&str, &str); 3] = [
+    ("pandora", "Pandora"),
+    ("rubilax", "Rubilax"),
+    ("ogrest", "Ogrest"),
+];
+
 impl GameServers {
-    /// Lit la réponse de `GET /api/v1/game-servers` — un tableau d'objets `{code, label,
+    /// La liste embarquée (voir la doc du module).
+    pub fn embedded() -> Self {
+        Self {
+            entries: EMBEDDED
+                .iter()
+                .map(|(code, label)| GameServer {
+                    code: (*code).to_string(),
+                    label: (*label).to_string(),
+                    is_active: true,
+                })
+                .collect(),
+        }
+    }
+
+    /// Lit un tableau d'objets `{code, label,
     /// isActive}`. Une entrée sans `code` est ignorée : elle ne pourrait être ni proposée ni
     /// retrouvée. Jamais une erreur : une liste vide se peint (voir [`GameServers::is_empty`]).
     pub fn from_json(value: &Value) -> Self {
@@ -112,5 +133,17 @@ mod tests {
         assert_eq!(liste().label("pandora"), "Pandora");
         // Liste pas encore descendue, ou serveur retiré de la table : le compte reste lisible.
         assert_eq!(GameServers::default().label("pandora"), "pandora");
+    }
+
+    #[test]
+    fn la_liste_embarquee_propose_les_trois_serveurs() {
+        let servers = GameServers::embedded();
+        let codes: Vec<_> = servers
+            .selectable(None)
+            .iter()
+            .map(|server| server.code.as_str())
+            .collect();
+        assert_eq!(codes, ["pandora", "rubilax", "ogrest"]);
+        assert_eq!(servers.label("rubilax"), "Rubilax");
     }
 }

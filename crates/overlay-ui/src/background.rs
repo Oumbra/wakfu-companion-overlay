@@ -1,6 +1,6 @@
 //! **Threads de fond partagés par les deux binaires** (2026-09-14) : compte (`spawn_auth_thread`),
-//! file de synchro (`spawn_sync_thread`), catalogue (`spawn_catalog_thread`) et référentiel de
-//! donjons (`spawn_dungeon_thread`), serveurs de jeu (`spawn_game_servers_thread`). Ils vivaient
+//! file de synchro (`spawn_sync_thread`), référentiel embarqué (`spawn_referentiel_thread`). Ils
+//! vivaient
 //! dans `main.rs` (Windows) depuis les lots L3-L5 ; rien n'y dépend de l'OS — `std::thread`,
 //! `mpsc`, `ArcSwap`, `overlay_sync` et un `EventLoopProxy` — et le binaire Linux
 //! (`bin/wakfu-companion-overlay-x11.rs`) en a besoin depuis que la fenêtre de connexion lui est
@@ -9,264 +9,56 @@
 //! Chacun signale au [`crate::startup::StartupProgress`] partagé la fin de son chargement initial,
 //! ce qui fait tomber l'écran de chargement de la fenêtre de connexion (voir `panels::login`).
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
+use std::time::Instant;
 
 use arc_swap::ArcSwap;
 use overlay_engine::{CatalogIndex, DungeonIndex, WatchlistEntry};
 
-use crate::game_servers::GameServers;
 use winit::event_loop::EventLoopProxy;
 
 use crate::engine_thread::{EngineCommand, SyncCommand};
 use crate::render_content::{AuthCommand, AuthFailure, AuthStatus, UserEvent};
 use crate::startup::StartupProgress;
 
-/// Thread Auth (lot L4, §7.2 du plan) : résout l'accès au compte sur un thread dédié — jamais le
-/// thread Engine ni le main thread. Jamais fatal : sans jeton stocké, l'overlay affiche sa fenêtre
-/// de connexion et attend (plus de mode invité depuis le 2026-09-14, voir `spawn_auth_thread`).
+/// Thread Référentiel (2026-11-27, `docs/plan-historique-local.md` §4) : construit les index du
+/// référentiel **embarqué** (`overlay_engine::referentiel`) — objets, monstres, recettes, donjons —
+/// puis les publie. Hors du main thread : c'est ~1 Mo de JSON à analyser au lancement.
 ///
-/// Thread Catalogue (lot L3, §7.4 du plan — réduit pour l'instant à la résolution d'icônes, voir
-/// `overlay_engine::catalog`) : résout les icônes réelles d'objets/monstres affichées par le
-/// panneau Suivi (retour utilisateur 2026-09-02, capture d'écran à l'appui : icône générique
-/// partout, tuiles impossibles à distinguer). Offline-first (mêmes principes que
-/// `CatalogService.initialize()` côté web) : le cache disque
-/// (`overlay_sync::catalog_cache`) est chargé et publié IMMÉDIATEMENT s'il existe, sans attendre
-/// le réseau — le rafraîchissement qui suit ne republie que si `GET /api/v1/catalog/version`
-/// (`indexHash`) a changé depuis le cache, jamais pour rien. Le MÊME `Arc<ArcSwap<CatalogIndex>>`
-/// est aussi relayé au thread Engine (voir `spawn_engine_thread`, `Engine::set_catalog`) : sert
-/// cette fois de garde-fou `hostIsKnownMonsterName` (`quickjs_engine.rs`) contre un vrai monstre
-/// qui se révèle (mimique, brèche) confondu à tort avec une invocation.
+/// Remplace les anciens threads Catalogue et Donjons, qui interrogeaient l'API du site
+/// (`GET /api/v1/catalog/*`, `/dungeons`) derrière un cache disque et un repli embarqué daté :
+/// le référentiel suit désormais les releases, il n'y a plus ni réseau, ni cache, ni repli, ni
+/// session à attendre.
 ///
-/// Tout premier lancement SANS cache disque ET SANS réseau : repli sur le catalogue embarqué
-/// (`overlay_sync::catalog_cache::embedded_fallback`, §7.4 du plan) — l'overlay reste utilisable
-/// plutôt que de rester sur un `CatalogIndex::default()` vide. `catalog_stale` (lu par `render`,
-/// icône « 📦⚠ » de la zone Combat) est mis à `true` dans ce seul cas — jamais réinitialisé à
-/// `false` explicitement ailleurs dans ce thread : sa valeur initiale (posée par `main`) est déjà
-/// `false`, et les autres branches de cette fonction ne s'exécutent qu'une fois par lancement, donc
-/// aucune ne peut suivre une mise à `true` pour la corriger a posteriori.
-pub fn spawn_catalog_thread(
+/// Le MÊME `Arc<ArcSwap<CatalogIndex>>` est relayé au thread Engine (voir `spawn_engine_thread`,
+/// `Engine::set_catalog`) : il y sert de garde-fou `hostIsKnownMonsterName` (`quickjs_engine.rs`)
+/// contre un vrai monstre qui se révèle (mimique, brèche) confondu à tort avec une invocation.
+pub fn spawn_referentiel_thread(
     catalog: Arc<ArcSwap<CatalogIndex>>,
-    catalog_stale: Arc<AtomicBool>,
-    startup: Arc<StartupProgress>,
-    proxy: EventLoopProxy<UserEvent>,
-) {
-    thread::Builder::new()
-        .name("overlay-catalog".into())
-        .spawn(move || {
-            // Le réseau exige la session (routes réservées à l'overlay, voir
-            // `overlay_sync::session`) : cache disque publié tout de suite, puis attente du
-            // verdict du thread Auth avant `load_catalog` — l'écran de chargement couvre déjà
-            // cette validation. Sans session, le cache (ou le repli embarqué) reste en place.
-            let mut known_hash = publish_cached_catalog(&catalog, &proxy);
-            let (token, mut generation) = overlay_sync::session::wait_resolved();
-            if token.is_some() {
-                known_hash = load_catalog(&catalog, &catalog_stale, &proxy, known_hash);
-            } else if known_hash.is_none() {
-                load_embedded_catalog(&catalog, &catalog_stale, &proxy);
-            }
-            // Quel que soit le chemin pris ci-dessus (cache, réseau, repli, échec) : le
-            // catalogue a fini de se charger, l'écran de chargement peut le décompter.
-            startup.mark_catalog();
-            let _ = proxy.send_event(UserEvent::StartupProgress);
-            // Chaque session publiée ensuite (premier « Se connecter », reconnexion après
-            // « Déconnecter ») vaut un rafraîchissement : un premier lancement sans jeton n'a
-            // que le repli embarqué jusque-là.
-            loop {
-                generation = overlay_sync::session::wait_token_after(generation).1;
-                known_hash = load_catalog(&catalog, &catalog_stale, &proxy, known_hash);
-            }
-        })
-        .expect("échec de création du thread Catalogue");
-}
-
-/// Publie le cache disque du catalogue s'il existe et rend son empreinte (`indexHash`) — la
-/// première étape de `load_catalog`, sortie pour s'exécuter AVANT l'attente de la session.
-fn publish_cached_catalog(
-    catalog: &Arc<ArcSwap<CatalogIndex>>,
-    proxy: &EventLoopProxy<UserEvent>,
-) -> Option<String> {
-    let (hash, index) = overlay_sync::catalog_cache::load()?;
-    catalog.store(Arc::new(CatalogIndex::from_compact_json(&index)));
-    let _ = proxy.send_event(UserEvent::NewSnapshot);
-    Some(hash)
-}
-
-/// Repli hors-ligne EMBARQUÉ (§7.4 du plan, `catalog_cache::embedded_fallback`) — uniquement sans
-/// cache disque : un cache déjà chargé reste toujours préférable (référentiel plus récent que le
-/// placeholder embarqué), le réseau injoignable ou l'absence de session n'y changent rien.
-fn load_embedded_catalog(
-    catalog: &Arc<ArcSwap<CatalogIndex>>,
-    catalog_stale: &Arc<AtomicBool>,
-    proxy: &EventLoopProxy<UserEvent>,
-) {
-    catalog.store(Arc::new(CatalogIndex::from_compact_json(
-        &overlay_sync::catalog_cache::embedded_fallback(),
-    )));
-    catalog_stale.store(true, Ordering::Relaxed);
-    let _ = proxy.send_event(UserEvent::NewSnapshot);
-}
-
-/// Rafraîchit le catalogue depuis le réseau (session requise, voir `spawn_catalog_thread`) :
-/// `cached_hash` est l'empreinte de l'index déjà en mémoire (cache disque publié par
-/// `publish_cached_catalog`, ou réseau d'un précédent passage), `None` s'il n'y en a aucun. Rend
-/// l'empreinte de ce qui est en mémoire à la sortie, à repasser au prochain appel.
-fn load_catalog(
-    catalog: &Arc<ArcSwap<CatalogIndex>>,
-    catalog_stale: &Arc<AtomicBool>,
-    proxy: &EventLoopProxy<UserEvent>,
-    cached_hash: Option<String>,
-) -> Option<String> {
-    let latest_hash = match overlay_sync::client::fetch_catalog_version() {
-        Ok(hash) => hash,
-        Err(err) => {
-            // Repli hors-ligne EMBARQUÉ (§7.4 du plan, `catalog_cache::embedded_fallback`)
-            // — uniquement si `cached_hash` est vide : un cache disque déjà chargé
-            // ci-dessus reste toujours préférable (référentiel plus récent que le
-            // placeholder embarqué), le réseau injoignable n'y change rien.
-            if cached_hash.is_none() {
-                tracing::warn!(
-                    %err,
-                    "catalogue injoignable ET aucun cache local — repli sur le catalogue embarqué (daté)"
-                );
-                load_embedded_catalog(catalog, catalog_stale, proxy);
-            } else {
-                tracing::warn!(%err, "version du catalogue injoignable, repli sur le cache local");
-            }
-            return cached_hash;
-        }
-    };
-    if cached_hash.as_deref() == Some(latest_hash.as_str()) {
-        tracing::info!("catalogue déjà à jour (cache local)");
-        return cached_hash;
-    }
-    match overlay_sync::client::fetch_catalog_index() {
-        Ok(index) => {
-            catalog.store(Arc::new(CatalogIndex::from_compact_json(&index)));
-            let _ = proxy.send_event(UserEvent::NewSnapshot);
-            if let Err(err) = overlay_sync::catalog_cache::save(&latest_hash, &index) {
-                tracing::warn!(
-                    %err,
-                    "échec de mise en cache du catalogue (retéléchargé au prochain lancement)"
-                );
-            }
-            Some(latest_hash)
-        }
-        Err(err) => {
-            tracing::warn!(
-                %err,
-                "téléchargement du catalogue impossible, repli sur le cache local"
-            );
-            cached_hash
-        }
-    }
-}
-
-/// Thread Donjons (L5, §7.1 du plan — assignation `dungeonId`/`dungeonRunKey`) : miroir simplifié
-/// de `spawn_catalog_thread` ci-dessus — `GET /api/v1/dungeons` n'expose pas d'endpoint `/version`
-/// séparé (voir `reference_data_cache.rs`), donc pas de comparaison de hash possible : le cache
-/// disque est chargé immédiatement (l'Engine reste utilisable pour la synchro dès le démarrage même
-/// hors ligne), puis la version réseau REMPLACE inconditionnellement l'index en mémoire dès qu'elle
-/// arrive, sans jamais bloquer ce thread ni les autres. Volume négligeable (~150 lignes, voir la
-/// doc de tête de `dungeon.rs`) : pas de repli embarqué comme pour le catalogue (~1,8 Mo) — un
-/// référentiel de donjons manquant laisse simplement `dungeonId` à `None`, jamais un blocage.
-pub fn spawn_dungeon_thread(
     dungeons: Arc<ArcSwap<DungeonIndex>>,
     startup: Arc<StartupProgress>,
     proxy: EventLoopProxy<UserEvent>,
 ) {
     thread::Builder::new()
-        .name("overlay-dungeons".into())
+        .name("overlay-referentiel".into())
         .spawn(move || {
-            // Même attente de session que le thread Catalogue (voir `spawn_catalog_thread`).
-            publish_cached_dungeons(&dungeons, &proxy);
-            let (token, mut generation) = overlay_sync::session::wait_resolved();
-            if token.is_some() {
-                load_dungeons(&dungeons, &proxy);
-            }
+            let started = Instant::now();
+            let referentiel = overlay_engine::referentiel::load();
+            tracing::info!(
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "référentiel embarqué chargé"
+            );
+            catalog.store(Arc::new(referentiel.catalog));
+            dungeons.store(Arc::new(referentiel.dungeons));
+            startup.mark_catalog();
             startup.mark_dungeons();
-            let _ = proxy.send_event(UserEvent::StartupProgress);
-            loop {
-                generation = overlay_sync::session::wait_token_after(generation).1;
-                load_dungeons(&dungeons, &proxy);
-            }
-        })
-        .expect("échec de création du thread Donjons");
-}
-
-fn publish_cached_dungeons(
-    dungeons: &Arc<ArcSwap<DungeonIndex>>,
-    proxy: &EventLoopProxy<UserEvent>,
-) {
-    if let Some(rows) = overlay_sync::reference_data_cache::load(
-        overlay_sync::reference_data_cache::ReferenceData::Dungeons,
-    ) {
-        dungeons.store(Arc::new(DungeonIndex::from_json(&rows)));
-        let _ = proxy.send_event(UserEvent::NewSnapshot);
-    }
-}
-
-/// Rafraîchit le référentiel de donjons depuis le réseau (session requise, voir
-/// `spawn_dungeon_thread`).
-fn load_dungeons(dungeons: &Arc<ArcSwap<DungeonIndex>>, proxy: &EventLoopProxy<UserEvent>) {
-    match overlay_sync::client::fetch_dungeons() {
-        Ok(rows) => {
-            dungeons.store(Arc::new(DungeonIndex::from_json(&rows)));
             let _ = proxy.send_event(UserEvent::NewSnapshot);
-            if let Err(err) = overlay_sync::reference_data_cache::save(
-                overlay_sync::reference_data_cache::ReferenceData::Dungeons,
-                &rows,
-            ) {
-                tracing::warn!(
-                    %err,
-                    "échec de mise en cache du référentiel de donjons (retéléchargé au prochain lancement)"
-                );
-            }
-        }
-        Err(err) => tracing::warn!(
-            %err,
-            "téléchargement du référentiel de donjons impossible, repli sur le cache local (dungeonId non résolu si aucun cache)"
-        ),
-    }
-}
-
-/// Thread Serveurs de jeu (2026-09-16, onglet « Personnages ») : même mécanique que le thread
-/// Donjons ci-dessus — cache disque publié immédiatement, réseau qui le remplace dès qu'il arrive.
-///
-/// **Aucun jalon de démarrage** (contrairement au catalogue et aux donjons, voir
-/// [`StartupProgress`]) : cette liste ne sert qu'au sélecteur de serveur de la fenêtre Options,
-/// jamais à l'ingestion ni à l'affichage d'un combat. Faire attendre l'écran de chargement pour
-/// elle retarderait le lancement pour un écran que l'utilisateur n'ouvrira peut-être pas.
-pub fn spawn_game_servers_thread(servers: Arc<ArcSwap<GameServers>>) {
-    thread::Builder::new()
-        .name("overlay-game-servers".into())
-        .spawn(move || {
-            use overlay_sync::reference_data_cache::{self, ReferenceData};
-            if let Some(rows) = reference_data_cache::load(ReferenceData::GameServers) {
-                servers.store(Arc::new(GameServers::from_json(&rows)));
-            }
-            match overlay_sync::client::fetch_game_servers() {
-                Ok(rows) => {
-                    servers.store(Arc::new(GameServers::from_json(&rows)));
-                    if let Err(err) = reference_data_cache::save(ReferenceData::GameServers, &rows)
-                    {
-                        tracing::warn!(
-                            %err,
-                            "échec de mise en cache des serveurs de jeu (retéléchargés au prochain lancement)"
-                        );
-                    }
-                }
-                // Best-effort, comme les donjons : sans liste, le sélecteur de serveur montre ce
-                // que le compte porte déjà et rien d'autre — jamais un blocage.
-                Err(err) => tracing::warn!(
-                    %err,
-                    "téléchargement des serveurs de jeu impossible, repli sur le cache local"
-                ),
-            }
+            let _ = proxy.send_event(UserEvent::StartupProgress);
+            crate::local_data::remove_obsolete_caches();
         })
-        .expect("échec de création du thread Serveurs de jeu");
+        .expect("échec de création du thread Référentiel");
 }
 
 /// Thread Sync (lot L5, §7.3 du plan) : possède la file SQLite persistante (`overlay_sync::
@@ -275,7 +67,7 @@ pub fn spawn_game_servers_thread(servers: Arc<ArcSwap<GameServers>>) {
 /// sérialisés sans jamais attendre dessus) ni sur le main thread. Best-effort à l'ouverture de la
 /// file elle-même (dossier de données/SQLite indisponible) : le thread se termine simplement,
 /// l'overlay continue sans synchro plutôt que de planter — même philosophie que
-/// `spawn_catalog_thread`/`spawn_auth_thread`.
+/// `spawn_auth_thread`.
 ///
 /// **Simplification assumée par rapport à `SyncQueueService` côté web** : pas de debounce explicite
 /// de 2 s avant un envoi (`FLUSH_DEBOUNCE_MS`) — chaque `SyncCommand::Enqueue` tente un
@@ -687,12 +479,6 @@ pub fn spawn_auth_thread(
                 );
 
                 let mut connected = result.is_ok();
-                if !connected {
-                    // Verdict rendu sans session (pas de jeton, jeton refusé, appairage annulé ou
-                    // échoué) : les threads Catalogue/Donjons qui attendent ce verdict repartent
-                    // sur leur cache (`session::wait_resolved`), et `client` répond `NoSession`.
-                    overlay_sync::session::clear();
-                }
                 status.store(Arc::new(match result {
                     Ok(()) => AuthStatus::Connected,
                     Err(AttemptEnd::Idle) => AuthStatus::Disconnected { failure: None },
@@ -717,7 +503,6 @@ pub fn spawn_auth_thread(
                             // session valide en base sans plus aucun moyen de la nommer.
                             crate::local_data::revoke_server_session();
                             overlay_sync::token_store::clear_token();
-                            overlay_sync::session::clear();
                             let _ = settings_tx.send(EngineCommand::Disconnect);
                             let _ = sync_tx.send(SyncCommand::Deactivate);
                             connected = false;
@@ -748,7 +533,6 @@ pub fn spawn_auth_thread(
                             // l'utilisateur qui a demandé à partir. La file d'envoi attend la
                             // reconnexion (voir `spawn_sync_thread`).
                             overlay_sync::token_store::clear_token();
-                            overlay_sync::session::clear();
                             connected = false;
                             status.store(Arc::new(AuthStatus::Disconnected { failure: None }));
                             let _ = proxy.send_event(UserEvent::AuthStatusChanged);
@@ -787,7 +571,6 @@ fn auth_failure(err: &overlay_sync::SyncError, step: &str) -> AuthFailure {
         SyncError::PairingExpired => "Appairage expiré",
         SyncError::PairingCancelled => "Appairage annulé",
         SyncError::TokenStore(_) => "Stockage de la session impossible",
-        SyncError::NoSession => "Aucune session",
     };
     AuthFailure {
         headline: headline.to_string(),
@@ -1009,10 +792,6 @@ fn attempt_connect(
 /// session (roster/watchlist restent pleinement fonctionnels, seul l'historique ne remonte pas au
 /// compte) plutôt que de faire échouer toute la connexion pour un besoin annexe.
 fn activate_sync_queue(token: &str, sync_tx: &mpsc::Sender<SyncCommand>) {
-    // Jeton validé par `GET /api/v1/settings` juste avant : c'est lui que les routes réservées à
-    // l'overlay attendent (`overlay_sync::session`, 2026-09-20) — publié AVANT `/auth/me`, dont
-    // l'échec ne concerne que la file d'historique, pas le catalogue ni les icônes.
-    overlay_sync::session::publish(token);
     match overlay_sync::client::fetch_account_id(token) {
         Ok(uid) => {
             let _ = sync_tx.send(SyncCommand::Activate {

@@ -190,7 +190,6 @@ fn panneau_combat_sur_un_vrai_rejeu_ne_panique_pas() {
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -272,7 +271,6 @@ fn panneau_combat_tooltip_switch_allies_ennemis_au_dessus() {
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -380,7 +378,6 @@ fn bande_recap_sur_un_vrai_rejeu_ne_panique_pas() {
                     watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
-                    catalog_stale: false,
                     remote_icons: &remote_icon_store,
                     remote_icon_textures: &mut remote_icon_textures,
                     auth_status: &auth_status,
@@ -481,7 +478,6 @@ fn bloc_recap_d_une_session_ordinaire_tient_sur_trois_lignes() {
                         watchlist_counter_edit: None,
                         watchlist_toast: None,
                         catalog: &catalog,
-                        catalog_stale: false,
                         remote_icons: &remote_icon_store,
                         remote_icon_textures: &mut remote_icon_textures,
                         auth_status: &auth_status,
@@ -635,7 +631,6 @@ fn bande_recap_saisie_a_la_souris_remonte_le_geste() {
                         watchlist_counter_edit: None,
                         watchlist_toast: None,
                         catalog: &catalog,
-                        catalog_stale: false,
                         remote_icons: &remote_icon_store,
                         remote_icon_textures: &mut remote_icon_textures,
                         auth_status: &auth_status,
@@ -788,7 +783,6 @@ fn confirmation_de_remise_a_zero_du_recap_voile_la_fenetre() {
                     watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
-                    catalog_stale: false,
                     remote_icons: &remote_icon_store,
                     remote_icon_textures: &mut remote_icon_textures,
                     auth_status: &auth_status,
@@ -886,7 +880,6 @@ fn harnais_edition_compteur(
                         watchlist_counter_edit: Some(&mut etat),
                         watchlist_toast: None,
                         catalog: &catalog,
-                        catalog_stale: false,
                         remote_icons: &remote_icon_store,
                         remote_icon_textures: &mut remote_icon_textures,
                         auth_status: &auth_status,
@@ -1116,7 +1109,6 @@ fn bloc_recap_sans_combats_ni_duree_se_resserre() {
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -1201,7 +1193,6 @@ fn bloc_recap_sans_duree_range_la_derniere_ligne_avant_le_glyphe() {
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -1278,7 +1269,6 @@ fn panneau_suivi_vide_ne_panique_pas() {
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -1448,7 +1438,6 @@ fn panneau_suivi_avec_toast_de_ramassage_ne_panique_pas() {
                 watchlist_counter_edit: None,
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -1532,7 +1521,6 @@ fn panneau_suivi_mode_up_ne_panique_pas() {
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -1676,7 +1664,6 @@ fn panneau_suivi_toutes_les_infobulles_sous_la_bande() {
                     watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
-                    catalog_stale: false,
                     remote_icons: &remote_icon_store,
                     remote_icon_textures: &mut remote_icon_textures,
                     auth_status: &auth_status,
@@ -1836,7 +1823,6 @@ fn panneau_suivi_vide_boutons_en_ligne_infobulles_dessous() {
                     watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
-                    catalog_stale: false,
                     remote_icons: &remote_icon_store,
                     remote_icon_textures: &mut remote_icon_textures,
                     auth_status: &auth_status,
@@ -1949,7 +1935,6 @@ fn panneau_suivi_coupe_sans_boutons_plus_et_moins() {
                     watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
-                    catalog_stale: false,
                     remote_icons: &remote_icon_store,
                     remote_icon_textures: &mut remote_icon_textures,
                     auth_status: &auth_status,
@@ -2122,7 +2107,6 @@ fn harnais_bandeau(entries: Vec<WatchlistEntry>) -> Bandeau {
                         watchlist_counter_edit: None,
                         watchlist_toast: None,
                         catalog: &catalog,
-                        catalog_stale: false,
                         remote_icons: &remote_icon_store,
                         remote_icon_textures: &mut remote_icon_textures,
                         auth_status: &auth_status,
@@ -2256,7 +2240,6 @@ fn panneau_suivi_bande_defilante_boutons_fixes() {
                     watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
-                    catalog_stale: false,
                     remote_icons: &remote_icon_store,
                     remote_icon_textures: &mut remote_icon_textures,
                     auth_status: &auth_status,
@@ -2624,7 +2607,6 @@ fn panneau_suivi_clic_maintenu_repasse_en_mode_repos() {
                     watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
-                    catalog_stale: false,
                     remote_icons: &remote_icon_store,
                     remote_icon_textures: &mut remote_icon_textures,
                     auth_status: &auth_status,
@@ -2734,7 +2716,6 @@ fn panneau_suivi_decompte_grandes_valeurs_ne_deborde_pas() {
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -2836,7 +2817,6 @@ fn panneau_suivi_glyphe_de_mode_et_infobulle_objectif() {
                     watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
-                    catalog_stale: false,
                     remote_icons: &remote_icon_store,
                     remote_icon_textures: &mut remote_icon_textures,
                     auth_status: &auth_status,
@@ -2937,7 +2917,6 @@ fn panneau_options_ne_panique_pas() {
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -3236,7 +3215,6 @@ fn modale_options_sur_damier_ne_panique_pas() {
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -3364,7 +3342,6 @@ fn modale_options_voilee_couvre_la_fenetre_de_jeu() {
                         watchlist_counter_edit: None,
                         watchlist_toast: None,
                         catalog: &catalog,
-                        catalog_stale: false,
                         remote_icons: &remote_icon_store,
                         remote_icon_textures: &mut remote_icon_textures,
                         auth_status: &auth_status,
@@ -4929,12 +4906,12 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
     overlay_ui::build_info::freeze_for_snapshots();
     use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
 
-    // `[id, fr, en, es, pt, gfxId, rarity_sort, has_recipe, category_sort]`
-    let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
+    // `[id, fr, gfxId, rarity_sort, has_recipe, category_sort]`
+    let catalog = CatalogIndex::from_json(&serde_json::json!({
         "items": [
-            [101, "Pierre de lune", "Moonstone", "Piedra", "Pedra", 1101, 2, 0, 1],
-            [102, "Pierre de dolomite", "Dolomite", "Dolomita", "Dolomita", 1102, 1, 0, 1],
-            [103, "Coiffe du Bouftou", "Gobball Headgear", "Casco", "Elmo", 1103, 3, 1, 0],
+            [101, "Pierre de lune", 1101, 2, 0, 1],
+            [102, "Pierre de dolomite", 1102, 1, 0, 1],
+            [103, "Coiffe du Bouftou", 1103, 3, 1, 0],
         ],
     }));
     assert_eq!(
@@ -5062,9 +5039,9 @@ fn options_alertes_champ_d_ajout_trouve_et_ajoute() {
 fn options_alertes_croix_efface_la_saisie() {
     use overlay_ui::panels::alerts_tab::{AlertsAvailability, AlertsTabState};
 
-    let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
+    let catalog = CatalogIndex::from_json(&serde_json::json!({
         "items": [
-            [101, "Pierre de lune", "Moonstone", "Piedra", "Pedra", 1101, 2, 0, 1],
+            [101, "Pierre de lune", 1101, 2, 0, 1],
         ],
     }));
     let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
@@ -5162,21 +5139,9 @@ fn options_alertes_les_fleches_font_defiler_la_liste() {
 
     // Huit « Pierre … », toutes retenues par « pierre » : trois de plus que les rangées visibles.
     let items: Vec<serde_json::Value> = (1..=8)
-        .map(|i| {
-            serde_json::json!([
-                100 + i,
-                format!("Pierre n° {i}"),
-                format!("Stone #{i}"),
-                format!("Piedra {i}"),
-                format!("Pedra {i}"),
-                1100 + i,
-                1,
-                0,
-                1
-            ])
-        })
+        .map(|i| serde_json::json!([100 + i, format!("Pierre n° {i}"), 1100 + i, 1, 0, 1]))
         .collect();
-    let catalog = CatalogIndex::from_compact_json(&serde_json::json!({ "items": items }));
+    let catalog = CatalogIndex::from_json(&serde_json::json!({ "items": items }));
     assert_eq!(catalog.search_items("pierre", 3, 40).len(), 8);
 
     let etat = std::rc::Rc::new(std::cell::RefCell::new(OptionsModalState {
@@ -6017,16 +5982,16 @@ fn options_suivi_champ_d_ajout_trouve_objets_et_monstres() {
     use overlay_engine::WatchlistKind;
     use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
 
-    // `[id, fr, en, es, pt, gfxId, rarity_sort, has_recipe, category_sort]` pour les objets,
-    // `[id, fr, en, es, pt, gfxId, family, isBoss, isArchi, isDominant]` pour les monstres.
-    let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
+    // `[id, fr, gfxId, rarity_sort, has_recipe, category_sort]` pour les objets,
+    // `[id, fr, gfxId, family, isBoss, isArchi, isDominant]` pour les monstres.
+    let catalog = CatalogIndex::from_json(&serde_json::json!({
         "items": [
-            [201, "Plume de Tofu", "Tofu Feather", "Pluma", "Pena", 1201, 1, 0, 1],
-            [202, "Coiffe du Tofu", "Tofu Headgear", "Casco", "Elmo", 1202, 2, 1, 0],
+            [201, "Plume de Tofu", 1201, 1, 0, 1],
+            [202, "Coiffe du Tofu", 1202, 2, 1, 0],
         ],
         "monsters": [
-            [301, "Tofu", "Tofu", "Tofu", "Tofu", "2301", -1, 0, 0, 0],
-            [302, "Tofu Royal", "Royal Tofu", "Tofu Real", "Tofu Real", "2302", -1, 1, 0, 0],
+            [301, "Tofu", "2301", -1, 0, 0, 0],
+            [302, "Tofu Royal", "2302", -1, 1, 0, 0],
         ],
     }));
     assert_eq!(
@@ -6166,8 +6131,8 @@ fn entree_ajoutee_depuis_le_formulaire(
 ) -> overlay_engine::WatchlistEntry {
     use overlay_ui::panels::suivi_tab::{SuiviAvailability, SuiviTabState};
 
-    let catalog = CatalogIndex::from_compact_json(&serde_json::json!({
-        "items": [[201, "Plume de Tofu", "Tofu Feather", "Pluma", "Pena", 1201, 1, 0, 1]],
+    let catalog = CatalogIndex::from_json(&serde_json::json!({
+        "items": [[201, "Plume de Tofu", 1201, 1, 0, 1]],
         "monsters": [],
     }));
 
@@ -6293,7 +6258,6 @@ fn le_curseur_du_jeu_remplace_le_curseur_systeme_et_clignote_sur_le_cliquable() 
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -6976,7 +6940,6 @@ fn capture_carte_de_chat(nom: &str, message: &str, survol: Option<egui::Pos2>) {
                 watchlist_counter_edit: None,
                 watchlist_toast: Some(&toast),
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -7252,7 +7215,6 @@ fn login_card_harness(
                     watchlist_counter_edit: None,
                     watchlist_toast: None,
                     catalog: &catalog,
-                    catalog_stale: false,
                     remote_icons: &remote_icon_store,
                     remote_icon_textures: &mut remote_icon_textures,
                     auth_status: &auth_status,
@@ -8004,7 +7966,6 @@ fn capture_rangee_actions_survolee(chrome: panels::recap::RecapChrome, nom: &str
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,
@@ -8112,7 +8073,6 @@ fn bande_recap_verrouillee_ne_bouge_pas() {
                         watchlist_counter_edit: None,
                         watchlist_toast: None,
                         catalog: &catalog,
-                        catalog_stale: false,
                         remote_icons: &remote_icon_store,
                         remote_icon_textures: &mut remote_icon_textures,
                         auth_status: &auth_status,

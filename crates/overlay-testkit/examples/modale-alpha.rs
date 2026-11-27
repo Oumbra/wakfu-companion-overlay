@@ -116,7 +116,6 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 watchlist_counter_edit: None,
                 watchlist_toast: None,
                 catalog: &catalog,
-                catalog_stale: false,
                 remote_icons: &remote_icon_store,
                 remote_icon_textures: &mut remote_icon_textures,
                 auth_status: &auth_status,

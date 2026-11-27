@@ -17,6 +17,7 @@ pub mod monster_family;
 pub mod profile;
 pub mod quickjs_engine;
 pub mod recipe;
+pub mod referentiel;
 pub mod roster;
 pub mod session;
 pub mod spells;

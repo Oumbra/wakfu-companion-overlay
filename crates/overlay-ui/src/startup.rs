@@ -7,8 +7,8 @@
 //! n'êtes pas connecté" ». Quatre chargements de fond y contribuent, un drapeau chacun, posé par
 //! le thread concerné quand son travail INITIAL est fini (succès ou repli, peu importe) :
 //!
-//! - **catalogue** (`background::spawn_catalog_thread`) — cache disque, réseau ou repli embarqué ;
-//! - **référentiel de donjons** (`background::spawn_dungeon_thread`) — même logique ;
+//! - **catalogue** et **référentiel de donjons** (`background::spawn_referentiel_thread`, un seul
+//!   thread qui pose les deux drapeaux) — l'analyse du référentiel embarqué, ~40 ms ;
 //! - **rattrapage de `wakfu.log`** (`engine_thread::spawn_engine_thread`) — la relecture complète
 //!   du fichier par le moteur, jusqu'au premier silence du watcher ;
 //! - **vérification de mise à jour** (`background::spawn_update_thread`, 2026-09-15,

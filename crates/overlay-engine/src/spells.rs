@@ -313,10 +313,10 @@ pub fn referential_path(is_ally: bool) -> &'static str {
 /// L'icône d'une entrée à partir de son chemin `picture` — `<dossier>/<numéro>.png`, relatif à
 /// la racine `wakassets` (`spells/2282.png` → `IconKind::Spell` + `2282`, `timePointBonus/9.png`
 /// → `IconKind::TimePointBonus` + `9`). Le dossier choisit le genre, le numéro est ce qu'`IconRef`
-/// transporte : `IconRef::image_path` reconstruit le même chemin, que l'API relaie
-/// (`overlay_sync::client::icon_url`) et d'après lequel `overlay_sync::icon_cache` nomme son
-/// fichier de cache. Depuis que les icônes passent par l'API (2026-09-19), les référentiels ne
-/// portent plus l'URL du CDN (`https://vertylo.github.io/wakassets/…`) : un préfixe absolu, un
+/// transporte : `IconRef::image_path` reconstruit le même chemin, que l'overlay demande à
+/// wakassets puis à son propre CDN (`overlay_sync::client::icon_urls`) et d'après lequel
+/// `overlay_sync::icon_cache` nomme son fichier de cache. Les référentiels ne portent pas l'URL
+/// du CDN (`https://vertylo.github.io/wakassets/…`), seulement le chemin : un préfixe absolu, un
 /// dossier inconnu ou une extension autre que `.png` donnent `None` — entrée connue sans icône,
 /// signalée au journal. Le test `toutes_les_images_des_referentiels_sont_dans_un_dossier_connu`
 /// garantit que les fichiers embarqués n'en contiennent aucun.

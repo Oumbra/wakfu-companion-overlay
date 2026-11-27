@@ -7,14 +7,11 @@
 //! désormais portés (2026-09-02) : nécessaires à `dungeon_run.rs` pour le regroupement de combats
 //! (L5, §7.1).
 //!
-//! Consommé par `overlay-engine::session` (L5, §7.1 — assignation `dungeonId`/`dungeonRunKey`),
-//! **pas câblé côté `overlay-ui` par défaut de données** : voir `Engine::set_dungeons`/
-//! `spawn_dungeon_thread` (`overlay-ui/src/main.rs`) pour le chargement réel (`GET
-//! /api/v1/dungeons`, voir `overlay_sync::client::fetch_dungeons`), réponse `Vec<{id, fr, en, es,
-//! pt, bossMonsterId: number[], monsterFamilyId: number[], type, hasPreBossArchi, ...}>` (voir
-//! `functions/api/v1/dungeons.ts` côté `wakfu-companion`) — un tableau d'OBJETS complets, PAS des
-//! tuples compacts comme `catalog::CatalogIndex` (volume négligeable, ~151 lignes, pas besoin de
-//! compacité ici — voir la doc de `dungeons.ts`).
+//! Consommé par `overlay-engine::session` (L5, §7.1 — assignation `dungeonId`/`dungeonRunKey`).
+//! Source : la section `dungeons` du référentiel embarqué (voir [`crate::referentiel`]), même
+//! forme que l'ancienne réponse de `GET /api/v1/dungeons` mais en français seul — `Vec<{id, fr,
+//! bossMonsterId: number[], monsterFamilyId: number[], type, hasPreBossArchi, ...}>`, un tableau
+//! d'OBJETS complets, PAS des tuples compacts comme `catalog::CatalogIndex` (~140 lignes).
 
 use std::collections::HashMap;
 
@@ -56,17 +53,12 @@ impl WakfuDungeonType {
     }
 }
 
-/// Une ligne de `GET /api/v1/dungeons` — seuls les champs consommés ici sont déclarés ; `serde`
-/// ignore silencieusement les autres clés du JSON (`level`, `bracket`, `pictureUrl`,
-/// `wakassetsAvailable`), pas de désérialisation positionnelle stricte à respecter contrairement à
-/// `catalog::RawItemRow`/`RawMonsterRow`.
+/// Une ligne de la section `dungeons` du référentiel — seuls les champs consommés ici sont
+/// déclarés ; `serde` ignore silencieusement les autres clés (`level`, `bracket`, `picture`).
 #[derive(Debug, Clone, Deserialize)]
 struct RawDungeonRow {
     id: i64,
     fr: String,
-    en: String,
-    es: String,
-    pt: String,
     #[serde(rename = "bossMonsterId", default)]
     boss_monster_id: Vec<i64>,
     #[serde(rename = "monsterFamilyId", default)]
@@ -77,16 +69,11 @@ struct RawDungeonRow {
     has_pre_boss_archi: bool,
 }
 
-/// Un donjon résolu — les 4 noms restent tous les 4 disponibles (pas de sélection de locale ici :
-/// l'overlay n'a pour l'instant aucun système d'i18n, contrairement au web — voir `roster.rs`/
-/// `watchlist.rs`, qui n'en ont pas non plus) ; un futur consommateur choisit le champ voulu.
+/// Un donjon résolu — nom en français seulement (l'overlay ne parle que français).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DungeonEntry {
     pub id: i64,
     pub fr: String,
-    pub en: String,
-    pub es: String,
-    pub pt: String,
     /// Toujours un tableau, jamais absent — miroir de `dungeons.bossMonsterId` (`server/db/
     /// schema.ts`, normalisé côté serveur), vide pour un type de donjon sans boss (BREACH, ARCADE).
     pub boss_monster_ids: Vec<i64>,
@@ -118,10 +105,10 @@ pub struct DungeonIndex {
 }
 
 impl DungeonIndex {
-    /// Construit l'index depuis la réponse brute de `GET /api/v1/dungeons` (un tableau JSON
-    /// d'objets). Une ligne mal formée est silencieusement ignorée (même politique que
-    /// `catalog::CatalogIndex::from_compact_json`) — un référentiel de donjons partiel reste
-    /// préférable à aucun référentiel du tout.
+    /// Construit l'index depuis la section `dungeons` du référentiel (un tableau JSON d'objets).
+    /// Une ligne mal formée est silencieusement ignorée (même politique que
+    /// `catalog::CatalogIndex::from_json`) — un référentiel de donjons partiel reste préférable à
+    /// aucun référentiel du tout.
     pub fn from_json(data: &serde_json::Value) -> Self {
         let mut index = Self::default();
         let rows: Vec<RawDungeonRow> = serde_json::from_value(data.clone()).unwrap_or_default();
@@ -134,9 +121,6 @@ impl DungeonIndex {
                 DungeonEntry {
                     id: row.id,
                     fr: row.fr,
-                    en: row.en,
-                    es: row.es,
-                    pt: row.pt,
                     boss_monster_ids: row.boss_monster_id,
                     monster_family_ids: row.monster_family_id,
                     dungeon_type: row.dungeon_type,

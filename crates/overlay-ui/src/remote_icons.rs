@@ -1,5 +1,5 @@
-//! Icônes réelles d'objets/monstres (`wakassets` relayé par l'API, voir
-//! `overlay_engine::IconRef::image_paths` et `overlay_sync::client::icon_url`) —
+//! Icônes réelles d'objets/monstres (wakassets, puis le CDN de l'overlay pour ce qui y manque —
+//! voir `overlay_engine::IconRef::image_paths` et `overlay_sync::client::icon_urls`) —
 //! remplace l'icône générique du panneau Suivi (`panels::watchlist`) dès qu'une entrée est résolue
 //! par le catalogue (`CatalogIndex`, voir `catalog.rs`). Retour utilisateur 2026-09-02 : « comme
 //! les images de ressources/monstres n'est pas présent c'est très compliqué pour l'utilisateur »
@@ -230,21 +230,18 @@ impl Drop for RemoteIconStore {
 }
 
 /// Télécharge les octets d'une icône en essayant ses sources **dans l'ordre**
-/// (`IconRef::image_paths`, chacune relayée par l'API — `overlay_sync::client::icon_url`) : la
-/// première qui répond gagne, les échecs intermédiaires ne sont que
+/// (`IconRef::image_paths` sur wakassets, puis sur le CDN de l'overlay —
+/// `overlay_sync::client::icon_urls`) : la première qui répond gagne, les échecs intermédiaires ne
+/// sont que
 /// tracés en `debug` (un monstre absent de `monsters/` mais présent dans `monsterIllustrations/`
 /// est un cas normal, pas une anomalie), seul l'échec de TOUTES les sources vaut un `warn`. Mise en
 /// cache sous la clé de l'icône (`kind`, `gfx_id`), quelle que soit la source gagnante : le cache
 /// disque ne connaît que l'icône, pas l'URL qui l'a servie, et un `gfx_id` ne vit jamais dans les
 /// deux dossiers à la fois.
 fn fetch_bytes_from_any_source(icon: &IconRef) -> Option<Vec<u8>> {
-    let urls: Vec<String> = icon
-        .image_paths()
-        .iter()
-        .map(|path| overlay_sync::client::icon_url(path))
-        .collect();
+    let urls = overlay_sync::client::icon_urls(&icon.image_paths());
     for url in &urls {
-        match overlay_sync::client::fetch_bytes(url) {
+        match overlay_sync::client::fetch_public_bytes(url) {
             Ok(bytes) => return Some(bytes),
             Err(err) => tracing::debug!(%url, %err, "source d'icône distante sans réponse"),
         }

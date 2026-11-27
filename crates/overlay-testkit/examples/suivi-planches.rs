@@ -30,25 +30,25 @@ use overlay_ui::ui_icons::UiIcons;
 /// Le catalogue des planches — assez d'objets pour que la recherche « tofu » rende un panneau
 /// crédible, et deux monstres pour que la bande de filtres porte son bouton « Monstres ».
 ///
-/// `[id, fr, en, es, pt, gfxId, rarity_sort, has_recipe, category_sort]` pour les objets,
-/// `[id, fr, en, es, pt, gfxId, family, isBoss, isArchi, isDominant]` pour les monstres.
+/// `[id, fr, gfxId, rarity_sort, has_recipe, category_sort]` pour les objets,
+/// `[id, fr, gfxId, family, isBoss, isArchi, isDominant]` pour les monstres.
 fn catalogue() -> CatalogIndex {
-    CatalogIndex::from_compact_json(&serde_json::json!({
+    CatalogIndex::from_json(&serde_json::json!({
         "items": [
-            [201, "Plume de Tofu", "Tofu Feather", "Pluma", "Pena", 1201, 1, 0, 1],
-            [202, "Coiffe du Tofu", "Tofu Headgear", "Casco", "Elmo", 1202, 2, 1, 0],
-            [203, "Cape du Tofu", "Tofu Cape", "Capa", "Capa", 1203, 2, 1, 0],
-            [204, "Bec de Tofu", "Tofu Beak", "Pico", "Bico", 1204, 0, 0, 1],
-            [205, "Bois de Frêne", "Ash Wood", "Fresno", "Freixo", 1205, 0, 0, 1],
-            [206, "Pierre de Lune", "Moonstone", "Piedra", "Pedra", 1206, 4, 0, 1],
-            [207, "Griffe de Craqueleur", "Claw", "Garra", "Garra", 1207, 5, 0, 1],
-            [208, "Minerai de Fer", "Iron Ore", "Mineral", "Minerio", 1208, 0, 0, 1],
+            [201, "Plume de Tofu", 1201, 1, 0, 1],
+            [202, "Coiffe du Tofu", 1202, 2, 1, 0],
+            [203, "Cape du Tofu", 1203, 2, 1, 0],
+            [204, "Bec de Tofu", 1204, 0, 0, 1],
+            [205, "Bois de Frêne", 1205, 0, 0, 1],
+            [206, "Pierre de Lune", 1206, 4, 0, 1],
+            [207, "Griffe de Craqueleur", 1207, 5, 0, 1],
+            [208, "Minerai de Fer", 1208, 0, 0, 1],
         ],
         "monsters": [
-            [301, "Tofu", "Tofu", "Tofu", "Tofu", "2301", -1, 0, 0, 0],
-            [302, "Tofu Royal", "Royal Tofu", "Tofu Real", "Tofu Real", "2302", -1, 1, 0, 0],
-            [303, "Bouftou", "Gobball", "Jalato", "Jalato", "2303", -1, 0, 0, 0],
-            [304, "Chafer Élite", "Elite Chafer", "Chafer", "Chafer", "2304", -1, 0, 1, 0],
+            [301, "Tofu", "2301", -1, 0, 0, 0],
+            [302, "Tofu Royal", "2302", -1, 1, 0, 0],
+            [303, "Bouftou", "2303", -1, 0, 0, 0],
+            [304, "Chafer Élite", "2304", -1, 0, 1, 0],
         ],
     }))
 }

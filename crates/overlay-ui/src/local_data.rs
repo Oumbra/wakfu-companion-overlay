@@ -369,6 +369,34 @@ fn revoke_server_session_within(budget: std::time::Duration) {
     }
 }
 
+/// Les caches du référentiel que l'overlay téléchargeait de l'API du site jusqu'au 2026-11-27
+/// (catalogue, donjons, familles de monstres, serveurs de jeu) : le référentiel est désormais
+/// embarqué (`overlay_engine::referentiel`), ces fichiers ne sont plus jamais lus ni réécrits.
+const OBSOLETE_CACHES: [&str; 4] = [
+    "catalog-cache.json",
+    "dungeons-cache.json",
+    "monster-families-cache.json",
+    "game-servers-cache.json",
+];
+
+/// **Supprime les caches devenus inutiles** ([`OBSOLETE_CACHES`], ~2 Mo) d'une installation
+/// antérieure au référentiel embarqué. Appelé à chaque démarrage par le thread Référentiel : sur
+/// une installation déjà nettoyée, ce ne sont que quatre fichiers absents. Best-effort, comme le
+/// reste de ce module : un échec est journalisé, rien d'autre.
+pub fn remove_obsolete_caches() {
+    let Some(dirs) = shared_dirs() else {
+        return;
+    };
+    let paths: Vec<PathBuf> = OBSOLETE_CACHES
+        .iter()
+        .map(|name| dirs.data_dir().join(name))
+        .collect();
+    let report = purge_paths(&paths);
+    if !report.removed.is_empty() || !report.failed.is_empty() {
+        tracing::info!(rapport = %report.summary(), "anciens caches du référentiel supprimés");
+    }
+}
+
 /// Supprime chaque chemin de `paths` — fichier ou dossier entier —, sans jamais s'arrêter au
 /// premier échec. Séparé de [`purge`] pour être testable sur un dossier temporaire : appelé avec
 /// [`targets`], il viserait les données réelles de la machine.
@@ -533,5 +561,26 @@ mod tests {
             !deconnexion.iter().any(|p| logs.starts_with(p)),
             "le dossier des journaux ne doit pas être supprimé à la déconnexion"
         );
+    }
+
+    /// Les anciens caches partent, un fichier voisin reste.
+    #[test]
+    fn les_caches_obsoletes_sont_supprimes_et_rien_d_autre() {
+        let data = shared_dirs().unwrap().data_dir().to_path_buf();
+        std::fs::create_dir_all(&data).unwrap();
+        for name in OBSOLETE_CACHES {
+            std::fs::write(data.join(name), "{}").unwrap();
+        }
+        let voisin = data.join("icons");
+        std::fs::create_dir_all(&voisin).unwrap();
+
+        remove_obsolete_caches();
+
+        for name in OBSOLETE_CACHES {
+            assert!(!data.join(name).exists(), "{name} devait partir");
+        }
+        assert!(voisin.exists(), "le cache d'icônes doit rester");
+        // Deuxième passage : rien à faire, aucune erreur.
+        remove_obsolete_caches();
     }
 }

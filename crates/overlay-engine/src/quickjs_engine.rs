@@ -499,11 +499,9 @@ mod tests {
     #[test]
     fn un_monstre_catalogue_nest_jamais_avale_par_le_repli_dinvocation() {
         let engine = LogParserEngine::new().expect("moteur QuickJS");
-        engine.set_catalog(Arc::new(CatalogIndex::from_compact_json(
-            &serde_json::json!({
-                "monsters": [[1, "Rocher", "Rock", "Roca", "Rocha", "999", -1, 0, 0, 0]],
-            }),
-        )));
+        engine.set_catalog(Arc::new(CatalogIndex::from_json(&serde_json::json!({
+            "monsters": [[1, "Rocher", "999", -1, 0, 0, 0]],
+        }))));
         let entries = engine
             .parse_lines(&lignes_sorhon_rocher())
             .expect("parsing");

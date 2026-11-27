@@ -57,7 +57,6 @@
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -71,8 +70,8 @@ use overlay_sync::update::{apply as update_apply, UpdateStatus};
 use overlay_ui::alert_sound;
 use overlay_ui::avatars::AvatarAtlas;
 use overlay_ui::background::{
-    spawn_auth_thread, spawn_catalog_thread, spawn_dungeon_thread, spawn_game_servers_thread,
-    spawn_sync_thread, spawn_update_thread, UpdateCommand,
+    spawn_auth_thread, spawn_referentiel_thread, spawn_sync_thread, spawn_update_thread,
+    UpdateCommand,
 };
 use overlay_ui::build_info;
 use overlay_ui::chat_command::{self, ChatCommand};
@@ -715,7 +714,7 @@ struct App {
     /// `engine_thread::SharedRosterDraft`).
     roster_draft: SharedRosterDraft,
     /// Les serveurs de jeu proposés par le sélecteur de ce même onglet — voir
-    /// `background::spawn_game_servers_thread`.
+    /// `GameServers::embedded`.
     game_servers: Arc<ArcSwap<GameServers>>,
     /// Réglages de la carte d'alerte de chat EN VIGUEUR (durée, fermeture manuelle) — lus de la
     /// config locale au démarrage, réécrits à la validation de l'onglet « Chat ».
@@ -729,17 +728,10 @@ struct App {
     /// thread Engine : c'est lui qui décide s'il y a une célébration à jouer et un retrait à
     /// envoyer (voir `panels::suivi_tab::CompletionSettings`).
     completion: suivi_tab::CompletionSettings,
-    /// Publié par le thread Catalogue (`spawn_catalog_thread`) — d'abord depuis le cache disque
-    /// (rapide, hors-ligne), puis réécrasé si le réseau confirme un contenu différent (voir
-    /// `overlay_sync::catalog_cache`). Vide (`CatalogIndex::default`) tant que rien n'a encore pu
-    /// être chargé — les tuiles du panneau Suivi retombent alors sur l'icône générique.
+    /// Publié par le thread Référentiel (`spawn_referentiel_thread`) depuis le référentiel
+    /// embarqué. Vide (`CatalogIndex::default`) le temps de son analyse au lancement — les tuiles
+    /// du panneau Suivi retombent alors sur l'icône générique.
     catalog: Arc<ArcSwap<CatalogIndex>>,
-    /// `true` quand `catalog` provient du repli hors-ligne EMBARQUÉ (`spawn_catalog_thread`,
-    /// §7.4 du plan) — ni cache disque ni réseau disponibles au démarrage. Pilote le petit
-    /// indicateur « catalogue daté » de la zone Combat (voir `render`) : ce n'était encore qu'un
-    /// `tracing::warn!` invisible en jeu avant ce lot (retour utilisateur : rien ne signale à
-    /// l'écran que les icônes/classements affichés peuvent dater du dernier build embarqué).
-    catalog_stale: Arc<AtomicBool>,
     /// Un seul thread/état de téléchargement d'icônes PARTAGÉ par toutes les fenêtres (voir
     /// `remote_icons::RemoteIconStore`) — chaque fenêtre garde son propre cache de textures déjà
     /// uploadées (`OverlayWindow::remote_icon_textures`), mais ne retélécharge jamais une icône
@@ -1058,7 +1050,6 @@ struct AppState {
     /// (`config::OverlayConfig::recap_locked`).
     recap_locked: bool,
     catalog: Arc<ArcSwap<CatalogIndex>>,
-    catalog_stale: Arc<AtomicBool>,
     remote_icons: RemoteIconStore,
     auth_status: Arc<ArcSwap<AuthStatus>>,
     auth_command_tx: mpsc::Sender<AuthCommand>,
@@ -1112,7 +1103,6 @@ impl App {
             watchlist_vertical,
             recap_locked,
             catalog,
-            catalog_stale,
             remote_icons,
             auth_status,
             auth_command_tx,
@@ -1159,7 +1149,6 @@ impl App {
             countdown_toast,
             completion,
             catalog,
-            catalog_stale,
             remote_icons,
             auth_status,
             auth_command_tx,
@@ -3862,8 +3851,8 @@ impl App {
     /// Résout les ingrédients d'une recette pour la fenêtre de l'onglet « Suivi » — sur un thread,
     /// jamais sur la boucle winit (§7.3 du plan).
     ///
-    /// Un aller-retour par NIVEAU de recette (`GET /api/v1/items/{id}`) : c'est pourquoi la fenêtre
-    /// s'ouvre avant la réponse et montre un rouage en attendant.
+    /// Le référentiel embarqué rend la résolution quasi instantanée ; le thread reste pour ne jamais
+    /// bloquer la boucle sur une recette profonde, et la fenêtre garde son rouage d'attente.
     fn start_recipe_resolution(&mut self, options_window_id: WindowId, item_id: i64) {
         let (tx, rx) = mpsc::channel();
         self.pending_recipe = Some((options_window_id, rx));
@@ -3872,8 +3861,7 @@ impl App {
             .name("overlay-ui-recipe".into())
             .spawn(move || {
                 let index = catalog.load();
-                let mut fetch = |id: i64| overlay_sync::client::fetch_item_detail(id).ok();
-                let ingredients = overlay_engine::resolve_recipe(item_id, &index, &mut fetch);
+                let ingredients = overlay_engine::resolve_recipe(item_id, &index);
                 tracing::info!(
                     item_id,
                     ingredient_count = ingredients.len(),
@@ -4986,7 +4974,6 @@ impl App {
                 watchlist_counter_edit: self.watchlist_counter_edit.as_mut(),
                 watchlist_toast,
                 catalog: &catalog,
-                catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
                 remote_icons: &self.remote_icons,
                 remote_icon_textures: &mut overlay.remote_icon_textures,
                 auth_status: &auth_status,
@@ -6270,13 +6257,10 @@ fn main() {
     let alert_profile = Arc::new(ArcSwap::from_pointee(None));
     let chat_filters: SharedChatFilters = Arc::new(ArcSwap::from_pointee(None));
     let roster_draft: SharedRosterDraft = Arc::new(ArcSwap::from_pointee(None));
-    // Les serveurs de jeu ne sont pas un jalon de démarrage : voir la doc du thread.
     let game_servers: Arc<ArcSwap<GameServers>> =
-        Arc::new(ArcSwap::from_pointee(GameServers::default()));
-    spawn_game_servers_thread(Arc::clone(&game_servers));
+        Arc::new(ArcSwap::from_pointee(GameServers::embedded()));
     let roster: overlay_ui::engine_thread::SharedRoster = Arc::new(ArcSwap::from_pointee(None));
     let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
-    let catalog_stale = Arc::new(AtomicBool::new(false));
     let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
     let auth_status = Arc::new(ArcSwap::from_pointee(AuthStatus::Connecting));
     let startup = Arc::new(StartupProgress::new());
@@ -6297,13 +6281,12 @@ fn main() {
         auth_command_rx,
         proxy.clone(),
     );
-    spawn_catalog_thread(
+    spawn_referentiel_thread(
         Arc::clone(&catalog),
-        Arc::clone(&catalog_stale),
+        Arc::clone(&dungeons),
         Arc::clone(&startup),
         proxy.clone(),
     );
-    spawn_dungeon_thread(Arc::clone(&dungeons), Arc::clone(&startup), proxy.clone());
     // Mise à jour automatique (2026-09-15, `docs/plan-mise-a-jour.md` §7) : la vérification part
     // tout de suite, derrière l'écran de chargement ; avec « Installer automatiquement » coché,
     // une version plus récente est installée avant d'ouvrir le moindre overlay de jeu.
@@ -6409,7 +6392,6 @@ fn main() {
         watchlist_vertical: saved_config.watchlist_vertical,
         recap_locked: saved_config.recap_locked,
         catalog,
-        catalog_stale,
         remote_icons,
         auth_status,
         auth_command_tx,

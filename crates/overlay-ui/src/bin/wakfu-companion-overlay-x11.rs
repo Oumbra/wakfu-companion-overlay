@@ -60,7 +60,6 @@ mod linux_main {
     use std::collections::HashMap;
     use std::env;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use std::sync::Arc;
     use std::thread;
@@ -75,8 +74,8 @@ mod linux_main {
     use overlay_sync::update::{apply as update_apply, UpdateStatus};
     use overlay_ui::avatars::AvatarAtlas;
     use overlay_ui::background::{
-        spawn_auth_thread, spawn_catalog_thread, spawn_dungeon_thread, spawn_sync_thread,
-        spawn_update_thread, UpdateCommand,
+        spawn_auth_thread, spawn_referentiel_thread, spawn_sync_thread, spawn_update_thread,
+        UpdateCommand,
     };
     use overlay_ui::build_info;
     use overlay_ui::chat_command::{self, ChatCommand};
@@ -275,8 +274,6 @@ mod linux_main {
         /// compteur (2026-10-05).
         watchlist_counter_edit: Option<panels::counter_edit::CounterEditState>,
         catalog: Arc<ArcSwap<CatalogIndex>>,
-        /// Voir `main.rs::App::catalog_stale` — indicateur « catalogue daté » de la zone Combat.
-        catalog_stale: Arc<AtomicBool>,
         remote_icons: RemoteIconStore,
         /// Publié par le thread Auth (`overlay_ui::background::spawn_auth_thread`) — pilote la
         /// fenêtre de connexion et l'existence même des overlays de jeu.
@@ -298,7 +295,7 @@ mod linux_main {
         /// `engine_thread::SharedRosterDraft`.
         roster_draft: SharedRosterDraft,
         /// Les serveurs de jeu proposés par le sélecteur du même onglet — voir
-        /// `background::spawn_game_servers_thread`.
+        /// `GameServers::embedded`.
         game_servers: Arc<ArcSwap<GameServers>>,
         /// Voir la doc de `AppState::settings_tx` — permet à `validate_and_commit_options`
         /// d'envoyer `EngineCommand::ChangeLogPath` sans redémarrer tout le binaire.
@@ -661,7 +658,6 @@ mod linux_main {
         watchlist: Arc<ArcSwap<Vec<WatchlistEntry>>>,
         watchlist_toast: Arc<ArcSwap<Option<WatchlistToast>>>,
         catalog: Arc<ArcSwap<CatalogIndex>>,
-        catalog_stale: Arc<AtomicBool>,
         remote_icons: RemoteIconStore,
         auth_status: Arc<ArcSwap<AuthStatus>>,
         auth_command_tx: mpsc::Sender<AuthCommand>,
@@ -714,7 +710,6 @@ mod linux_main {
                 watchlist,
                 watchlist_toast,
                 catalog,
-                catalog_stale,
                 remote_icons,
                 auth_status,
                 auth_command_tx,
@@ -750,7 +745,6 @@ mod linux_main {
                 watchlist,
                 watchlist_toast,
                 catalog,
-                catalog_stale,
                 remote_icons,
                 auth_status,
                 auth_command_tx,
@@ -2288,8 +2282,7 @@ mod linux_main {
                 .name("overlay-ui-recipe".into())
                 .spawn(move || {
                     let index = catalog.load();
-                    let mut fetch = |id: i64| overlay_sync::client::fetch_item_detail(id).ok();
-                    let ingredients = overlay_engine::resolve_recipe(item_id, &index, &mut fetch);
+                    let ingredients = overlay_engine::resolve_recipe(item_id, &index);
                     tracing::info!(
                         item_id,
                         ingredient_count = ingredients.len(),
@@ -3516,7 +3509,6 @@ mod linux_main {
                             watchlist_counter_edit: self.watchlist_counter_edit.as_mut(),
                             watchlist_toast,
                             catalog: &catalog,
-                            catalog_stale: self.catalog_stale.load(Ordering::Relaxed),
                             remote_icons: &self.remote_icons,
                             remote_icon_textures: &mut overlay.remote_icon_textures,
                             auth_status: &auth_status,
@@ -4559,15 +4551,12 @@ mod linux_main {
         let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
         let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
         let catalog = Arc::new(ArcSwap::from_pointee(CatalogIndex::default()));
-        let catalog_stale = Arc::new(AtomicBool::new(false));
         let dungeons = Arc::new(ArcSwap::from_pointee(DungeonIndex::default()));
         let alert_profile: SharedAlertProfile = Arc::new(ArcSwap::from_pointee(None));
         let chat_filters: SharedChatFilters = Arc::new(ArcSwap::from_pointee(None));
         let roster_draft: SharedRosterDraft = Arc::new(ArcSwap::from_pointee(None));
-        // Les serveurs de jeu ne sont pas un jalon de démarrage : voir la doc du thread.
         let game_servers: Arc<ArcSwap<GameServers>> =
-            Arc::new(ArcSwap::from_pointee(GameServers::default()));
-        overlay_ui::background::spawn_game_servers_thread(Arc::clone(&game_servers));
+            Arc::new(ArcSwap::from_pointee(GameServers::embedded()));
         // Publié par le thread Engine pour la surveillance de tour — sans effet sous X11 pour
         // l'instant (voir `turn_notification`), mais le thread l'attend.
         let roster: overlay_ui::engine_thread::SharedRoster = Arc::new(ArcSwap::from_pointee(None));
@@ -4584,7 +4573,7 @@ mod linux_main {
             .expect("création de l'event loop");
         let proxy = event_loop.create_proxy();
         // Les mêmes threads de fond que Windows (`overlay_ui::background`, 2026-09-14) : compte,
-        // synchro, catalogue, donjons, icônes réseau.
+        // synchro, référentiel embarqué, icônes réseau.
         let (settings_tx, settings_rx) = mpsc::channel();
         let (auth_command_tx, auth_command_rx) = mpsc::channel();
         let (sync_tx, sync_rx) = mpsc::channel();
@@ -4596,13 +4585,12 @@ mod linux_main {
             auth_command_rx,
             proxy.clone(),
         );
-        spawn_catalog_thread(
+        spawn_referentiel_thread(
             Arc::clone(&catalog),
-            Arc::clone(&catalog_stale),
+            Arc::clone(&dungeons),
             Arc::clone(&startup),
             proxy.clone(),
         );
-        spawn_dungeon_thread(Arc::clone(&dungeons), Arc::clone(&startup), proxy.clone());
         // Mise à jour automatique (2026-09-15, `docs/plan-mise-a-jour.md` §7) : la vérification part
         // tout de suite, derrière l'écran de chargement ; avec « Installer automatiquement » coché,
         // une version plus récente est installée avant d'ouvrir le moindre overlay de jeu.
@@ -4700,7 +4688,6 @@ mod linux_main {
             watchlist,
             watchlist_toast,
             catalog,
-            catalog_stale,
             remote_icons,
             auth_status,
             auth_command_tx,

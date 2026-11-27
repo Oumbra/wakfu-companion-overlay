@@ -4,10 +4,9 @@
 //! de son id (`catalog::CatalogIndex::find_monster_family_id`) — sert au même futur consommateur
 //! que `dungeon.rs` (panneau conscient du donjon/de la famille, pas encore construit).
 //!
-//! Source : `GET /api/v1/monster-families` (voir `overlay_sync::client::fetch_monster_families`),
-//! réponse `Vec<{id, fr, en, es, pt, pictureUrl: string|null}>` (voir `functions/api/v1/
-//! monster-families.ts`) — même remarque que `dungeon.rs` : un tableau d'objets complets, pas des
-//! tuples compacts (volume négligeable, ~150 lignes).
+//! Source : la section `monsterFamilies` du référentiel embarqué (voir [`crate::referentiel`]),
+//! `Vec<{id, fr, picture: string|null}>` — même remarque que `dungeon.rs` : un tableau d'objets
+//! complets, pas des tuples compacts (~150 lignes).
 
 use std::collections::HashMap;
 
@@ -17,22 +16,15 @@ use serde::Deserialize;
 struct RawMonsterFamilyRow {
     id: i64,
     fr: String,
-    en: String,
-    es: String,
-    pt: String,
 }
 
-/// Une famille de monstre résolue — mêmes remarques que `DungeonEntry` (4 locales toutes
-/// disponibles, pas de sélection ici faute d'i18n overlay). `picture_url` (référentiel curé à la
-/// main côté serveur, pas garanti pour toute famille — voir `server/db/schema.ts`) volontairement
-/// absent : aucun consommateur overlay n'affiche encore d'illustration de famille.
+/// Une famille de monstre résolue — nom en français seulement. `picture` (pas garanti pour toute
+/// famille) volontairement absent : aucun consommateur overlay n'affiche encore d'illustration de
+/// famille.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MonsterFamilyEntry {
     pub id: i64,
     pub fr: String,
-    pub en: String,
-    pub es: String,
-    pub pt: String,
 }
 
 /// Index en RAM des familles de monstres — O(1) par id, même politique de tolérance aux lignes mal
@@ -53,9 +45,6 @@ impl MonsterFamilyIndex {
                 MonsterFamilyEntry {
                     id: row.id,
                     fr: row.fr,
-                    en: row.en,
-                    es: row.es,
-                    pt: row.pt,
                 },
             );
         }

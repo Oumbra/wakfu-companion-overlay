@@ -3,21 +3,20 @@
 //! pour résoudre une icône réelle d'objet/monstre suivi dans le panneau Suivi (retour utilisateur
 //! 2026-09-02 : « comme les images de ressources/monstres n'est pas présent c'est très compliqué
 //! pour l'utilisateur » de distinguer les tuiles entre elles avec la même icône générique
-//! partout), étendu depuis à la résolution de la recette (`find_item_has_recipe`) et du classement
-//! boss/archimonstre/dominant d'un monstre (`find_monster_classification`, voir
-//! `MonsterClassification`) — la résolution des DONJONS et des FAMILLES DE MONSTRES par elles-mêmes
-//! (noms localisés, pas seulement l'id de famille d'un monstre) vit dans `dungeon.rs`/
-//! `monster_family.rs`, deux modules frères plutôt qu'ici (formats serveur différents — tableaux
-//! d'objets complets, pas des tuples compacts, voir leur doc de tête).
+//! partout), étendu depuis à la résolution de la recette (`find_item_has_recipe`, [`CatalogIndex::
+//! recipe`]) et du classement boss/archimonstre/dominant d'un monstre (`find_monster_classification`,
+//! voir `MonsterClassification`) — la résolution des DONJONS et des FAMILLES DE MONSTRES vit dans
+//! `dungeon.rs`/`monster_family.rs`.
 //!
-//! Pas d'IO ici, comme `roster.rs`/`watchlist.rs` : `CatalogIndex::from_compact_json` prend un
-//! `serde_json::Value` déjà récupéré par `overlay-sync` (voir `client::fetch_catalog_index`,
-//! format documenté par `server/catalog/compact-index.ts` côté `wakfu-companion` — tuples, PAS
-//! d'objets à clés répétées, ~1,14 Mo bruts / ~348 Ko gzip pour ~11 700 entrées).
+//! **Référentiel embarqué, français seul (2026-11-27, `docs/plan-historique-local.md` §4)** : le
+//! catalogue ne vient plus de `GET /api/v1/catalog/` mais de `assets/referentiel.json`, généré par
+//! `tools/referentiel` depuis les JSON du dépôt web, avec les mêmes règles que l'index compact du
+//! serveur (voir [`crate::referentiel`]). Les noms en/es/pt ont disparu : le parseur ne lit que des
+//! logs en français.
+//!
+//! Pas d'IO ici : `CatalogIndex::from_json` prend un `serde_json::Value` déjà lu.
 
 use std::collections::HashMap;
-
-use serde::Deserialize;
 
 use crate::roster::normalize_wakfu_name;
 
@@ -85,11 +84,10 @@ impl IconRef {
 
     /// Le chemin de la source principale de l'icône, relatif à l'origine des icônes
     /// (`items/1234.png`) — le premier élément de [`Self::image_paths`], seul chemin à essayer
-    /// pour tout ce qui n'est pas un monstre. C'est le chemin **`wakassets`**, que l'API relaie
-    /// tel quel (`GET /api/v1/icons/{folder}/{gfxId}.png`, voir `overlay_sync::client::icon_url`) :
-    /// depuis le 2026-09-19 l'overlay ne parle plus à `vertylo.github.io` lui-même (constat C10 de
-    /// `docs/analyse-rgpd.md` — l'adresse IP de l'utilisateur et la liste des icônes qu'il demande
-    /// ne sortent plus vers GitHub Pages). Sert aussi de nom lisible dans le journal et les tests.
+    /// pour tout ce qui n'est pas un monstre. C'est le chemin **`wakassets`**, repris à
+    /// l'identique par le CDN de l'overlay pour les images qui y manquent (voir
+    /// `overlay_sync::client::icon_urls` — depuis le 2026-11-27, plus de relais par l'API du site,
+    /// `docs/plan-historique-local.md` §5). Sert aussi de nom lisible dans le journal et les tests.
     pub fn image_path(&self) -> String {
         format!("{}/{}.png", self.primary_folder(), self.gfx_id)
     }
@@ -278,31 +276,56 @@ fn rarity_from_sort_order(order: i64) -> WakfuRarity {
     }
 }
 
-/// Un tuple positionnel de `data["items"]` — `[id, fr, en, es, pt, gfxId, raritySortOrder,
-/// hasRecipe(0|1), categorySortOrder]` (voir `server/catalog/compact-index.ts` côté
-/// `wakfu-companion`, dont l'arité DOIT rester en phase avec cette struct).
-///
-/// Les neuf champs sont désormais tous exploités — `categorySortOrder` était le dernier à ne
-/// servir qu'à faire consommer le tuple entier par serde ; il alimente maintenant
-/// [`CatalogIndex::find_item_category`].
-#[derive(Debug, Clone, Deserialize)]
-struct RawItemRow(i64, String, String, String, String, i64, i64, i64, i64);
+/// Lit un tuple positionnel d'objet — `[id, fr, gfxId, raritySortOrder, hasRecipe(0|1),
+/// categorySortOrder]` (format écrit par `tools/referentiel`, voir sa doc). `None` pour une ligne
+/// mal formée, ignorée plutôt que de faire échouer tout le chargement.
+fn parse_item_row(row: &serde_json::Value) -> Option<(i64, String, String, i64, i64, i64)> {
+    let row = row.as_array()?;
+    Some((
+        row.first()?.as_i64()?,
+        row.get(1)?.as_str()?.to_string(),
+        gfx_text(row.get(2)?)?,
+        row.get(3)?.as_i64()?,
+        row.get(4)?.as_i64()?,
+        row.get(5)?.as_i64()?,
+    ))
+}
 
-/// Miroir de `RawItemRow` pour `data["monsters"]` — `[id, fr, en, es, pt, gfxId, family(-1 si
-/// null), isBoss(0|1), isArchi(0|1), isDominant(0|1)]`.
-#[derive(Debug, Clone, Deserialize)]
-struct RawMonsterRow(
-    i64,
-    String,
-    String,
-    String,
-    String,
-    String,
-    i64,
-    i64,
-    i64,
-    i64,
-);
+/// Un monstre lu dans le référentiel — voir [`parse_monster_row`].
+struct MonsterRow {
+    id: i64,
+    name: String,
+    gfx_id: String,
+    family: i64,
+    is_boss: bool,
+    is_archi: bool,
+    is_dominant: bool,
+}
+
+/// Lit un tuple positionnel de monstre — `[id, fr, gfxId, family(-1 si aucune), isBoss(0|1),
+/// isArchi(0|1), isDominant(0|1)]`.
+fn parse_monster_row(row: &serde_json::Value) -> Option<MonsterRow> {
+    let row = row.as_array()?;
+    Some(MonsterRow {
+        id: row.first()?.as_i64()?,
+        name: row.get(1)?.as_str()?.to_string(),
+        gfx_id: gfx_text(row.get(2)?)?,
+        family: row.get(3)?.as_i64()?,
+        is_boss: row.get(4)?.as_i64()? != 0,
+        is_archi: row.get(5)?.as_i64()? != 0,
+        is_dominant: row.get(6)?.as_i64()? != 0,
+    })
+}
+
+/// Un `gfxId` est numérique pour un objet, textuel pour un monstre : les deux se lisent, seule la
+/// forme texte sert (interpolée dans une URL).
+fn gfx_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
 
 /// Classement d'un monstre au sein de son combat — miroir (partiel) de la priorité utilisée par
 /// `resolveFightTypeClassification` (`fight-image.util.ts`) : `boss > archimonstre > dominant`.
@@ -325,6 +348,8 @@ pub enum MonsterClassification {
 #[derive(Clone)]
 struct ItemEntry {
     id: i64,
+    /// Nom fr, tel qu'il s'écrit — celui d'un ingrédient de recette (voir [`CatalogIndex::recipe`]).
+    name: String,
     icon: IconRef,
     rarity: WakfuRarity,
     has_recipe: bool,
@@ -361,33 +386,32 @@ impl MonsterEntry {
 #[derive(Default)]
 pub struct CatalogIndex {
     items_by_id: HashMap<i64, ItemEntry>,
-    /// Nom `fr` prioritaire — un objet homonyme dans une autre langue écraserait sinon le nom
-    /// français au chargement (l'index est construit dans l'ordre `items`, une seule passe) ; en
-    /// pratique la distinction ne joue que si le NOM (normalisé) est identique entre deux entrées
-    /// différentes, cas limite déjà accepté tel quel côté web (`findWakfuItemEntry`, « renvoie une
-    /// seule entrée arbitrairement »).
+    /// Par nom fr normalisé — deux objets homonymes : le premier (id le plus bas) gagne, cas
+    /// limite déjà accepté tel quel côté web (`findWakfuItemEntry`, « renvoie une seule entrée
+    /// arbitrairement »).
     items_by_name: HashMap<String, ItemEntry>,
     monsters_by_id: HashMap<i64, MonsterEntry>,
-    /// Même priorité `fr` qu'`items_by_name` ci-dessus, même raison.
+    /// Même règle qu'`items_by_name` ci-dessus.
     monsters_by_name: HashMap<String, MonsterEntry>,
     /// **Les objets dans l'ordre où ils se cherchent**, pour [`CatalogIndex::search_items`].
     ///
-    /// Les deux `HashMap` ci-dessus ne peuvent pas servir : elles ne gardent aucun nom
-    /// d'affichage (la clé est normalisée, sans accent ni majuscule) et portent les quatre
-    /// langues mélangées, donc quatre fois le même objet. Un champ d'autocomplétion a besoin du
-    /// nom tel qu'il s'écrit.
+    /// Les deux `HashMap` ci-dessus ne peuvent pas servir : leur clé est normalisée (sans accent
+    /// ni majuscule) et ne garde qu'un objet par nom. Un champ d'autocomplétion a besoin du nom tel
+    /// qu'il s'écrit.
     ///
     /// Trié une fois à la construction, par nom : la recherche parcourt dans l'ordre et sort dès
     /// qu'elle a sa limite — le tri n'est pas refait à chaque frappe.
     searchable_items: Vec<SearchableItem>,
     /// **Les monstres dans l'ordre où ils se cherchent**, pour [`CatalogIndex::search_monsters`] —
-    /// pendant exact de [`CatalogIndex::searchable_items`], et pour les mêmes raisons : les deux
-    /// `HashMap` de monstres ne gardent aucun nom d'affichage et mélangent les quatre langues.
+    /// pendant exact de [`CatalogIndex::searchable_items`], et pour les mêmes raisons.
     ///
     /// Écrit pour le champ d'ajout de l'onglet « Suivi », qui cherche « objets ET monstres » là où
     /// celui des alertes ne cherchait que des objets (`domain="both"` contre `domain="item"` côté
     /// web).
     searchable_monsters: Vec<SearchableItem>,
+    /// Ingrédients de chaque objet craftable — `(id de l'ingrédient, quantité)`, dans l'ordre du
+    /// référentiel. Remplace `GET /api/v1/items/{id}` (voir `recipe.rs`).
+    recipes: HashMap<i64, Vec<(i64, i64)>>,
 }
 
 /// Un objet tel que le champ d'ajout d'alerte le cherche — voir
@@ -428,50 +452,43 @@ pub struct MonsterSuggestion {
 }
 
 impl CatalogIndex {
-    /// Construit l'index depuis `{ items: [...], monsters: [...] }` — la réponse de
-    /// `GET /api/v1/catalog/` telle quelle (voir `client::fetch_catalog_index`). Une ligne mal
-    /// formée (tuple incomplet/type inattendu) est silencieusement ignorée plutôt que de faire
-    /// échouer tout le chargement — un catalogue partiel (repli sur l'icône générique pour les
-    /// entrées manquantes) reste préférable à aucun catalogue du tout.
-    pub fn from_compact_json(data: &serde_json::Value) -> Self {
+    /// Construit l'index depuis `{ items: [...], monsters: [...], recipes: [...] }` — le
+    /// référentiel embarqué (voir [`crate::referentiel`]), ou un extrait dans les tests. Une ligne
+    /// mal formée est silencieusement ignorée plutôt que de faire échouer tout le chargement — un
+    /// catalogue partiel (repli sur l'icône générique pour les entrées manquantes) reste
+    /// préférable à aucun catalogue du tout.
+    pub fn from_json(data: &serde_json::Value) -> Self {
         let mut index = Self::default();
+        let rows = |key: &str| {
+            data.get(key)
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+        };
 
-        let raw_items: Vec<RawItemRow> = data
-            .get("items")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-        for RawItemRow(
-            id,
-            fr,
-            en,
-            es,
-            pt,
-            gfx_id,
-            rarity_sort_order,
-            has_recipe,
-            category_sort_order,
-        ) in raw_items
+        for (id, name, gfx_id, rarity_sort_order, has_recipe, category_sort_order) in
+            rows("items").iter().filter_map(parse_item_row)
         {
             let entry = ItemEntry {
                 id,
+                name: name.clone(),
                 icon: IconRef {
                     kind: IconKind::Item,
-                    gfx_id: gfx_id.to_string(),
+                    gfx_id,
                 },
                 rarity: rarity_from_sort_order(rarity_sort_order),
                 has_recipe: has_recipe != 0,
                 category: WakfuItemCategory::from_sort_order(category_sort_order),
             };
-            for name in [&fr, &en, &es, &pt] {
-                index
-                    .items_by_name
-                    .entry(normalize_wakfu_name(name))
-                    .or_insert_with(|| entry.clone());
-            }
+            let normalized = normalize_wakfu_name(&name);
+            index
+                .items_by_name
+                .entry(normalized.clone())
+                .or_insert_with(|| entry.clone());
             index.searchable_items.push(SearchableItem {
                 id,
-                normalized: normalize_wakfu_name(&fr),
-                name: fr,
+                normalized,
+                name,
             });
             index.items_by_id.insert(id, entry);
         }
@@ -483,42 +500,70 @@ impl CatalogIndex {
             .searchable_items
             .sort_unstable_by(|a, b| a.normalized.cmp(&b.normalized));
 
-        let raw_monsters: Vec<RawMonsterRow> = data
-            .get("monsters")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-        for RawMonsterRow(id, fr, en, es, pt, gfx_id, family, is_boss, is_archi, is_dominant) in
-            raw_monsters
-        {
+        for row in rows("monsters").iter().filter_map(parse_monster_row) {
             let entry = MonsterEntry {
-                id,
+                id: row.id,
                 icon: IconRef {
                     kind: IconKind::Monster,
-                    gfx_id,
+                    gfx_id: row.gfx_id,
                 },
-                family_id: (family != -1).then_some(family),
-                is_boss: is_boss != 0,
-                is_archi: is_archi != 0,
-                is_dominant: is_dominant != 0,
+                family_id: (row.family != -1).then_some(row.family),
+                is_boss: row.is_boss,
+                is_archi: row.is_archi,
+                is_dominant: row.is_dominant,
             };
-            for name in [&fr, &en, &es, &pt] {
-                index
-                    .monsters_by_name
-                    .entry(normalize_wakfu_name(name))
-                    .or_insert_with(|| entry.clone());
-            }
+            let normalized = normalize_wakfu_name(&row.name);
+            index
+                .monsters_by_name
+                .entry(normalized.clone())
+                .or_insert_with(|| entry.clone());
             index.searchable_monsters.push(SearchableItem {
-                id,
-                normalized: normalize_wakfu_name(&fr),
-                name: fr,
+                id: row.id,
+                normalized,
+                name: row.name,
             });
-            index.monsters_by_id.insert(id, entry);
+            index.monsters_by_id.insert(row.id, entry);
         }
         index
             .searchable_monsters
             .sort_unstable_by(|a, b| a.normalized.cmp(&b.normalized));
 
+        // `[itemId, [[ingredientId, quantité], …]]`.
+        for row in rows("recipes") {
+            let Some((id, ingredients)) = row
+                .as_array()
+                .and_then(|row| Some((row.first()?.as_i64()?, row.get(1)?.as_array()?)))
+            else {
+                continue;
+            };
+            let ingredients = ingredients
+                .iter()
+                .filter_map(|ingredient| {
+                    let ingredient = ingredient.as_array()?;
+                    Some((
+                        ingredient.first()?.as_i64()?,
+                        ingredient
+                            .get(1)
+                            .and_then(serde_json::Value::as_i64)
+                            .unwrap_or(1),
+                    ))
+                })
+                .collect();
+            index.recipes.insert(id, ingredients);
+        }
+
         index
+    }
+
+    /// Ingrédients de l'objet `id` — `(id de l'ingrédient, quantité)`, vide si l'objet n'a pas de
+    /// recette. Miroir du champ `recipe` de `GET /api/v1/items/{id}` côté web.
+    pub fn recipe(&self, id: i64) -> &[(i64, i64)] {
+        self.recipes.get(&id).map_or(&[], Vec::as_slice)
+    }
+
+    /// Nom fr d'un objet par id — `None` s'il n'est pas au référentiel.
+    pub fn item_name(&self, id: i64) -> Option<&str> {
+        self.items_by_id.get(&id).map(|entry| entry.name.as_str())
     }
 
     /// Les objets dont le nom **contient** la requête, triés par nom.
@@ -631,12 +676,9 @@ impl CatalogIndex {
         self.items_by_name.get(&normalize_wakfu_name(name))
     }
 
-    /// A-t-il une recette de craft ? Miroir du booléen `hasRecipe` de l'index compact (`server/
-    /// catalog/compact-index.ts`), lui-même reflétant `WakfuItemRow.hasRecipe` — un simple drapeau,
-    /// pas la recette elle-même (ingrédients/quantités), que l'index compact n'embarque volontairement
-    /// pas (voir sa doc de tête côté `wakfu-companion` : alourdirait l'index pour un besoin qu'aucun
-    /// panneau de l'overlay ne couvre encore, §9 du plan). `false` pour un objet non résolu, comme
-    /// `find_item_rarity`.
+    /// A-t-il une recette de craft ? Miroir du booléen `hasRecipe` du référentiel — le drapeau
+    /// seul ; les ingrédients se lisent par [`CatalogIndex::recipe`]. `false` pour un objet non
+    /// résolu, comme `find_item_rarity`.
     pub fn find_item_has_recipe(&self, name: &str, catalog_id: Option<i64>) -> bool {
         self.find_item_entry(name, catalog_id)
             .is_some_and(|entry| entry.has_recipe)
@@ -721,26 +763,30 @@ mod tests {
         serde_json::json!({
             "items": [
                 // raritySortOrder=2 -> "rare" (voir rarity_from_sort_order). hasRecipe=0.
-                [24029, "Larme d'Ogrest", "Ogrest's Tear", "Lágrima de Ogrest", "Lágrima de Ogrest", 1234, 2, 0, 1],
+                [24029, "Larme d'Ogrest", 1234, 2, 0, 1],
                 // hasRecipe=1 — objet craftable, voir find_item_has_recipe.
-                [9001, "Pain de Craqueleur", "Craqueleur Bread", "Pan de Craqueleur", "Pão de Craqueleur", 4321, 1, 1, 6],
+                [9001, "Pain de Craqueleur", 4321, 1, 1, 6],
             ],
             "monsters": [
                 // isBoss=1, pas de famille (-1).
-                [24875, "El Pochito", "El Pochito", "El Pochito", "El Pochito", "5421", -1, 1, 0, 0],
+                [24875, "El Pochito", "5421", -1, 1, 0, 0],
                 // family=42, isArchi=1.
-                [501, "Bwork Archi", "Bwork Archi", "Bwork Archi", "Bwork Archi", "9999", 42, 0, 1, 0],
+                [501, "Bwork Archi", "9999", 42, 0, 1, 0],
                 // family=42, isDominant=1 — même famille que le précédent, classement différent.
-                [502, "Bwork Dominant", "Bwork Dominant", "Bwork Dominant", "Bwork Dominant", "8888", 42, 0, 0, 1],
+                [502, "Bwork Dominant", "8888", 42, 0, 0, 1],
                 // aucun classement particulier ni famille.
-                [503, "Bwork Lambda", "Bwork Lambda", "Bwork Lambda", "Bwork Lambda", "7777", -1, 0, 0, 0],
+                [503, "Bwork Lambda", "7777", -1, 0, 0, 0],
+            ],
+            // Le Pain de Craqueleur se fait avec deux Larmes d'Ogrest et un ingrédient inconnu.
+            "recipes": [
+                [9001, [[24029, 2], [777, 1]]],
             ],
         })
     }
 
     #[test]
     fn resout_un_objet_par_id() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         let icon = index.find_item_icon("peu importe", Some(24029)).unwrap();
         assert_eq!(icon.kind, IconKind::Item);
         assert_eq!(icon.gfx_id, "1234");
@@ -748,14 +794,14 @@ mod tests {
 
     #[test]
     fn resout_un_objet_par_nom_insensible_a_la_casse_et_aux_accents() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         let icon = index.find_item_icon("larme d'ogrest", None).unwrap();
         assert_eq!(icon.gfx_id, "1234");
     }
 
     #[test]
     fn resout_la_rarete_dun_objet_par_id() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert_eq!(
             index.find_item_rarity("peu importe", Some(24029)),
             WakfuRarity::Rare
@@ -764,7 +810,7 @@ mod tests {
 
     #[test]
     fn objet_non_resolu_retombe_sur_la_rarete_commune() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert_eq!(
             index.find_item_rarity("Introuvable", None),
             WakfuRarity::Common
@@ -773,7 +819,7 @@ mod tests {
 
     #[test]
     fn resout_un_monstre_par_id_avec_un_gfx_id_texte() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         let icon = index.find_monster_icon("peu importe", Some(24875)).unwrap();
         assert_eq!(icon.kind, IconKind::Monster);
         assert_eq!(icon.gfx_id, "5421");
@@ -781,29 +827,56 @@ mod tests {
 
     #[test]
     fn resout_lid_dun_objet_par_nom_seul() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert_eq!(index.find_item_id("larme d'ogrest"), Some(24029));
         assert_eq!(index.find_item_id("Introuvable"), None);
     }
 
     #[test]
     fn resout_lid_dun_monstre_par_nom_seul() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert_eq!(index.find_monster_id("el pochito"), Some(24875));
         assert_eq!(index.find_monster_id("Introuvable"), None);
     }
 
     #[test]
     fn resout_le_drapeau_de_recette() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert!(index.find_item_has_recipe("peu importe", Some(9001)));
         assert!(!index.find_item_has_recipe("peu importe", Some(24029)));
         assert!(!index.find_item_has_recipe("Introuvable", None));
     }
 
     #[test]
+    fn lit_les_ingredients_dune_recette() {
+        let index = CatalogIndex::from_json(&sample());
+        assert_eq!(index.recipe(9001), &[(24029, 2), (777, 1)]);
+        assert!(index.recipe(24029).is_empty());
+        assert_eq!(index.item_name(24029), Some("Larme d'Ogrest"));
+        assert_eq!(index.item_name(777), None);
+    }
+
+    #[test]
+    fn une_ligne_mal_formee_est_ignoree_sans_perdre_les_autres() {
+        let index = CatalogIndex::from_json(&serde_json::json!({
+            "items": [
+                [1, "Complet", 10, 1, 0, 1],
+                [2, "Tronqué", 20],
+                "pas un tuple",
+                [3, "Gfx texte", "30", 2, 0, 1],
+            ],
+        }));
+        assert!(index.find_item_icon("complet", None).is_some());
+        assert!(index.find_item_icon("tronqué", None).is_none());
+        assert_eq!(
+            index.find_item_icon("gfx texte", None).unwrap().gfx_id,
+            "30"
+        );
+    }
+
+    #[test]
     fn classe_un_boss() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert_eq!(
             index.find_monster_classification("peu importe", Some(24875)),
             MonsterClassification::Boss
@@ -812,7 +885,7 @@ mod tests {
 
     #[test]
     fn classe_un_archimonstre_et_un_dominant_distinctement() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert_eq!(
             index.find_monster_classification("peu importe", Some(501)),
             MonsterClassification::Archi
@@ -825,7 +898,7 @@ mod tests {
 
     #[test]
     fn drapeau_archi_brut_reste_disponible_meme_derriere_un_classement_boss() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert!(index.find_monster_is_archi("peu importe", Some(501)));
         assert!(!index.find_monster_is_archi("peu importe", Some(502))); // dominant, pas archi
         assert!(!index.find_monster_is_archi("peu importe", Some(24875))); // boss, pas archi
@@ -834,7 +907,7 @@ mod tests {
 
     #[test]
     fn monstre_sans_classement_ni_famille_retombe_sur_none() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert_eq!(
             index.find_monster_classification("peu importe", Some(503)),
             MonsterClassification::None
@@ -848,7 +921,7 @@ mod tests {
 
     #[test]
     fn resout_lid_de_famille_dun_monstre_par_nom() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert_eq!(index.find_monster_family_id("bwork archi", None), Some(42));
     }
 
@@ -862,14 +935,14 @@ mod tests {
 
     #[test]
     fn objet_inconnu_renvoie_none_sans_paniquer() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert!(index.find_item_icon("Inconnu", None).is_none());
         assert!(index.find_item_icon("Inconnu", Some(999)).is_none());
     }
 
     #[test]
     fn catalogue_absent_ou_vide_ne_plante_pas() {
-        let index = CatalogIndex::from_compact_json(&serde_json::json!({}));
+        let index = CatalogIndex::from_json(&serde_json::json!({}));
         assert!(index.is_empty());
         assert!(index.find_item_icon("quoi que ce soit", None).is_none());
     }
@@ -931,7 +1004,7 @@ mod tests {
 
     #[test]
     fn resout_la_categorie_dun_objet() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         // categorySortOrder=1 dans le jeu d'essai.
         assert_eq!(
             index.find_item_category("Larme d'Ogrest", None),
@@ -946,12 +1019,12 @@ mod tests {
 
     #[test]
     fn objet_non_resolu_retombe_sur_divers() {
-        let index = CatalogIndex::from_compact_json(&sample());
+        let index = CatalogIndex::from_json(&sample());
         assert_eq!(
             index.find_item_category("Inconnu au bataillon", None),
             WakfuItemCategory::Misc
         );
-        let vide = CatalogIndex::from_compact_json(&serde_json::json!({}));
+        let vide = CatalogIndex::from_json(&serde_json::json!({}));
         assert_eq!(
             vide.find_item_category("quoi que ce soit", Some(1)),
             WakfuItemCategory::Misc
