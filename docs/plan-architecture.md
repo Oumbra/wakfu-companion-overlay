@@ -944,6 +944,12 @@ DERNIER instantané compte.
 
 ## 8. Budget mémoire (cible 300 Mo)
 
+> **Depuis le 2026-11-27, deux processus, deux budgets** : 300 Mo pour l'overlay, **500 Mo pour le
+> processus d'historique** (`--historique`, [`plan-historique-local.md`](plan-historique-local.md)
+> §7), soit 800 Mo au pire quand les deux tournent. Le contexte GPU d'une fenêtre coûte à lui seul
+> ~310 Mo privés (pilote DX12, mesuré) : c'est lui qui a décidé de sortir l'historique de
+> l'overlay.
+
 | Poste | Estimation | Note |
 | --- | --- | --- |
 | Runtime graphique (winit + wgpu + pilote DX12/Vulkan) | 70–120 Mo | Poste dominant, largement hors de notre contrôle |

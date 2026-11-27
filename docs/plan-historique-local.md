@@ -313,7 +313,8 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
 ## 7. Fenêtre application
 
 - Fenêtre winit **normale** : niveau normal, icône dans la barre des tâches, redimensionnable,
-  taille et position mémorisées. Elle vit à côté des fenêtres overlay, dans le même processus.
+  taille et position mémorisées. **Dans son propre processus** (décision du 2026-11-27, voir
+  ci-dessous), pas à côté des fenêtres overlay.
 - Ouverte depuis la modale d'options, le menu de la zone de notification et un raccourci. Un
   paramètre de page (`Combats`, `Récap`, `Achats`, `Échanges`, `Pactes`, `À propos`) permet à
   l'overlay de l'ouvrir directement au bon endroit.
@@ -329,6 +330,28 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
   5. ligne d'échange en deux colonnes (acquis / donnés).
   Le détail d'un combat réutilise le rendu du panneau Combat ; la bande d'indicateurs du récap
   réutilise celle du bandeau Récap.
+
+**Fait (phase 3, en cours — 2026-11-27).**
+
+- **Un processus à part** : `wakfu-companion-overlay --historique[=onglet]`, lancé par l'entrée
+  « Historique » du menu de la zone de notification. Il s'ouvre sans le jeu et sans l'overlay, a son
+  propre verrou (une seconde ouverture ramène la première au premier plan), ne démarre ni moteur,
+  ni compte, ni synchronisation, ni raccourcis, ni icône de notification, et se termine avec sa
+  fenêtre. Demande de l'utilisateur (« une fenêtre vraiment en dehors »), et la mesure le
+  justifie : le contexte GPU d'une fenêtre (pilote DX12) coûte **~310 Mo privés à lui seul**
+  (mesuré en debug par `--autotest-scenario=memoire`), et une fenêtre de l'overlay le gardait à
+  moitié (~195 Mo) après sa fermeture. Un processus le rend en entier.
+- **Budget mémoire** (décision du 2026-11-27) : 300 Mo pour l'overlay, **500 Mo pour le processus
+  d'historique**, soit 800 Mo au pire. Mesures : fenêtre ouverte ~405 Mo privés en debug ; la liste
+  des achats entière n'ajoute que 2 à 4 Mo.
+- **Achats** : port de la vue du site — recherche, tri, jours repliables, icône de chaque objet
+  (wakassets puis CDN) et de l'Hôtel de vente (`itemTypes/614`), liseré et dégradé de rareté,
+  « Charger plus » (50 achats, jusqu'au bout du dernier jour) et menu 1 semaine / 1 mois / 1 an.
+  Identique au site (empreinte du texte du DOM) sur la partie que le site affiche.
+- **Essai automatique** de la vraie fenêtre, invisible et sans la souris : `--autotest=<dossier>`
+  (`.claude/rules/captures.md`).
+- Reste : vues Combats, Récap, Échanges, Pactes, À propos ; taille et position mémorisées ; hôte
+  Linux (le binaire X11 n'ouvre pas encore la fenêtre).
 
 ## 8. Import de l'historique en ligne
 
