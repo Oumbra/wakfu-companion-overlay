@@ -243,6 +243,30 @@ avec les seules images absentes de wakassets, converties en PNG (350 fichiers, 2
 
 ## 6. Stockage local
 
+**Fait (phase 1, 2026-11-27)** : crate `overlay-history`, thread `background::spawn_history_thread`.
+Écarts et précisions par rapport au plan initial ci-dessous :
+
+- **Clé d'idempotence** : la signature de contenu du moteur, unique par table. À l'import (§8),
+  la signature de chaque ligne du serveur sera recalculée depuis son contenu et vérifiée contre
+  sa `clientKey` (`sha256(uid|type|signature)`, uid connu pendant l'import) : un événement déjà
+  importé puis relu dans `wakfu.log` ne fera pas doublon.
+- **Clé de run de donjon** : la signature du combat représentatif du run (celle que le moteur
+  donne déjà), et non `migrated:<id>` comme le serveur quand aucune clé n'existe.
+- **Horodatages** en millisecondes UTC (`INTEGER`), pas en texte.
+- **Base ouverte le temps d'un lot**, puis refermée : un fichier SQLite ouvert ne se supprime pas
+  sous Windows, et « Supprimer les données locales » doit l'emporter. L'historique ne part pas à
+  la déconnexion (ce n'est pas une donnée du compte).
+- **Pendant la transition**, les événements partent à la fois vers l'historique local et vers la
+  file d'envoi au site (inchangée jusqu'à la phase 4).
+- **Mesures** (`cargo run --release -p overlay-history --example bench-historique`, 20 000
+  combats de 8 participants) : lot de 50 combats écrit en 13 ms, relecture complète sans ajout en
+  1,5 s, page de 50 combats en 0,06 ms, agrégat sur la moitié de l'historique en 2 ms, **3,2 Ko par
+  combat** sur disque (ventilations par sort comprises) — un joueur à 10 000 combats par an
+  occupe ~32 Mo par an.
+- **Rejeu** (`crates/overlay-history/tests/rejeu_log.rs`) : dix lancements sur le `wakfu.log` de
+  référence, aucun doublon ; victoires, défaites, XP et kamas des combats identiques à ce que le
+  moteur a émis. L'XP **hors combat** (métiers) n'est pas stockée, pas plus que sur le site.
+
 ### 6.1 Fichier et schéma
 
 - `data/history.sqlite3`, à côté des autres fichiers de données (`app_dirs.rs`). Mode WAL.
@@ -361,7 +385,7 @@ avec les seules images absentes de wakassets, converties en PNG (350 fichiers, 2
 | Phase | Contenu | Critère de sortie |
 | --- | --- | --- |
 | **0 — Données** ✅ | Référentiel français embarqué (`tools/referentiel`) ; dossier `cdn/` + `pages.yml` ; résolution d'icônes wakassets puis CDN | L'overlay démarre et résout noms et icônes sans jeton ni API |
-| **1 — Stockage** | `history.sqlite3`, écriture depuis le moteur, recalcul runs de donjon et type de combat | Rejeu 10× du même log : aucun doublon ; totaux identiques au site sur un même log |
+| **1 — Stockage** ✅ | `history.sqlite3`, écriture depuis le moteur, recalcul runs de donjon et type de combat | Rejeu 10× du même log : aucun doublon ✅ ; totaux identiques au site sur un même log : vérifiés contre le moteur, la comparaison avec le site se fait sur un import réel (phase 2) |
 | **2 — Import** | Version de transition avec import de l'historique en ligne | Historique d'un compte réel importé, volume mesuré, totaux identiques au site |
 | **3 — Fenêtre** | Fenêtre application, 5 composants, vues Combats / Récap / Achats / Échanges / Pactes / À propos, Windows et X11 | Parité fonctionnelle avec le site sur le périmètre §3.1 ; captures de référence |
 | **4 — Nettoyage** | Retrait compte et connexion (§9), du multilingue du catalogue, mise à jour de `plan-architecture.md` | Plus aucun appel à `wakfu-companion.com` hors liens ouverts dans le navigateur |
