@@ -788,22 +788,23 @@ fn fight_detail(
     for participant in &fight.participants {
         let key = participant_key(fight.id, participant);
         if detail.open_participants.contains(&key) {
-            let cache_key = (key, metric);
-            if !detail.spells.contains_key(&cache_key) {
-                let (fight_id, name, instance) = &cache_key.0;
-                let spells = ctx
-                    .store
+            detail.spells.entry((key, metric)).or_insert_with(|| {
+                ctx.store
                     .map(|store| {
                         store
-                            .participant_spells(*fight_id, name, *instance, metric.column())
+                            .participant_spells(
+                                fight.id,
+                                &participant.name,
+                                participant.instance_index,
+                                metric.column(),
+                            )
                             .unwrap_or_else(|err| {
                                 tracing::warn!(%err, "historique : sorts illisibles");
                                 Vec::new()
                             })
                     })
-                    .unwrap_or_default();
-                detail.spells.insert(cache_key, spells);
-            }
+                    .unwrap_or_default()
+            });
         }
     }
     let spell_rows = |participant: &ParticipantRow| -> usize {
