@@ -358,7 +358,14 @@ avec les seules images absentes de wakassets, converties en PNG (350 fichiers, 2
   suivantes (500 combats par lot au plus).
 - Une page = une transaction, base ouverte le temps d'une page (`busy_timeout` de 10 s entre
   l'import et le thread Historique) ; 3 essais par page sur panne réseau, 429 ou 5xx.
-- Reste pour fermer la phase : l'import d'un compte réel (volume, durée, totaux comparés au site).
+- **Import réel (compte du mainteneur, prod, 2026-11-27)** : 1 562 entrées en 4,6 s (1 112 combats,
+  423 achats dont 63 récupérations de kamas, 20 échanges, 7 pactes ; 10 août → 26 novembre), base
+  de 3,2 Mo, aucune entrée écartée, aucun combat sans type ni combat de donjon sans run.
+- **Doublons hérités du serveur** : 9 groupes de combats identiques (même début, même issue, même
+  XP ; jusqu'à 6 copies) existent déjà sur le site sous des `clientKey` différentes — signatures
+  d'anciennes versions du moteur. Recopiés tels quels (parité avec le site) ; un dédoublonnage par
+  contenu pourra se faire dans la fenêtre (phase 3) si on le juge utile.
+- Reste pour fermer la phase : comparer les totaux avec le récap du site.
 
 ## 9. Retrait du compte et de la connexion
 
