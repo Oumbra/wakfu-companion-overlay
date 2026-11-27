@@ -184,6 +184,55 @@ fn read_pid(file: &mut File) -> Option<u32> {
     content.trim().parse().ok()
 }
 
+/// **Le garde du processus d'historique** (`--historique`, 2026-11-27) : un verrou à part, à côté
+/// de celui de l'overlay — les deux processus tournent ensemble, chacun en un seul exemplaire.
+/// Déjà ouvert : sa fenêtre revient au premier plan (geste de l'utilisateur, qui vient de
+/// demander l'historique), et ce processus-ci s'arrête sans rien dire.
+pub fn history_guard() -> Startup {
+    let Some(path) = default_lock_path().map(|path| path.with_extension("historique.lock")) else {
+        return Startup::Proceed(None);
+    };
+    match acquire_at(&path, Duration::ZERO) {
+        Ok(lock) => Startup::Proceed(Some(lock)),
+        Err(AcquireError::AlreadyRunning { .. }) => {
+            focus_existing_history();
+            Startup::Exit
+        }
+        Err(AcquireError::Io(err)) => {
+            eprintln!(
+                "verrou de l'historique indisponible ({}) : {err} — démarrage sans verrou",
+                path.display()
+            );
+            Startup::Proceed(None)
+        }
+    }
+}
+
+/// Ramène la fenêtre d'historique déjà ouverte (cherchée par son titre).
+fn focus_existing_history() {
+    #[cfg(windows)]
+    {
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            FindWindowW, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
+        };
+        let title: Vec<u16> = crate::panels::history::WINDOW_TITLE
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        // SAFETY: chaîne UTF-16 terminée par un zéro, vivante pendant l'appel ; le handle rendu
+        // n'est utilisé que pour deux appels qui tolèrent une fenêtre disparue entre-temps.
+        unsafe {
+            if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
+                if IsIconic(hwnd).as_bool() {
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                }
+                let _ = SetForegroundWindow(hwnd);
+            }
+        }
+    }
+}
+
 /// Le message montré à la seconde instance.
 pub const ALREADY_RUNNING_MESSAGE: &str = "Wakfu Companion Overlay est déjà lancé.\n\n\
      Son icône se trouve dans la zone de notification. Pour le relancer, quittez-le d'abord \

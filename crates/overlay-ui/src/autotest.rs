@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 
 /// L'option de ligne de commande : `--autotest=<dossier>`.
 pub const FLAG: &str = "--autotest";
+/// Le scénario joué : `--autotest-scenario=historique` (défaut) ou `memoire`.
+pub const SCENARIO_FLAG: &str = "--autotest-scenario";
 
 /// Délai entre deux étapes : le temps que les frames injectées soient peintes.
 pub const STEP_INTERVAL: Duration = Duration::from_millis(120);
@@ -43,6 +45,91 @@ pub fn requested(args: impl IntoIterator<Item = String>) -> Option<PathBuf> {
     })
 }
 
+/// Le scénario demandé par `--autotest-scenario=<nom>` et l'onglet sur lequel la fenêtre
+/// s'ouvre. `None` : nom inconnu.
+pub fn scenario(args: impl IntoIterator<Item = String>) -> Option<(Vec<Step>, &'static str)> {
+    let name = args
+        .into_iter()
+        .find_map(|arg| {
+            arg.strip_prefix(SCENARIO_FLAG)
+                .and_then(|rest| rest.strip_prefix('='))
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "historique".to_string());
+    match name.as_str() {
+        "historique" => Some((history_scenario(), "achats")),
+        "memoire" => Some((memory_scenario(), "echanges")),
+        _ => None,
+    }
+}
+
+/// Mémoire du processus : working set et mémoire privée, en octets.
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessMemory {
+    pub working_set: u64,
+    pub private: u64,
+}
+
+impl std::fmt::Display for ProcessMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const MB: f64 = 1024.0 * 1024.0;
+        write!(
+            f,
+            "working set {:.0} Mo, privée {:.0} Mo",
+            self.working_set as f64 / MB,
+            self.private as f64 / MB
+        )
+    }
+}
+
+/// Mémoire du processus courant (`GetProcessMemoryInfo` ; `/proc/self/status` sous Linux).
+#[cfg(windows)]
+pub fn process_memory() -> Option<ProcessMemory> {
+    use windows::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
+    };
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    let mut counters = PROCESS_MEMORY_COUNTERS_EX::default();
+    let size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
+    // SAFETY: `counters` est un PROCESS_MEMORY_COUNTERS_EX valide, de la taille annoncée ;
+    // `GetCurrentProcess` rend un pseudo-handle qui n'a pas à être fermé.
+    unsafe {
+        GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            (&mut counters as *mut PROCESS_MEMORY_COUNTERS_EX).cast::<PROCESS_MEMORY_COUNTERS>(),
+            size,
+        )
+        .ok()?;
+    }
+    Some(ProcessMemory {
+        working_set: counters.WorkingSetSize as u64,
+        private: counters.PrivateUsage as u64,
+    })
+}
+
+/// Mémoire du processus courant (`GetProcessMemoryInfo` ; `/proc/self/status` sous Linux).
+#[cfg(not(windows))]
+pub fn process_memory() -> Option<ProcessMemory> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let field = |name: &str| {
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(name))
+            .and_then(|rest| {
+                rest.trim()
+                    .trim_end_matches("kB")
+                    .trim()
+                    .parse::<u64>()
+                    .ok()
+            })
+            .map(|kb| kb * 1024)
+    };
+    Some(ProcessMemory {
+        working_set: field("VmRSS:")?,
+        private: field("RssAnon:").unwrap_or(0),
+    })
+}
+
 /// Une étape du scénario. Les coordonnées sont en points egui, relatives à la fenêtre.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
@@ -56,6 +143,10 @@ pub enum Step {
     Capture(&'static str),
     /// La fenêtre d'historique doit être fermée.
     ExpectClosed,
+    /// Note la mémoire du processus dans le journal.
+    Memory(&'static str),
+    /// Attendre, sans rien peindre.
+    Pause(Duration),
 }
 
 /// Taille de la fenêtre pendant l'essai — celle d'ouverture, sur laquelle sont relevées les
@@ -109,6 +200,42 @@ pub fn history_scenario() -> Vec<Step> {
     steps
 }
 
+/// Le scénario de la mémoire : la fenêtre ouverte sur un onglet vide, puis sur les achats, puis
+/// refermée — ce que coûte la fenêtre elle-même, et ce que coûte une liste.
+pub fn memory_scenario() -> Vec<Step> {
+    let settle = Step::Pause(Duration::from_secs(2));
+    vec![
+        Step::WaitReady,
+        Step::Memory("fenêtre ouverte, onglet vide"),
+        settle.clone(),
+        Step::Memory("onglet vide, 2 s plus tard"),
+        Step::Click {
+            x: TAB_CENTERS[2].0,
+            y: TAB_Y,
+            label: "achats",
+        },
+        Step::Memory("achats peints"),
+        settle.clone(),
+        Step::Memory("achats, 2 s plus tard"),
+        Step::Capture("memoire-achats"),
+        Step::Click {
+            x: TAB_CENTERS[3].0,
+            y: TAB_Y,
+            label: "echanges",
+        },
+        settle.clone(),
+        Step::Memory("retour sur l'onglet vide, 2 s plus tard"),
+        Step::Click {
+            x: 1071.0,
+            y: 28.0,
+            label: "croix",
+        },
+        Step::ExpectClosed,
+        settle,
+        Step::Memory("fenêtre fermée, 2 s plus tard"),
+    ]
+}
+
 /// L'état du robot, tenu par l'hôte.
 pub struct AutoTest {
     pub dir: PathBuf,
@@ -131,6 +258,19 @@ impl AutoTest {
             journal: Vec::new(),
             failed: false,
             shots: 0,
+        }
+    }
+
+    /// Repousse la prochaine étape (`Step::Pause`).
+    pub fn delay(&mut self, by: Duration) {
+        self.next_at += by;
+    }
+
+    /// Note la mémoire du processus.
+    pub fn log_memory(&mut self, label: &str) {
+        match process_memory() {
+            Some(memory) => self.log(format!("mémoire ({label}) : {memory}")),
+            None => self.log(format!("mémoire ({label}) : illisible")),
         }
     }
 

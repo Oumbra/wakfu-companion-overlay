@@ -15,6 +15,10 @@ use overlay_history::HistoryStore;
 
 use crate::design::{self, DsIcon};
 
+/// Titre système de la fenêtre (barre des tâches, Alt+Tab) — aussi ce que cherche une seconde
+/// ouverture pour ramener la première au premier plan (`single_instance::history_guard`).
+pub const WINDOW_TITLE: &str = "Wakfu Companion — Historique";
+
 /// Fond opaque sous le décor — le ton sombre de la texture du corps.
 const WINDOW_UNDERLAY: egui::Color32 = egui::Color32::from_rgb(0x15, 0x17, 0x1C);
 

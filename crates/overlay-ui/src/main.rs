@@ -949,6 +949,12 @@ struct App {
     /// `--autotest=<dossier>` (`overlay_ui::autotest`) : le robot qui joue le scénario de la
     /// fenêtre d'historique, invisible. `Some`, l'overlay ne fait rien d'autre.
     autotest: Option<overlay_ui::autotest::AutoTest>,
+    /// **Processus d'historique** (`--historique[=onglet]`, 2026-11-27) : la fenêtre d'historique
+    /// seule, sans jeu ni overlay — ni moteur, ni compte, ni icône de notification, ni fenêtre sur
+    /// le jeu ; le processus se termine avec sa fenêtre. Un processus à part plutôt qu'une fenêtre
+    /// de l'overlay : son contexte GPU (~300 Mo, pilote DX12) est rendu en entier à la fermeture,
+    /// et chaque processus garde son budget (300 Mo l'overlay, 500 Mo l'historique).
+    standalone: bool,
 }
 
 /// L'icône de zone de notification (`tray-icon`, même auteurs que `global-hotkey`) et les quatre
@@ -1206,6 +1212,7 @@ impl App {
             history: None,
             history_on_start: None,
             autotest: None,
+            standalone: false,
         }
     }
 
@@ -1584,7 +1591,7 @@ impl App {
         let (rgba, width, height) = ui_icons::app_logo_rgba();
         let icon = Icon::from_rgba(rgba, width, height).ok();
         let attrs = WindowAttributes::default()
-            .with_title("Wakfu Companion — Historique")
+            .with_title(panels::history::WINDOW_TITLE)
             .with_inner_size(winit::dpi::LogicalSize::new(
                 HISTORY_WINDOW_SIZE.0,
                 HISTORY_WINDOW_SIZE.1,
@@ -1743,6 +1750,15 @@ impl App {
                 }
                 vec![Vec::new()]
             }
+            Step::Memory(label) => {
+                test.log_memory(label);
+                Vec::new()
+            }
+            Step::Pause(duration) => {
+                test.delay(*duration);
+                event_loop.set_control_flow(ControlFlow::WaitUntil(test.next_at()));
+                return;
+            }
             Step::ExpectClosed => {
                 if history_id.is_some() {
                     test.fail("la fenêtre d'historique est toujours ouverte");
@@ -1752,7 +1768,8 @@ impl App {
                 Vec::new()
             }
         };
-        if !matches!(step, Step::ExpectClosed) && history_id.is_none() {
+        let needs_window = matches!(step, Step::Click { .. } | Step::Type(_) | Step::Capture(_));
+        if needs_window && history_id.is_none() {
             test.fail(format!(
                 "plus de fenêtre d'historique pour l'étape {step:?}"
             ));
@@ -1890,7 +1907,7 @@ impl App {
             if event.id == *tray.options.id() {
                 self.open_settings_card(event_loop);
             } else if event.id == *tray.history.id() {
-                self.open_history_window(event_loop, None);
+                launch_history_process();
             } else if event.id == *tray.update.id() {
                 self.open_manual_update_window(event_loop);
             } else if event.id == *tray.disconnect.id() {
@@ -5950,7 +5967,14 @@ impl App {
                 let _ = self.update_command_tx.send(UpdateCommand::Download);
             }
             PostRedraw::CloseManualUpdate => self.close_manual_update_window(event_loop),
-            PostRedraw::CloseHistory => self.close_history_window(),
+            PostRedraw::CloseHistory => {
+                self.close_history_window();
+                // Processus d'historique : il n'existe que pour sa fenêtre.
+                if self.standalone && self.autotest.is_none() {
+                    logging::log_session_end("fenêtre d'historique fermée");
+                    event_loop.exit();
+                }
+            }
             PostRedraw::OpenManualUpdate => self.open_manual_update_window(event_loop),
             PostRedraw::ApplyCardSettings(settings) => self.apply_card_settings(&settings),
             PostRedraw::TestCardSound(sound) => match sound {
@@ -5973,9 +5997,9 @@ impl App {
 
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        // Essai automatique : la fenêtre d'historique seule — ni icône de notification, ni Carte,
-        // ni fenêtre sur le jeu.
-        if self.autotest.is_some() {
+        // Processus d'historique (et son essai automatique) : la fenêtre d'historique seule — ni
+        // icône de notification, ni Carte, ni fenêtre sur le jeu.
+        if self.standalone {
             if let Some(tab) = self.history_on_start.take() {
                 self.open_history_window(event_loop, panels::history::HistoryTab::parse(&tab));
             }
@@ -6143,6 +6167,10 @@ impl ApplicationHandler<UserEvent> for App {
             self.autotest_tick(event_loop);
             return;
         }
+        if self.standalone {
+            self.drive_redraws(event_loop);
+            return;
+        }
         // Une mise à jour prête s'installe AVANT tout le reste du tick : l'exe est remplacé,
         // l'overlay relancé, et cette boucle se termine (voir `install_update_if_ready`).
         self.install_update_if_ready(event_loop);
@@ -6302,7 +6330,13 @@ impl ApplicationHandler<UserEvent> for App {
         // Surveillance de tour (§9.1 decies) — après `sync_windows`, qui vient de mettre à jour
         // la liste des fenêtres de jeu qu'elle lit.
         self.sync_turn_watch();
+        self.drive_redraws(event_loop);
+    }
+}
 
+impl App {
+    /// Fin de chaque tour de boucle : les redessins dus, puis le prochain réveil.
+    fn drive_redraws(&mut self, event_loop: &ActiveEventLoop) {
         // Honore les délais de redessin qu'egui a demandés (tooltip au survol d'un portrait,
         // typiquement) et qu'aucun `WindowEvent`/`UserEvent` ne redéclenchera de lui-même — voir
         // `OverlayWindow::next_redraw_at` et `render`. Sans ceci, la tooltip ne s'affichait qu'au
@@ -6338,6 +6372,25 @@ impl ApplicationHandler<UserEvent> for App {
         // ci-dessus impose quand même un réveil périodique court (borne haute de `next_wake`),
         // sans quoi ni l'un ni l'autre ne seraient vus qu'au prochain événement fenêtre.
         event_loop.set_control_flow(ControlFlow::WaitUntil(next_wake));
+    }
+}
+
+/// Entrée « Historique » du menu de la zone de notification : lance le processus d'historique
+/// (`--historique`), qui ramène sa fenêtre au premier plan s'il tourne déjà.
+fn launch_history_process() {
+    tracing::info!(">>> Historique (zone de notification).");
+    let exe = match env::current_exe() {
+        Ok(exe) => exe,
+        Err(err) => {
+            tracing::warn!("[historique] exécutable introuvable : {err}");
+            return;
+        }
+    };
+    if let Err(err) = std::process::Command::new(exe)
+        .arg(update_apply::HISTORY_FLAG)
+        .spawn()
+    {
+        tracing::warn!("[historique] lancement refusé : {err}");
     }
 }
 
@@ -6514,11 +6567,23 @@ fn main() {
     // **Sauf essai automatique** (`--autotest=<dossier>`, `overlay_ui::autotest`) : il tourne à
     // côté de l'overlay de l'utilisateur sans rien partager — ni jeton, ni file, ni base (une
     // copie) —, et ne doit surtout pas ouvrir la boîte « déjà lancé ».
+    //
+    // **Processus d'historique** (`--historique`) : son propre verrou, à côté de celui de
+    // l'overlay (`single_instance::history_guard`).
     let autotest_dir = overlay_ui::autotest::requested(env::args().skip(1));
+    let standalone = autotest_dir.is_some()
+        || update_apply::parse_args(env::args().skip(1))
+            .history_tab
+            .is_some();
     let _instance = if autotest_dir.is_some() {
         None
     } else {
-        match overlay_ui::single_instance::guard() {
+        let guard = if standalone {
+            overlay_ui::single_instance::history_guard()
+        } else {
+            overlay_ui::single_instance::guard()
+        };
+        match guard {
             overlay_ui::single_instance::Startup::Proceed(lock) => Some(lock),
             overlay_ui::single_instance::Startup::Exit => return,
         }
@@ -6577,7 +6642,12 @@ fn main() {
         update_apply::cleanup(&overlay_sync::update::updates_dir());
     }
 
-    let log_path = resolve_path(&saved_config, cli.log_path);
+    // Le processus d'historique ne lit pas `wakfu.log` : il s'ouvre aussi sans le jeu installé.
+    let log_path = if standalone {
+        PathBuf::new()
+    } else {
+        resolve_path(&saved_config, cli.log_path)
+    };
     let snapshot = Arc::new(ArcSwap::from_pointee(SessionSnapshot::default()));
     let watchlist = Arc::new(ArcSwap::from_pointee(Vec::<WatchlistEntry>::new()));
     let watchlist_toast = Arc::new(ArcSwap::from_pointee(None::<WatchlistToast>));
@@ -6602,7 +6672,7 @@ fn main() {
     let (sync_tx, sync_rx) = mpsc::channel();
     // Essai automatique : ni compte, ni synchronisation, ni mise à jour, ni moteur — seul le
     // référentiel (les noms d'objets de l'historique) démarre.
-    let full_session = autotest_dir.is_none();
+    let full_session = !standalone;
     if full_session {
         spawn_sync_thread(sync_rx, auth_command_tx.clone());
         spawn_auth_thread(
@@ -6740,18 +6810,24 @@ fn main() {
         settings_tx,
     });
     app.history_on_start = cli.history_tab;
+    if standalone {
+        // Les raccourcis globaux appartiennent à l'overlay.
+        app.hotkeys.suspend();
+        app.standalone = true;
+    }
     if let Some(dir) = autotest_dir {
         if let Err(err) = std::fs::create_dir_all(&dir) {
             eprintln!("[autotest] dossier {} : {err}", dir.display());
             std::process::exit(2);
         }
-        // Les raccourcis globaux appartiennent à l'overlay de l'utilisateur.
-        app.hotkeys.suspend();
-        app.history_on_start = Some(String::from("achats"));
-        app.autotest = Some(overlay_ui::autotest::AutoTest::new(
-            dir,
-            overlay_ui::autotest::history_scenario(),
-        ));
+        let Some((steps, tab)) = overlay_ui::autotest::scenario(env::args().skip(1)) else {
+            eprintln!("[autotest] scénario inconnu (historique, memoire)");
+            std::process::exit(2);
+        };
+        app.history_on_start = Some(tab.to_string());
+        let mut test = overlay_ui::autotest::AutoTest::new(dir, steps);
+        test.log_memory("démarrage, avant la fenêtre");
+        app.autotest = Some(test);
     }
     let failed = {
         event_loop.run_app(&mut app).expect("boucle d'événements");
