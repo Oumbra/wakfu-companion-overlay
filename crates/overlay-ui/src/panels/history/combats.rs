@@ -692,20 +692,27 @@ fn participants_column(
             egui::pos2(row.left() + 14.0, row.center().y),
             egui::vec2(20.0, 20.0),
         );
-        if !participant.is_ally {
-            if let Some(icon) = ctx
-                .catalog
-                .find_monster_icon(&participant.name, participant.monster_id)
-            {
-                super::paint_remote_icon(
-                    ui,
-                    &painter,
-                    icon_rect,
-                    &icon,
-                    ctx.remote_icons,
-                    textures,
-                );
-            }
+        // Un allié : le portrait de sa classe (grisé s'il est KO) ; un ennemi, ou un allié sans
+        // classe connue : l'icône du monstre.
+        let portrait = participant
+            .class_name
+            .as_deref()
+            .zip(ctx.portraits)
+            .and_then(|(class, atlas)| {
+                atlas.texture(class, overlay_engine::Gender::M, participant.defeated)
+            });
+        if let Some(texture) = portrait {
+            painter.image(
+                texture.id(),
+                icon_rect,
+                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        } else if let Some(icon) = ctx
+            .catalog
+            .find_monster_icon(&participant.name, participant.monster_id)
+        {
+            super::paint_remote_icon(ui, &painter, icon_rect, &icon, ctx.remote_icons, textures);
         }
         let share = if total > 0 {
             format!("{:.0} %", value as f64 * 100.0 / total as f64)

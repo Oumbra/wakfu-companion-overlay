@@ -94,6 +94,7 @@ fn main() {
             store: Some(&store),
             catalog: &referentiel.catalog,
             dungeons: &referentiel.dungeons,
+            portraits: None,
             remote_icons: &remote_icons,
             today,
         };

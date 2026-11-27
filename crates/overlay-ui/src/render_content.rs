@@ -1006,6 +1006,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                                 store: host.store.as_ref(),
                                 catalog,
                                 dungeons: &dungeons,
+                                portraits: Some(portraits),
                                 remote_icons,
                                 today: chrono::Local::now().date_naive(),
                             },

@@ -207,6 +207,8 @@ pub struct HistoryContext<'a> {
     pub catalog: &'a CatalogIndex,
     /// Référentiel des donjons (noms des runs de la vue Combats).
     pub dungeons: &'a DungeonIndex,
+    /// Portraits de classe des alliés (vue Combats) ; `None` : icônes de monstre seulement.
+    pub portraits: Option<&'a crate::portraits::PortraitAtlas>,
     /// Icônes d'objets (wakassets, puis le CDN de l'overlay), partagées par le processus.
     pub remote_icons: &'a RemoteIconStore,
     /// Jour local courant (« Aujourd'hui », « Hier »…), fourni par l'hôte pour que les captures
