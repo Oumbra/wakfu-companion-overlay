@@ -2016,6 +2016,7 @@ mod tests {
                 spells: Default::default(),
                 heal_spells: Default::default(),
                 armor_spells: Default::default(),
+                turn_spells: Default::default(),
                 is_ko: false,
                 last_turn_casts: Vec::new(),
                 last_turn: 0,

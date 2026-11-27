@@ -39,6 +39,7 @@ fn enemy(name: String, total_damage: i64, casts: usize) -> FighterDamage {
         spells: Default::default(),
         heal_spells: Default::default(),
         armor_spells: Default::default(),
+        turn_spells: Default::default(),
         is_ko: false,
         last_turn_casts: (0..casts)
             .map(|i| SpellCastRecord {

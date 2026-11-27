@@ -214,6 +214,14 @@ pub fn history_scenario() -> Vec<Step> {
                 },
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("combats-sorts"),
+                // La vue « Tour » du combat déplié.
+                Step::Click {
+                    x: 313.0,
+                    y: 327.0,
+                    label: "vue tour",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("combats-tour"),
                 Step::Click {
                     x: 830.0,
                     y: 165.0,
@@ -533,7 +541,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            19
+            20
         );
     }
 

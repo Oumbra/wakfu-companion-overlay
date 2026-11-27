@@ -392,11 +392,24 @@ fn les_sorts_d_un_combattant_se_lisent_a_la_demande() {
                 spell: "Épée divine".to_string(),
                 total: 120,
                 by_element: [("Feu".to_string(), 120)].into(),
+                by_turn: vec![
+                    overlay_engine::history::FightSpellTurnPayload {
+                        turn: 2,
+                        total: 70,
+                        by_element: [("Feu".to_string(), 70)].into(),
+                    },
+                    overlay_engine::history::FightSpellTurnPayload {
+                        turn: 1,
+                        total: 50,
+                        by_element: [("Feu".to_string(), 50)].into(),
+                    },
+                ],
             },
             overlay_engine::history::FightSpellPayload {
                 spell: "Super Iop Punch".to_string(),
                 total: 380,
                 by_element: [("Feu".to_string(), 300), ("Terre".to_string(), 80)].into(),
+                by_turn: Vec::new(),
             },
         ];
     }
@@ -418,6 +431,17 @@ fn les_sorts_d_un_combattant_se_lisent_a_la_demande() {
         "du plus gros au plus petit"
     );
     assert_eq!(spells[0].by_element.len(), 2);
+    assert!(spells[0].by_turn.is_empty(), "sans détail par tour");
+    let turns: Vec<(i64, i64)> = spells[1]
+        .by_turn
+        .iter()
+        .map(|t| (t.turn, t.total))
+        .collect();
+    assert_eq!(turns, vec![(1, 50), (2, 70)], "par tour croissant");
+    let all = store
+        .fight_spells(fight.id, read::SpellColumn::Damage)
+        .unwrap();
+    assert_eq!(all.len(), 2, "l'allié et le Bouftou");
     assert!(store
         .participant_spells(
             fight.id,

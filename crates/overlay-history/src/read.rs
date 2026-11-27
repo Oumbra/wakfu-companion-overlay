@@ -89,6 +89,17 @@ pub struct SpellLine {
     pub spell: String,
     pub total: i64,
     pub by_element: Vec<(String, i64)>,
+    /// Le détail tour par tour (`byTurn`), par tour croissant — vide pour un combat enregistré
+    /// avant ce détail ou importé du site, qui ne l'avait pas.
+    pub by_turn: Vec<SpellTurn>,
+}
+
+/// Un tour d'un sort.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpellTurn {
+    pub turn: i64,
+    pub total: i64,
+    pub by_element: Vec<(String, i64)>,
 }
 
 /// Un combat, ses combattants (dans l'ordre d'écriture) et son butin.
@@ -218,6 +229,42 @@ impl HistoryStore {
         Ok(json.map(|json| parse_spells(&json)).unwrap_or_default())
     }
 
+    /// Les sorts de **tous** les combattants d'un combat, pour une grandeur : `(nom, rang de
+    /// l'instance, sorts)` — ce dont la vue « Tour » a besoin pour recalculer chaque ligne.
+    pub fn fight_spells(
+        &self,
+        fight_id: i64,
+        column: SpellColumn,
+    ) -> Result<Vec<(String, i64, Vec<SpellLine>)>, HistoryError> {
+        let sql = match column {
+            SpellColumn::Damage => {
+                "SELECT name, instance_index, spells FROM fight_participants WHERE fight_id = ?1"
+            }
+            SpellColumn::Heal => {
+                "SELECT name, instance_index, heal_spells FROM fight_participants
+                 WHERE fight_id = ?1"
+            }
+            SpellColumn::Armor => {
+                "SELECT name, instance_index, armor_spells FROM fight_participants
+                 WHERE fight_id = ?1"
+            }
+        };
+        let mut stmt = self.conn.prepare_cached(sql)?;
+        let rows = stmt
+            .query_map(params![fight_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows
+            .into_iter()
+            .map(|(name, instance, json)| (name, instance, parse_spells(&json)))
+            .collect())
+    }
+
     /// Tous les achats, du plus récent au plus ancien.
     pub fn purchases(&self) -> Result<Vec<PurchaseRow>, HistoryError> {
         let mut stmt = self.conn.prepare_cached(
@@ -343,22 +390,39 @@ fn parse_spells(json: &str) -> Vec<SpellLine> {
     let Ok(serde_json::Value::Array(spells)) = serde_json::from_str(json) else {
         return Vec::new();
     };
+    let elements = |value: Option<&serde_json::Value>| -> Vec<(String, i64)> {
+        value
+            .and_then(|v| v.as_object())
+            .map(|elements| {
+                elements
+                    .iter()
+                    .filter_map(|(element, value)| Some((element.clone(), number(value)?)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
     let mut lines: Vec<SpellLine> = spells
         .iter()
         .filter_map(|spell| {
+            let mut by_turn: Vec<SpellTurn> = spell
+                .get("byTurn")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|turn| {
+                    Some(SpellTurn {
+                        turn: turn.get("turn").and_then(number)?,
+                        total: turn.get("total").and_then(number).unwrap_or(0),
+                        by_element: elements(turn.get("byElement")),
+                    })
+                })
+                .collect();
+            by_turn.sort_by_key(|turn| turn.turn);
             Some(SpellLine {
                 spell: spell.get("spell")?.as_str()?.to_string(),
                 total: spell.get("total").and_then(number).unwrap_or(0),
-                by_element: spell
-                    .get("byElement")
-                    .and_then(|v| v.as_object())
-                    .map(|elements| {
-                        elements
-                            .iter()
-                            .filter_map(|(element, value)| Some((element.clone(), number(value)?)))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                by_element: elements(spell.get("byElement")),
+                by_turn,
             })
         })
         .collect();

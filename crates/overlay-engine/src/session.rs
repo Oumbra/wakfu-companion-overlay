@@ -30,7 +30,7 @@
 //! `SessionSnapshot::fight_for_character` (une fenêtre overlay par fenêtre de jeu, chacune montrant
 //! le combat de SON personnage).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -45,9 +45,9 @@ use crate::dungeon_run::{
 use crate::history::{
     fight_signature, pact_extraction_signature, purchase_signature, trade_signature,
     FightLootPayload, FightParticipantPayload, FightPayload, FightSide, FightSpellPayload,
-    HistoryEventKind, HistoryPayload, PactExtractionItemPayload, PactExtractionPayload,
-    PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload, TradePayload,
-    HDV_KAMAS_SALE_ITEM,
+    FightSpellTurnPayload, HistoryEventKind, HistoryPayload, PactExtractionItemPayload,
+    PactExtractionPayload, PurchasePayload, SyncEvent, TradeDirection, TradeItemPayload,
+    TradePayload, HDV_KAMAS_SALE_ITEM,
 };
 use crate::log_time::{format_iso_utc, time_of_day_ms, LogDateTracker};
 use crate::model::{DamageElement, FightResult, LogEntry};
@@ -134,6 +134,34 @@ struct ApplyContext<'a> {
 /// `Serialize`/`Deserialize` servent à la persistance disque du combat en cours (voir
 /// `fight_store.rs`, §9 du plan) — restauration après un redémarrage de l'overlay survenu pendant
 /// une rotation de `wakfu.log`.
+/// Une ventilation par tour : sort → numéro de tour (à partir de 1) → élément → montant.
+pub type SpellTurns = HashMap<String, BTreeMap<i64, HashMap<String, i64>>>;
+
+/// Les trois ventilations par tour d'un combattant (dégâts, soins, armure) — miroir de
+/// `SpellAgg.byTurn` (`stats-store.service.ts`). Le site ne les gardait qu'en mémoire ; l'overlay
+/// les enregistre avec le combat (`FightSpellPayload::by_turn`), d'où la vue « Tour » de la
+/// fenêtre d'historique.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TurnSpells {
+    #[serde(default)]
+    pub damage: SpellTurns,
+    #[serde(default)]
+    pub heal: SpellTurns,
+    #[serde(default)]
+    pub armor: SpellTurns,
+}
+
+impl TurnSpells {
+    fn add(map: &mut SpellTurns, spell: &str, turn: i64, element: &str, amount: i64) {
+        *map.entry(spell.to_string())
+            .or_default()
+            .entry(turn)
+            .or_default()
+            .entry(element.to_string())
+            .or_insert(0) += amount;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FighterDamage {
     pub name: String,
@@ -188,6 +216,10 @@ pub struct FighterDamage {
     /// `#[serde(default)]` même raison que `xp_gained`.
     #[serde(default)]
     pub armor_spells: HashMap<String, HashMap<String, i64>>,
+    /// Les mêmes ventilations, tour par tour — voir [`TurnSpells`]. `#[serde(default)]` même
+    /// raison que `xp_gained`.
+    #[serde(default)]
+    pub turn_spells: TurnSpells,
     /// Ce combattant a-t-il été mis KO au moins une fois DANS ce combat — alimenté par
     /// `LogEntry::EnemyDefeated` (voir `SessionState::apply`, cas `EnemyDefeated`), qui malgré son
     /// nom couvre aussi bien "X est KO !" (réservé aux alliés, `KO_RE`) que "X est hors-combat !"
@@ -1186,8 +1218,16 @@ impl SessionState {
                 time,
                 ..
             } => {
+                let turn = self.fights.get(fight_id).map_or(1, |f| f.turn_count);
                 if let Some(fighter) = self.fighter_mut(*fight_id, attacker, time) {
                     fighter.total_damage += amount;
+                    TurnSpells::add(
+                        &mut fighter.turn_spells.damage,
+                        spell,
+                        turn,
+                        damage_element_label(*element),
+                        *amount,
+                    );
                     // Ventilation par sort/élément (L5, §7.1) — miroir de `SpellBreakdownRow`, mais
                     // UNIQUEMENT pour les dégâts (voir la doc de `FighterDamage::spells` et de
                     // `build_fight_sync_event` pour le raisonnement de ce choix, les soins n'y
@@ -1209,8 +1249,16 @@ impl SessionState {
                 time,
                 ..
             } => {
+                let turn = self.fights.get(fight_id).map_or(1, |f| f.turn_count);
                 if let Some(fighter) = self.fighter_mut(*fight_id, attacker, time) {
                     fighter.total_heal += amount;
+                    TurnSpells::add(
+                        &mut fighter.turn_spells.heal,
+                        spell,
+                        turn,
+                        damage_element_label(*element),
+                        *amount,
+                    );
                     // Ventilation par sort/élément — voir `FighterDamage::heal_spells`. Même
                     // chemin que les dégâts ci-dessus, mais dans sa PROPRE ventilation : un soin
                     // n'a jamais été, et ne doit jamais devenir, un dégât de plus dans `spells`
@@ -1237,8 +1285,16 @@ impl SessionState {
                 time,
                 ..
             } => {
+                let turn = self.fights.get(fight_id).map_or(1, |f| f.turn_count);
                 if let Some(fighter) = self.fighter_mut(*fight_id, attacker, time) {
                     fighter.total_armor += amount;
+                    TurnSpells::add(
+                        &mut fighter.turn_spells.armor,
+                        spell,
+                        turn,
+                        damage_element_label(DamageElement::Inconnu),
+                        *amount,
+                    );
                     // `DamageElement::Inconnu` en dur, jamais un élément deviné : une ligne
                     // d'armure ne porte pas de tag élémentaire (voir `FighterDamage::armor_spells`).
                     *fighter
@@ -1873,6 +1929,7 @@ impl SessionState {
             spells: HashMap::new(),
             heal_spells: HashMap::new(),
             armor_spells: HashMap::new(),
+            turn_spells: Default::default(),
             is_ko: false,
             last_turn_casts: Vec::new(),
             last_turn: 0,
@@ -2124,13 +2181,26 @@ fn fight_own_signature(fight: &FightWorking, time: &str, won: bool) -> String {
 /// `FighterDamage::spells`) telle que le serveur l'attend. Triée par nom de sort pour un résultat
 /// déterministe (`HashMap` n'a pas d'ordre stable), utile aux tests et sans importance pour le
 /// serveur, qui n'indexe jamais par position.
-fn spell_payloads(spells: &HashMap<String, HashMap<String, i64>>) -> Vec<FightSpellPayload> {
+fn spell_payloads(
+    spells: &HashMap<String, HashMap<String, i64>>,
+    turns: &SpellTurns,
+) -> Vec<FightSpellPayload> {
     let mut payloads: Vec<FightSpellPayload> = spells
         .iter()
         .map(|(spell, by_element)| FightSpellPayload {
             spell: spell.clone(),
             total: by_element.values().sum(),
             by_element: by_element.clone(),
+            by_turn: turns
+                .get(spell)
+                .into_iter()
+                .flatten()
+                .map(|(turn, by_element)| FightSpellTurnPayload {
+                    turn: *turn,
+                    total: by_element.values().sum(),
+                    by_element: by_element.clone(),
+                })
+                .collect(),
         })
         .collect();
     payloads.sort_by(|a, b| a.spell.cmp(&b.spell));
@@ -2186,9 +2256,9 @@ fn build_fight_sync_event(
             };
             // Les trois ventilations par sort — voir `FighterDamage::spells`/`heal_spells`/
             // `armor_spells` et `spell_payloads`.
-            let spells = spell_payloads(&fighter.spells);
-            let heal_spells = spell_payloads(&fighter.heal_spells);
-            let armor_spells = spell_payloads(&fighter.armor_spells);
+            let spells = spell_payloads(&fighter.spells, &fighter.turn_spells.damage);
+            let heal_spells = spell_payloads(&fighter.heal_spells, &fighter.turn_spells.heal);
+            let armor_spells = spell_payloads(&fighter.armor_spells, &fighter.turn_spells.armor);
             FightParticipantPayload {
                 side: if fighter.is_ally {
                     FightSide::Ally
@@ -4273,6 +4343,7 @@ mod tests {
                     spells: HashMap::new(),
                     heal_spells: HashMap::new(),
                     armor_spells: HashMap::new(),
+                    turn_spells: Default::default(),
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
@@ -4290,6 +4361,7 @@ mod tests {
                     spells: HashMap::new(),
                     heal_spells: HashMap::new(),
                     armor_spells: HashMap::new(),
+                    turn_spells: Default::default(),
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
@@ -4402,6 +4474,7 @@ mod tests {
                     spells: HashMap::new(),
                     heal_spells: HashMap::new(),
                     armor_spells: HashMap::new(),
+                    turn_spells: Default::default(),
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
@@ -4419,6 +4492,7 @@ mod tests {
                     spells: HashMap::new(),
                     heal_spells: HashMap::new(),
                     armor_spells: HashMap::new(),
+                    turn_spells: Default::default(),
                     is_ko: false,
                     last_turn_casts: Vec::new(),
                     last_turn: 0,
@@ -4536,6 +4610,11 @@ mod tests {
         assert_eq!(spells[0].total, 180);
         assert_eq!(spells[0].by_element.get("Feu"), Some(&150));
         assert_eq!(spells[0].by_element.get("Air"), Some(&30));
+        // Le même détail, tour par tour (tout au premier tour ici).
+        assert_eq!(spells[0].by_turn.len(), 1);
+        assert_eq!(spells[0].by_turn[0].turn, 1);
+        assert_eq!(spells[0].by_turn[0].total, 180);
+        assert_eq!(spells[0].by_turn[0].by_element.get("Feu"), Some(&150));
     }
 
     /// Armure DONNÉE et soins sont comptés pour les DEUX camps, chacun dans SON total et SA

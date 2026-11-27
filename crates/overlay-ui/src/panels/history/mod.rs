@@ -215,6 +215,7 @@ impl HistoryWindowState {
         self.achats.rows = None;
         self.combats.list.rows = None;
         self.combats.detail.spells.clear();
+        self.combats.detail.fight_spells.clear();
         self.recap.invalidate();
         self.echanges.rows = None;
         self.pactes.rows = None;

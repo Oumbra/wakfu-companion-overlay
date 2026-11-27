@@ -355,6 +355,43 @@ impl Metric {
     }
 }
 
+/// Ce que montre le détail d'un combat déplié : le combat entier ou un seul tour
+/// (`DamageViewMode` du site, switch « Cumulé » / « Tour »).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViewMode {
+    #[default]
+    Cumulative,
+    Turn,
+}
+
+/// Les sorts de tous les combattants d'un combat pour une grandeur : `(nom, instance, sorts)`.
+type FightSpells = Vec<(String, i64, Vec<SpellLine>)>;
+
+/// En vue « Tour » : la valeur et les sorts de chaque combattant, clé `(nom, instance)`.
+type TurnRows = HashMap<(String, i64), (i64, Vec<SpellLine>)>;
+
+/// Les sorts d'un combattant restreints à un tour (`rowForTurn` du site) : seuls ceux qui ont
+/// compté ce tour-là, avec le total et les éléments du tour, du plus fort au plus faible.
+pub fn spells_for_turn(spells: &[SpellLine], turn: i64) -> Vec<SpellLine> {
+    let mut lines: Vec<SpellLine> = spells
+        .iter()
+        .filter_map(|spell| {
+            let at = spell
+                .by_turn
+                .iter()
+                .find(|at| at.turn == turn && at.total != 0)?;
+            Some(SpellLine {
+                spell: spell.spell.clone(),
+                total: at.total,
+                by_element: at.by_element.clone(),
+                by_turn: Vec::new(),
+            })
+        })
+        .collect();
+    lines.sort_by_key(|spell| std::cmp::Reverse(spell.total));
+    lines
+}
+
 /// Un combattant d'un combat : `(id du combat, nom, rang de l'instance)`.
 pub type ParticipantKey = (i64, String, i64);
 
@@ -377,6 +414,12 @@ pub struct DetailState {
     pub open_participants: HashSet<ParticipantKey>,
     /// Sorts lus, par combattant et grandeur — vidé quand la base change.
     pub spells: HashMap<(ParticipantKey, Metric), Vec<SpellLine>>,
+    /// Vue « Cumulé » / « Tour » de chaque combat déplié.
+    pub view: HashMap<i64, ViewMode>,
+    /// Tour affiché en vue « Tour » (par défaut le dernier).
+    pub turn: HashMap<i64, i64>,
+    /// Sorts de tout un combat, lus pour la vue « Tour » — vidé quand la base change.
+    pub fight_spells: HashMap<(i64, Metric), FightSpells>,
     /// Recherche dans le butin, partagée par tous les combats dépliés.
     pub loot_query: String,
     /// Tri du butin, partagé de même.
@@ -455,6 +498,8 @@ const SUMMARY_HEIGHT: f32 = 40.0;
 const IMAGE_SIZE: f32 = 28.0;
 const TOGGLE_ALL_WIDTH: f32 = 140.0;
 const MODE_SWITCH_WIDTH: f32 = 300.0;
+/// Switch « Cumulé » / « Tour ».
+const VIEW_SWITCH_WIDTH: f32 = 180.0;
 /// Victoire / défaite (`.fight-badge.won`, `.lost`).
 const WON: Color32 = items::GAIN;
 const LOST: Color32 = items::LOSS;
@@ -855,11 +900,86 @@ fn fight_detail(
                 .variant(design::SwitchVariant::FirstPlan)
                 .log_name("historique.combats.grandeur"),
         );
+        ui.add_space(16.0);
+        // « Cumulé » / « Tour » puis, en vue « Tour », le tour affiché (`damage-view-switch`).
+        let view = detail.view.entry(fight.id).or_default();
+        ui.add(
+            design::switch(view)
+                .slot(ViewMode::Cumulative, "Cumulé")
+                .slot(ViewMode::Turn, "Tour")
+                .width(VIEW_SWITCH_WIDTH)
+                .log_name("historique.combats.vue"),
+        );
+        if *view == ViewMode::Turn {
+            let last = fight.turns.max(1);
+            let turn = detail.turn.entry(fight.id).or_insert(last);
+            *turn = (*turn).clamp(1, last);
+            ui.add_space(12.0);
+            ui.add(
+                design::label("Tour")
+                    .width(34.0)
+                    .align(egui::Align::Min)
+                    .color(tokens::OVERLAY_TEXT_MUTED),
+            );
+            ui.add(
+                design::stepper(turn)
+                    .range(1..=last)
+                    .size(30.0)
+                    .field_width(48.0)
+                    .log_name("historique.combats.tour"),
+            );
+        }
     });
     ui.add_space(8.0);
     let column_gap = 16.0;
     let column_width = (inner_width - column_gap) / 2.0;
-    let metric = *metric;
+    let metric = detail.metric.get(&fight.id).copied().unwrap_or_default();
+    // En vue « Tour » : chaque combattant recalculé sur ce tour, d'après les sorts de tout le
+    // combat (lus une fois par grandeur).
+    let turn_rows: Option<TurnRows> =
+        (detail.view.get(&fight.id) == Some(&ViewMode::Turn)).then(|| {
+            let turn = detail.turn.get(&fight.id).copied().unwrap_or(1);
+            let all = detail
+                .fight_spells
+                .entry((fight.id, metric))
+                .or_insert_with(|| {
+                    ctx.store
+                        .map(|store| {
+                            store
+                                .fight_spells(fight.id, metric.column())
+                                .unwrap_or_else(|err| {
+                                    tracing::warn!(%err, "historique : sorts illisibles");
+                                    Vec::new()
+                                })
+                        })
+                        .unwrap_or_default()
+                });
+            all.iter()
+                .map(|(name, instance, spells)| {
+                    let lines = spells_for_turn(spells, turn);
+                    let total = lines.iter().map(|spell| spell.total).sum();
+                    ((name.clone(), *instance), (total, lines))
+                })
+                .collect()
+        });
+    let has_turns = detail
+        .fight_spells
+        .get(&(fight.id, metric))
+        .is_some_and(|all| {
+            all.iter()
+                .any(|(_, _, spells)| spells.iter().any(|spell| !spell.by_turn.is_empty()))
+        });
+    if turn_rows.is_some() && !has_turns {
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            ui.add(
+                design::label("Le détail par tour n'a pas été enregistré pour ce combat.")
+                    .align(egui::Align::Min)
+                    .color(tokens::TEXT_DISABLED),
+            );
+        });
+        ui.add_space(6.0);
+    }
     let allies: Vec<&ParticipantRow> = fight.participants.iter().filter(|p| p.is_ally).collect();
     let enemies: Vec<&ParticipantRow> = fight.participants.iter().filter(|p| !p.is_ally).collect();
     // Les sorts des combattants dépliés, lus une fois par grandeur.
@@ -887,11 +1007,16 @@ fn fight_detail(
     }
     let spell_rows = |participant: &ParticipantRow| -> usize {
         let key = (participant_key(fight.id, participant), metric);
-        if detail.open_participants.contains(&key.0) {
-            detail.spells.get(&key).map_or(0, Vec::len).max(1)
-        } else {
-            0
+        if !detail.open_participants.contains(&key.0) {
+            return 0;
         }
+        let count = match &turn_rows {
+            Some(rows) => rows
+                .get(&(participant.name.clone(), participant.instance_index))
+                .map_or(0, |(_, spells)| spells.len()),
+            None => detail.spells.get(&key).map_or(0, Vec::len),
+        };
+        count.max(1)
     };
     let column_height = |side: &[&ParticipantRow]| -> f32 {
         side.iter()
@@ -930,6 +1055,7 @@ fn fight_detail(
                 bar,
                 fight_id: fight.id,
                 detail,
+                turn_rows: turn_rows.as_ref(),
             },
             ctx,
             textures,
@@ -1109,6 +1235,8 @@ struct Column<'a> {
     bar: Color32,
     fight_id: i64,
     detail: &'a DetailState,
+    /// En vue « Tour » : valeurs et sorts recalculés sur le tour affiché.
+    turn_rows: Option<&'a TurnRows>,
 }
 
 /// Une colonne de combattants, chacun dépliable sur ses sorts. Rend le combattant cliqué.
@@ -1122,6 +1250,7 @@ fn participants_column(
         bar,
         fight_id,
         detail,
+        turn_rows,
     }: Column<'_>,
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
@@ -1135,17 +1264,29 @@ fn participants_column(
         text::label_strong_font(ui.ctx(), 12.0),
         tokens::OVERLAY_TEXT_MUTED,
     );
+    let turn_row = |p: &ParticipantRow| {
+        turn_rows.map(|rows| {
+            rows.get(&(p.name.clone(), p.instance_index))
+                .map_or((0, &[][..]), |(value, spells)| (*value, spells.as_slice()))
+        })
+    };
+    let value_of = |p: &ParticipantRow| turn_row(p).map_or_else(|| metric.of(p), |(v, _)| v);
     let mut rows: Vec<&ParticipantRow> = side.to_vec();
-    rows.sort_by_key(|p| std::cmp::Reverse(metric.of(p)));
-    let total: i64 = rows.iter().map(|p| metric.of(p)).sum();
-    let best = rows.first().map_or(0, |p| metric.of(p)).max(1);
+    rows.sort_by_key(|p| std::cmp::Reverse(value_of(p)));
+    let total: i64 = rows.iter().map(|p| value_of(p)).sum();
+    let best = rows
+        .iter()
+        .map(|p| value_of(p).abs())
+        .max()
+        .unwrap_or(0)
+        .max(1);
     let mut top = column.top() + 22.0;
     for participant in rows {
         let row = Rect::from_min_size(
             egui::pos2(column.left(), top),
             egui::vec2(column.width(), PARTICIPANT_ROW - 4.0),
         );
-        let value = metric.of(participant);
+        let value = value_of(participant);
         let key = participant_key(fight_id, participant);
         let open = detail.open_participants.contains(&key);
         let response = ui
@@ -1170,7 +1311,7 @@ fn participants_column(
         }
         let fill = Rect::from_min_size(
             row.min,
-            egui::vec2(row.width() * value as f32 / best as f32, row.height()),
+            egui::vec2(row.width() * value.abs() as f32 / best as f32, row.height()),
         );
         painter.rect_filled(fill, 3.0, bar.gamma_multiply(0.45));
         let icon_rect = Rect::from_center_size(
@@ -1249,10 +1390,13 @@ fn participants_column(
         );
         top += PARTICIPANT_ROW;
         if open {
-            let spells = detail
-                .spells
-                .get(&(key, metric))
-                .map_or(&[][..], Vec::as_slice);
+            let spells = match turn_row(participant) {
+                Some((_, spells)) => spells,
+                None => detail
+                    .spells
+                    .get(&(key, metric))
+                    .map_or(&[][..], Vec::as_slice),
+            };
             top = paint_spells(
                 ui,
                 &painter,
@@ -1427,6 +1571,35 @@ mod tests {
         let lone = [fight(4, 4_000, Some("seul"), &[])];
         let refs: Vec<&FightRow> = lone.iter().collect();
         assert!(matches!(super::entries(&refs)[0], Entry::Single(_)));
+    }
+
+    #[test]
+    fn la_vue_tour_ne_garde_que_les_sorts_du_tour() {
+        use overlay_history::read::SpellTurn;
+        let turn = |turn, total| SpellTurn {
+            turn,
+            total,
+            by_element: vec![("Feu".to_string(), total)],
+        };
+        let spell = |name: &str, total, by_turn| SpellLine {
+            spell: name.to_string(),
+            total,
+            by_element: vec![("Feu".to_string(), total)],
+            by_turn,
+        };
+        let spells = [
+            spell("Épée divine", 120, vec![turn(1, 50), turn(2, 70)]),
+            spell("Colère", 300, vec![turn(1, 300)]),
+            spell("Bond", 0, vec![turn(2, 0)]),
+            spell("Ancien", 40, Vec::new()),
+        ];
+        let first = super::spells_for_turn(&spells, 1);
+        let names: Vec<(&str, i64)> = first.iter().map(|s| (s.spell.as_str(), s.total)).collect();
+        assert_eq!(names, vec![("Colère", 300), ("Épée divine", 50)]);
+        let second = super::spells_for_turn(&spells, 2);
+        assert_eq!(second.len(), 1, "un tour à zéro ne compte pas");
+        assert_eq!(second[0].total, 70);
+        assert!(super::spells_for_turn(&spells, 3).is_empty());
     }
 
     #[test]

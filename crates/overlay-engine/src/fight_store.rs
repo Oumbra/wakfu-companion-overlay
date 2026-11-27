@@ -192,6 +192,7 @@ mod tests {
             spells: std::collections::HashMap::new(),
             heal_spells: std::collections::HashMap::new(),
             armor_spells: std::collections::HashMap::new(),
+            turn_spells: Default::default(),
             is_ko: false,
             last_turn_casts: Vec::new(),
             last_turn: 0,

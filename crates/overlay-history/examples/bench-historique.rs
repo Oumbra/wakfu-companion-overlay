@@ -21,6 +21,7 @@ fn fight(index: i64) -> SyncEvent {
             spell: "Épée Céleste".to_string(),
             total: 12_000,
             by_element: [("Air".to_string(), 12_000)].into_iter().collect(),
+            by_turn: Vec::new(),
         };
         4
     ];

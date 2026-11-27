@@ -96,6 +96,20 @@ pub struct FightSpellPayload {
     pub spell: String,
     pub total: i64,
     pub by_element: HashMap<String, i64>,
+    /// La même ventilation, tour par tour (`SpellTurnBreakdown` du site, `byTurn`) — ce qui
+    /// permet la vue « Tour » d'un combat de l'historique. Omise quand elle est vide (combat
+    /// restauré d'une version antérieure) : le JSON reste alors celui d'avant.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub by_turn: Vec<FightSpellTurnPayload>,
+}
+
+/// Un tour d'un sort : son numéro (à partir de 1), son total et sa part par élément.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FightSpellTurnPayload {
+    pub turn: i64,
+    pub total: i64,
+    pub by_element: HashMap<String, i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
