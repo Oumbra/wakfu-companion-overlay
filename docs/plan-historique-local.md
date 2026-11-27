@@ -370,7 +370,7 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
   Soins de l'overlay, statut KO / A fui en icône, homonymes numérotés `#2`, vignettes de donjon et
   de famille (`bossIllustrations/`, `monstersfamily/` de wakassets) sur les groupes et les runs.
   **Écarts** : pas d'état « Interrompu » (la base impose `won` non nul) ; pas de badge de pierre sur
-  l'illustration ; « Charger plus » sans menu de plage.
+  l'illustration.
 - **Récap** : jour, mois ou année dans le calendrier local, précédent / suivant, bande kamas nets /
   XP / combats / challenges (dessinée pour la fenêtre, pas celle du bandeau Récap), puis trois
   affichages : Cumulé (détail des kamas, XP par personnage, butin et pacte), Donjon & Famille (une
@@ -379,8 +379,7 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
   (`HistoryStore::period_stats`). Revu le 2026-11-27 : médaillons du site dans les titres, détail
   des kamas en infobulle, portraits de classe sur l'XP, butin filtrable, pierre de donjon épinglée
   en tête d'un type, vignettes de donjons empilées au-delà de 5, période bornée au 2026-08-01.
-  **Écarts** : pas de granularité « session » (le récap de session vit dans l'overlay, sur le jeu),
-  pas de sélecteur calendrier.
+  **Écarts** : pas de granularité « session » (le récap de session vit dans l'overlay, sur le jeu).
 - **Hôte Linux** : mode `--historique` et entrée « Historique » du menu de notification dans le
   binaire X11 (vérifié par clippy seulement, pas à l'écran). Une seconde ouverture n'y ramène pas
   la première au premier plan.
@@ -388,11 +387,19 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
   entre-temps, chaque vue relit ses données en gardant recherche, replis et pages chargées.
 - **Taille et position** retrouvées d'une ouverture à l'autre (`historique-fenetre.json`, à part de
   `config.toml` puisque deux processus tournent), ignorées si la bannière ne tombe plus sur un écran.
+- **Retours du 2026-11-27 (première revue écran par écran)** : les menus sont des onglets (barre
+  du haut, Jour / Mois / Année du Récap, qui surplombe la vue) ; les switches prennent le socle bleu
+  de premier plan (celui de Dégâts / Armure / Soins) et les corps du site (`history::switch`) ;
+  tous les champs de recherche sont le même (`history::search_field` : loupe dans le champ, verre à
+  gauche, texte indicatif gris, à la hauteur des switches) ; un seul chevron, `›` replié et `⌄`
+  déplié ; le pied « Charger plus » est épinglé en bas du panneau, en contrôle scindé avec le menu
+  des portées ; le détail d'un combat garde le retrait de son run. Ajouts propres à la fenêtre :
+  sections du Récap repliables, échanges et extractions de pacte repliables un à un.
 - Le symbole ₭ manque dans la police du design system : un montant est toujours suivi de l'icône
   Kamas (`paint_amount`, `paint_amount_left`).
 - Reste :
-  - Récap : sélecteur calendrier ; illustrations des brèches ;
-  - Combats : menu de plage de « Charger plus », badge de pierre ;
+  - Récap : illustrations des brèches ;
+  - Combats : badge de pierre ;
   - corrections au clic droit du site : réattribuer l'objet d'un achat ou d'un pacte, la classe
     d'un personnage (ligne d'XP), un sort à un autre combattant ; suivre un ennemi ;
   - **images des objets de pacte** : la plupart (costumes, équipements de boutique) n'ont ni id en
