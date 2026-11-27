@@ -70,8 +70,8 @@ use overlay_sync::update::{apply as update_apply, UpdateStatus};
 use overlay_ui::alert_sound;
 use overlay_ui::avatars::AvatarAtlas;
 use overlay_ui::background::{
-    spawn_auth_thread, spawn_referentiel_thread, spawn_sync_thread, spawn_update_thread,
-    UpdateCommand,
+    spawn_auth_thread, spawn_history_thread, spawn_referentiel_thread, spawn_sync_thread,
+    spawn_update_thread, UpdateCommand,
 };
 use overlay_ui::build_info;
 use overlay_ui::chat_command::{self, ChatCommand};
@@ -6323,8 +6323,9 @@ fn main() {
             roster: Arc::clone(&roster),
             roster_draft: Arc::clone(&roster_draft),
             catalog: Arc::clone(&catalog),
-            dungeons,
+            dungeons: Arc::clone(&dungeons),
             startup: Arc::clone(&startup),
+            history: spawn_history_thread(Arc::clone(&catalog), Arc::clone(&dungeons)),
         },
         proxy,
         settings_rx,

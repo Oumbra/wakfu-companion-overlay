@@ -17,6 +17,11 @@
 //! de cette machine, et la seule qui puisse échouer sans conséquence : hors ligne, la purge locale
 //! se fait quand même et la session expire d'elle-même côté serveur.
 //!
+//! L'historique local (`history.sqlite3`, 2026-11-27) suit la même règle : c'est l'historique du
+//! joueur, sur son poste, pas une donnée du compte — il ne part qu'avec « Supprimer les données
+//! locales ». Le thread qui l'écrit ne garde la base ouverte que le temps d'un lot
+//! (`background::spawn_history_thread`), pour que cet effacement puisse la supprimer sous Windows.
+//!
 //! La portée de déconnexion ne touche ni la configuration ni les caches : se déconnecter n'est pas
 //! désinstaller, et reperdre son chemin de `wakfu.log` ou son catalogue à chaque déconnexion serait
 //! une punition, pas une protection. C'est le bouton qui va jusque-là, et il le dit avant.
@@ -142,6 +147,7 @@ fn shared_dirs() -> Option<directories::ProjectDirs> {
 ///
 /// - un jeton de session dans le trousseau — il n'y en a qu'après un appairage ;
 /// - un combat en cours ou un récap de session (`fight_store`) ;
+/// - l'historique local (`overlay_history`, `history.sqlite3`) ;
 /// - les compteurs de Suivi (`watchlist`) ;
 /// - un gabarit de tour (`turn_watch::templates`) ;
 /// - l'ancienne racine de configuration, si une migration l'a laissée ;
@@ -160,6 +166,7 @@ pub fn has_user_data(process_start: std::time::SystemTime) -> bool {
     ];
     paths.extend(crate::turn_watch::templates::dir());
     paths.extend(crate::config::legacy_root());
+    paths.extend(overlay_history::HistoryStore::default_path().ok());
     if paths.iter().any(|path| not_empty(path)) {
         return true;
     }

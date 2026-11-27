@@ -1,5 +1,6 @@
 //! **Threads de fond partagés par les deux binaires** (2026-09-14) : compte (`spawn_auth_thread`),
-//! file de synchro (`spawn_sync_thread`), référentiel embarqué (`spawn_referentiel_thread`). Ils
+//! file de synchro (`spawn_sync_thread`), référentiel embarqué (`spawn_referentiel_thread`),
+//! historique local (`spawn_history_thread`). Ils
 //! vivaient
 //! dans `main.rs` (Windows) depuis les lots L3-L5 ; rien n'y dépend de l'OS — `std::thread`,
 //! `mpsc`, `ArcSwap`, `overlay_sync` et un `EventLoopProxy` — et le binaire Linux
@@ -59,6 +60,85 @@ pub fn spawn_referentiel_thread(
             crate::local_data::remove_obsolete_caches();
         })
         .expect("échec de création du thread Référentiel");
+}
+
+/// Thread Historique (2026-11-27, `docs/plan-historique-local.md` §6.2) : écrit dans
+/// `data/history.sqlite3` (`overlay_history`) chaque lot d'événements que le thread moteur lui
+/// relaie — combats, achats, échanges, pactes —, puis rattache les salles de donjon à leur run et
+/// classe les combats. Idempotent : le rattrapage de tout `wakfu.log` à chaque lancement réécrit
+/// les mêmes événements sans rien ajouter.
+///
+/// Rend l'émetteur à confier au thread moteur (`EngineHandles::history`).
+///
+/// **La base n'est ouverte que le temps d'écrire un lot**, puis refermée : un fichier SQLite
+/// ouvert ne peut pas être supprimé sous Windows, et « Supprimer les données locales »
+/// (`local_data::purge`) doit pouvoir emporter l'historique avec le reste du dossier. Les lots
+/// arrivent au rythme des fins de combat : l'ouverture (quelques millisecondes) ne pèse rien, et
+/// les lots en attente sont fusionnés en une seule écriture.
+///
+/// Les recalculs ont besoin du référentiel : le premier lot (le rattrapage du log, au lancement)
+/// attend qu'il soit chargé (`spawn_referentiel_thread`, ~40 ms), cinq secondes au plus.
+///
+/// Best-effort, comme le reste des threads de fond : un échec d'écriture est journalisé, l'overlay
+/// continue ; le prochain lancement réécrira ce que le log contient encore.
+pub fn spawn_history_thread(
+    catalog: Arc<ArcSwap<CatalogIndex>>,
+    dungeons: Arc<ArcSwap<DungeonIndex>>,
+) -> mpsc::Sender<Vec<overlay_engine::SyncEvent>> {
+    let (tx, rx) = mpsc::channel::<Vec<overlay_engine::SyncEvent>>();
+    thread::Builder::new()
+        .name("overlay-history".into())
+        .spawn(move || {
+            let path = match overlay_history::HistoryStore::default_path() {
+                Ok(path) => path,
+                Err(err) => {
+                    tracing::warn!(%err, "historique local indisponible");
+                    return;
+                }
+            };
+            while let Ok(first) = rx.recv() {
+                let mut events = first;
+                while let Ok(more) = rx.try_recv() {
+                    events.extend(more);
+                }
+                wait_for_referentiel(&catalog);
+                let catalog = catalog.load();
+                let dungeons = dungeons.load();
+                let started = Instant::now();
+                let result = overlay_history::HistoryStore::open(&path).and_then(|mut store| {
+                    store.record(
+                        &events,
+                        overlay_history::Referentiels {
+                            catalog: &catalog,
+                            dungeons: &dungeons,
+                        },
+                    )
+                });
+                match result {
+                    Ok(report) => tracing::debug!(
+                        evenements = events.len(),
+                        combats = report.fights_inserted,
+                        achats = report.purchases_inserted,
+                        echanges = report.trades_inserted,
+                        pactes = report.pacts_inserted,
+                        rattaches = report.dungeon_attached,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        "historique local écrit"
+                    ),
+                    Err(err) => tracing::warn!(%err, "écriture de l'historique local impossible"),
+                }
+            }
+        })
+        .expect("échec de création du thread Historique");
+    tx
+}
+
+/// Attend que le thread Référentiel ait publié le catalogue — voir `spawn_history_thread`.
+fn wait_for_referentiel(catalog: &ArcSwap<CatalogIndex>) {
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while catalog.load().is_empty() && Instant::now() < deadline {
+        thread::sleep(std::time::Duration::from_millis(20));
+    }
 }
 
 /// Thread Sync (lot L5, §7.3 du plan) : possède la file SQLite persistante (`overlay_sync::

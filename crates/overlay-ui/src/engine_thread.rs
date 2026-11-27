@@ -464,6 +464,10 @@ pub struct EngineHandles {
     /// trait (voir `overlay_ingest::watcher::run`), un silence en marque donc la fin — et un
     /// fichier vide ou absent ne bloque rien.
     pub startup: Arc<crate::startup::StartupProgress>,
+    /// Vers le thread Historique (`background::spawn_history_thread`) : chaque lot d'événements
+    /// d'historique y part, en plus du thread Sync — sans condition de compte, l'historique local
+    /// est celui du poste.
+    pub history: mpsc::Sender<Vec<overlay_engine::SyncEvent>>,
 }
 
 pub fn spawn_engine_thread(
@@ -487,6 +491,7 @@ pub fn spawn_engine_thread(
         chat_filters: chat_filters_out,
         roster: roster_out,
         roster_draft: roster_draft_out,
+        history: history_tx,
     } = handles;
     thread::Builder::new()
         .name("overlay-engine".into())
@@ -997,6 +1002,7 @@ pub fn spawn_engine_thread(
                 // vivent ailleurs.
                 let sync_events = engine.drain_sync_events();
                 if !sync_events.is_empty() {
+                    let _ = history_tx.send(sync_events.clone());
                     let _ = sync_tx.send(SyncCommand::Enqueue(sync_events));
                 }
                 // Compteurs de Suivi (§14 point 3 du plan, chantier fermé le 2026-09-07) —

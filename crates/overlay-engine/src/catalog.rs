@@ -695,6 +695,13 @@ impl CatalogIndex {
             .map(|entry| entry.id)
     }
 
+    /// Le monstre d'id `id` est-il au référentiel ? Sert là où le serveur faisait une jointure
+    /// stricte `monsters.id = fight_participants.monster_id` (`overlay-history`, type de combat) :
+    /// un id inconnu n'y comptait pas, même si le nom, lui, aurait été reconnu.
+    pub fn has_monster_id(&self, id: i64) -> bool {
+        self.monsters_by_id.contains_key(&id)
+    }
+
     /// Miroir de `find_item_id` pour un monstre — voir `HistorySyncService.monsterId`.
     pub fn find_monster_id(&self, name: &str) -> Option<i64> {
         self.monsters_by_name

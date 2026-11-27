@@ -26,6 +26,7 @@ path = "src/main.rs"
 overlay-engine = { path = "../overlay-engine" }
 overlay-ingest = { path = "../overlay-ingest" }
 overlay-sync = { path = "../overlay-sync" }
+overlay-history = { path = "../overlay-history" }
 overlay-platform = { path = "../overlay-platform" }
 
 arc-swap = "1"
