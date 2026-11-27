@@ -209,8 +209,10 @@ wakassets, qui en est manifestement une extraction convertie en PNG.
 
 **Règle (décision du mainteneur, 2026-11-27) : l'overlay ne lit, n'ouvre ni n'extrait jamais
 aucun fichier du client de jeu** — seul `wakfu.log` est lu, comme aujourd'hui. Les images
-manquantes sont mises à disposition par le **CDN de l'overlay** (§5.2) ; le préparer est un travail
-du mainteneur, hors du binaire livré.
+manquantes sont mises à disposition par le **CDN de l'overlay** (§5.2). Leur récupération se fait
+**en amont, dans le projet** (outil lancé à la main sur le poste du mainteneur, à chaque patch du
+jeu), et le résultat — des PNG — est commité dans `cdn/`. Elle n'a lieu **ni pendant la
+compilation** (aucun `build.rs`, aucune étape de CI), **ni pendant l'exécution** de l'overlay.
 
 ## 6. Stockage local
 
