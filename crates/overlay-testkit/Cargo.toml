@@ -29,3 +29,6 @@ serde_json = "1"
 # `Harness::render` (`image::RgbaImage`), déclaré ici pour pouvoir le nommer. Même version
 # qu'`overlay-ui`, jamais un second décodeur PNG dans l'arbre.
 image = { version = "0.25", default-features = false, features = ["png"] }
+# `examples/historique.rs` : rendu de la fenêtre d'historique sur une vraie base locale.
+overlay-history = { path = "../overlay-history" }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

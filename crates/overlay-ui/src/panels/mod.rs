@@ -19,6 +19,7 @@ pub mod combat_spell_block;
 pub mod counter_edit;
 pub mod drag;
 pub mod feature_switch;
+pub mod history;
 pub mod hover_reveal;
 pub mod login;
 pub mod notifications;
