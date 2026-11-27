@@ -223,14 +223,14 @@ pub fn history_scenario() -> Vec<Step> {
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("combats-tour"),
                 Step::Click {
-                    x: 910.0,
+                    x: 920.0,
                     y: 165.0,
                     label: "donjons et familles",
                 },
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("combats-types"),
                 Step::Click {
-                    x: 1030.0,
+                    x: 1036.0,
                     y: 165.0,
                     label: "tout replier",
                 },
@@ -239,13 +239,28 @@ pub fn history_scenario() -> Vec<Step> {
             ]);
         }
         if name == "recap" {
-            // Aujourd'hui peut être vide : le mois et l'année en cours.
+            // Le calendrier ouvert sous son bouton, puis refermé par le même bouton.
+            steps.extend([
+                Step::Click {
+                    x: 322.0,
+                    y: 217.0,
+                    label: "calendrier",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("recap-calendrier"),
+                Step::Click {
+                    x: 322.0,
+                    y: 217.0,
+                    label: "calendrier",
+                },
+            ]);
+            // Aujourd'hui peut être vide : le mois et l'année en cours (menu en onglets).
             for (x, label, capture) in [
-                (174.0, "mois", "recap-mois"),
-                (264.0, "annee", "recap-annee"),
+                (539.0, "mois", "recap-mois"),
+                (880.0, "annee", "recap-annee"),
             ] {
                 steps.extend([
-                    Step::Click { x, y: 165.0, label },
+                    Step::Click { x, y: 168.0, label },
                     Step::Pause(Duration::from_secs(2)),
                     Step::Capture(capture),
                 ]);
@@ -253,22 +268,22 @@ pub fn history_scenario() -> Vec<Step> {
             // L'année par donjon et famille, sa première ligne dépliée, puis par type.
             steps.extend([
                 Step::Click {
-                    x: 950.0,
-                    y: 165.0,
+                    x: 1002.0,
+                    y: 217.0,
                     label: "donjon et famille",
                 },
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("recap-donjons"),
                 Step::Click {
                     x: 550.0,
-                    y: 314.0,
+                    y: 366.0,
                     label: "premier groupe",
                 },
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("recap-donjons-deplie"),
                 Step::Click {
-                    x: 1006.0,
-                    y: 165.0,
+                    x: 1036.0,
+                    y: 217.0,
                     label: "type",
                 },
                 Step::Pause(Duration::from_secs(1)),
@@ -276,7 +291,7 @@ pub fn history_scenario() -> Vec<Step> {
                 // « Donjon 3 joueurs » déplié : ses tuiles de donjons, sa pierre en tête du butin.
                 Step::Click {
                     x: 550.0,
-                    y: 393.0,
+                    y: 445.0,
                     label: "un type",
                 },
                 Step::Pause(Duration::from_secs(1)),
@@ -284,6 +299,21 @@ pub fn history_scenario() -> Vec<Step> {
             ]);
         }
         if name == "echanges" {
+            // Le premier échange replié sur sa ligne d'en-tête, puis rouvert.
+            steps.extend([
+                Step::Click {
+                    x: 550.0,
+                    y: 241.0,
+                    label: "premier échange",
+                },
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("echanges-replie"),
+                Step::Click {
+                    x: 550.0,
+                    y: 241.0,
+                    label: "premier échange",
+                },
+            ]);
             // Plus bas dans la liste : kamas et objets cédés.
             steps.extend([
                 Step::Scroll {
@@ -302,9 +332,22 @@ pub fn history_scenario() -> Vec<Step> {
             y: TAB_Y,
             label: "achats",
         },
+        // Le menu des portées de « Charger plus », ouvert au-dessus du pied, puis refermé.
+        Step::Click {
+            x: 624.0,
+            y: 784.0,
+            label: "portée",
+        },
+        Step::Pause(Duration::from_secs(1)),
+        Step::Capture("achats-portee"),
+        Step::Click {
+            x: 624.0,
+            y: 784.0,
+            label: "portée",
+        },
         Step::Click {
             x: 450.0,
-            y: 160.0,
+            y: 165.0,
             label: "champ de recherche",
         },
         Step::Scroll {
@@ -549,7 +592,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            21
+            24
         );
     }
 

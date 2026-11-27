@@ -6,6 +6,7 @@
 //! permet au harnais de rendu (`overlay-testkit`) de le dessiner hors écran sur une vraie base.
 
 pub mod achats;
+pub mod calendar;
 pub mod combats;
 pub mod echanges;
 pub mod format;
@@ -52,8 +53,8 @@ pub(crate) fn paint_icon(
     );
 }
 
-/// Le chevron d'une ligne repliable centré sur `center` : `⌄` dépliée, `▸` repliée. Le triangle
-/// du jeu pointe vers la gauche (voir `DsIcon::TriangleRight`) : il est peint en miroir.
+/// Le chevron d'une ligne repliable centré sur `center` : `⌄` dépliée, `›` repliée — le même trait
+/// tourné d'un quart de tour, partout dans la fenêtre (retour utilisateur du 2026-11-27).
 pub(crate) fn paint_caret(
     ui: &Ui,
     painter: &egui::Painter,
@@ -61,20 +62,46 @@ pub(crate) fn paint_caret(
     open: bool,
     tint: egui::Color32,
 ) {
-    if open {
-        paint_icon(ui, painter, center, DsIcon::ChevronDown, 12.0, tint);
-        return;
-    }
-    let ds = design::DesignSystem::get(ui.ctx());
-    let icon = DsIcon::TriangleRight;
-    let drawn = design::components::icon_button::glyph_fit(ds.icon_native_size(icon), 12.0);
-    ds.paint_icon_flipped(
-        painter,
-        egui::Rect::from_center_size(center, drawn),
-        icon,
-        tint,
-        true,
-    );
+    let icon = if open {
+        DsIcon::ChevronDown
+    } else {
+        DsIcon::ChevronRight
+    };
+    paint_icon(ui, painter, center, icon, CARET_SIZE, tint);
+}
+
+/// Côté du chevron d'une ligne repliable.
+const CARET_SIZE: f32 = 12.0;
+
+/// Hauteur commune des contrôles d'une ligne d'outils : un switch, un champ de recherche, un
+/// bouton icône — le socle de premier plan fait 36 (`.icon-switch` et `app-loot-search` du site
+/// partagent de même leurs 32 px).
+pub(crate) const CONTROL_HEIGHT: f32 = 36.0;
+/// Corps des libellés de switch (`.icon-switch-option` du site, 0,68 à 0,72 rem en gras, à
+/// l'échelle de la fenêtre).
+pub(crate) const SWITCH_TEXT: f32 = 12.0;
+/// Corps du texte d'un champ de recherche (`.search-input`, 0,78 à 0,82 rem).
+const SEARCH_TEXT: f32 = 14.0;
+
+/// **Le champ de recherche de la fenêtre** (`app-loot-search`, `.search-input` du site) : loupe
+/// dans le champ, verre à gauche ; texte indicatif gris ; à la hauteur des switches voisins.
+/// L'appelant ajoute largeur, croix d'effacement et nom de journal.
+pub(crate) fn search_field<'a>(query: &'a mut String, placeholder: &str) -> design::Input<'a> {
+    design::input(query)
+        .placeholder(placeholder)
+        .leading_icon(DsIcon::Search)
+        .leading_icon_mirrored(false)
+        .box_height(CONTROL_HEIGHT)
+        .text_size(SEARCH_TEXT)
+        .placeholder_color(design::tokens::OVERLAY_TEXT_MUTED)
+}
+
+/// **Le switch de la fenêtre** : le socle bleu de premier plan (celui de Dégâts / Armure / Soins)
+/// et les libellés au corps du site. Les menus, eux, sont des onglets (`design::tabs`).
+pub(crate) fn switch<T: PartialEq + Copy>(value: &mut T) -> design::Switch<'_, T> {
+    design::switch(value)
+        .variant(design::SwitchVariant::FirstPlan)
+        .text_size(SWITCH_TEXT)
 }
 
 /// Un montant en kamas aligné à droite sur `right` : le nombre, puis l'icône Kamas — la police du

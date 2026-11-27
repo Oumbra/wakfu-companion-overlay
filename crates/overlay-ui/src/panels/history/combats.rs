@@ -526,14 +526,19 @@ pub struct CombatsState {
 }
 
 const SUMMARY_HEIGHT: f32 = 40.0;
+/// Le switch de tri du butin (`.loot-sort-switch` du site : 78 × 32, libellés 0,62 rem).
+const LOOT_SWITCH_WIDTH: f32 = 96.0;
+const LOOT_SWITCH_TEXT: f32 = 11.0;
+/// Retrait d'un combat sous son run de donjon — le détail déplié le garde aussi.
+const RUN_INDENT: f32 = 24.0;
 /// Côté de la vignette d'une ligne de groupe (`.fight-group-image`, 18 px sur le site).
 const GROUP_IMAGE: f32 = 20.0;
 const IMAGE_SIZE: f32 = 28.0;
 /// Côté du bouton « Tout replier » / « Tout déplier ».
-const TOGGLE_ALL_SIZE: f32 = 32.0;
-const MODE_SWITCH_WIDTH: f32 = 380.0;
+const TOGGLE_ALL_SIZE: f32 = super::CONTROL_HEIGHT;
+const MODE_SWITCH_WIDTH: f32 = 320.0;
 /// Switch « Cumulé » / « Tour ».
-const VIEW_SWITCH_WIDTH: f32 = 180.0;
+const VIEW_SWITCH_WIDTH: f32 = 150.0;
 /// Écart entre le switch de vue et le libellé « Tour », et largeur de ce libellé.
 const TURN_GAP: f32 = 12.0;
 const TURN_LABEL_WIDTH: f32 = 36.0;
@@ -687,15 +692,15 @@ pub fn show(
     // Recherche, regroupement (pictogramme + libellé), puis le bouton « Tout replier » /
     // « Tout déplier » aux deux chevrons (`fight-group-controls` du site).
     ui.horizontal(|ui| {
+        let gap = ui.spacing().item_spacing.x;
         ui.add(
-            design::input(search)
-                .placeholder("Rechercher un ennemi, un allié, un objet...")
+            super::search_field(search, "Rechercher un ennemi, un allié, un objet...")
                 .clearable(true)
-                .width(zones.inner.width() - MODE_SWITCH_WIDTH - TOGGLE_ALL_SIZE - 24.0)
+                .width(zones.inner.width() - MODE_SWITCH_WIDTH - TOGGLE_ALL_SIZE - 2.0 * gap)
                 .log_name("historique.combats.recherche"),
         );
         ui.add(
-            design::switch(mode)
+            super::switch(mode)
                 .slot(GroupMode::Day, "Jour")
                 .icon_beside_label(design::DsIcon::Calendar)
                 .slot(GroupMode::Type, "Donjons & familles")
@@ -739,6 +744,8 @@ pub fn show(
     });
     ui.add_space(8.0);
 
+    let footer = pager.footer(ui, zones, &times, shown, "historique.combats");
+    let zones = footer.as_ref().unwrap_or(zones);
     zones.scroll_area(ui, "historique-combats", |ui, width| {
         if rows.is_empty() {
             ui.add(
@@ -788,7 +795,6 @@ pub fn show(
             }
             ui.add_space(6.0);
         }
-        pager.footer(ui, width, &times, shown, "historique.combats");
     });
 }
 
@@ -885,7 +891,18 @@ fn fight_block(
         }
     }
     if open {
-        fight_detail(ui, width, fight, detail, ctx, textures);
+        if in_run {
+            // Le détail garde le retrait du combat sous son run : on voit à quoi il appartient.
+            let rect = Rect::from_min_size(
+                ui.cursor().min + egui::vec2(RUN_INDENT, 0.0),
+                egui::vec2(width - RUN_INDENT, f32::INFINITY),
+            );
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                fight_detail(ui, width - RUN_INDENT, fight, detail, ctx, textures);
+            });
+        } else {
+            fight_detail(ui, width, fight, detail, ctx, textures);
+        }
     }
 }
 
@@ -960,7 +977,7 @@ fn fight_summary(
     let (rect, image_right, response) = summary_frame(
         ui,
         width,
-        if in_run { 24.0 } else { 0.0 },
+        if in_run { RUN_INDENT } else { 0.0 },
         fight.started_at,
         icon,
         face.map(|p| p.name.clone()),
@@ -1142,7 +1159,7 @@ fn header_switches(ui: &mut Ui, header: Rect, fight: &FightRow, detail: &mut Det
     // « Cumulé » / « Tour » puis, en vue « Tour », le tour affiché (`damage-view-switch`).
     let view = detail.view.entry(fight.id).or_default();
     let turn_mode = *view == ViewMode::Turn;
-    let view_switch = design::switch(view)
+    let view_switch = super::switch(view)
         .slot(ViewMode::Cumulative, "Cumulé")
         .slot(ViewMode::Turn, "Tour")
         .width(VIEW_SWITCH_WIDTH)
@@ -1581,7 +1598,9 @@ pub(super) fn loot_controls(
         tooltip(LootSort::Rarity, "Rareté"),
     );
     let before = filter.sort;
-    let switch = design::switch(&mut filter.sort)
+    let switch = super::switch(&mut filter.sort)
+        .text_size(LOOT_SWITCH_TEXT)
+        .width(LOOT_SWITCH_WIDTH)
         .slot(LootSort::Name, name_tip)
         .glyph("Az")
         .slot(LootSort::Quantity, quantity_tip)
@@ -1594,11 +1613,11 @@ pub(super) fn loot_controls(
     let mut changed = false;
     ui.horizontal(|ui| {
         ui.add_space(indent);
+        let gap = ui.spacing().item_spacing.x;
         ui.add(
-            design::input(&mut filter.query)
-                .placeholder("Rechercher un objet...")
+            super::search_field(&mut filter.query, "Rechercher un objet...")
                 .clearable(true)
-                .width(inner_width - switch_width - 8.0)
+                .width(inner_width - switch_width - gap)
                 .log_name(format!("{log_name}.recherche")),
         );
         changed = ui.add(switch).changed();

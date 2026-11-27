@@ -178,6 +178,8 @@ pub fn show(
     let groups = groups(&rows[..shown], &state.query, state.order, catalog);
     let pager = &mut state.pager;
     let collapsed_days = &mut state.collapsed;
+    let footer = pager.footer(ui, zones, &times, shown, "historique.achats");
+    let zones = footer.as_ref().unwrap_or(zones);
     zones.scroll_area(ui, "historique-achats", |ui, width| {
         if groups.is_empty() {
             ui.add(design::label("Aucun achat enregistré.").color(tokens::TEXT_DISABLED));
@@ -201,7 +203,6 @@ pub fn show(
             }
             ui.add_space(6.0);
         }
-        pager.footer(ui, width, &times, shown, "historique.achats");
     });
 }
 

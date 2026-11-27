@@ -2,7 +2,7 @@
 //! de tri (`app-history-list-header` du site), en-tête de jour repliable, regroupement par jour,
 //! et ligne d'objet avec son icône et le fond de sa rareté.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use chrono::NaiveDate;
 use egui::{Align2, Color32, Rect, Sense, Ui};
@@ -17,7 +17,6 @@ use crate::remote_icons::RemoteIconTextures;
 
 /// Taille de police des lignes de liste.
 pub(crate) const FONT_SIZE: f32 = 14.0;
-const SORT_SWITCH_WIDTH: f32 = 72.0;
 pub(super) const DAY_HEADER_HEIGHT: f32 = 30.0;
 
 /// `--btn-active-green` du site : kamas et objets acquis.
@@ -51,6 +50,10 @@ pub struct ListState<T> {
     pub query: String,
     pub order: SortOrder,
     pub collapsed: BTreeSet<NaiveDate>,
+    /// Entrées repliées (identifiant en base) — un échange ou une extraction de pacte réduit à sa
+    /// ligne d'en-tête. Ajout propre à la fenêtre (le site ne replie pas une entrée), demandé le
+    /// 2026-11-27 : de gros échanges dans une même journée se parcourent mieux repliés.
+    pub collapsed_entries: HashSet<i64>,
     /// `None` : pas encore lu (ou à relire).
     pub rows: Option<Vec<T>>,
     pub pager: super::pager::Pager,
@@ -62,6 +65,7 @@ impl<T> Default for ListState<T> {
             query: String::new(),
             order: SortOrder::default(),
             collapsed: BTreeSet::new(),
+            collapsed_entries: HashSet::new(),
             rows: None,
             pager: super::pager::Pager::default(),
         }
@@ -108,23 +112,21 @@ pub fn list_header(
     placeholder: &str,
     log_name: &str,
 ) {
+    let sort = super::switch(order)
+        .slot(SortOrder::Newest, "Plus récent en premier")
+        .icon(DsIcon::ArrowUp)
+        .slot(SortOrder::Oldest, "Plus ancien en premier")
+        .icon(DsIcon::ArrowDown)
+        .log_name(format!("{log_name}.tri"));
+    let sort_width = sort.desired_size().x;
     ui.horizontal(|ui| {
+        let gap = ui.spacing().item_spacing.x;
         ui.add(
-            design::input(query)
-                .placeholder(placeholder)
-                .leading_icon(design::DsIcon::Search)
-                .width(zones.inner.width() - SORT_SWITCH_WIDTH - 12.0)
+            super::search_field(query, placeholder)
+                .width(zones.inner.width() - sort_width - gap)
                 .log_name(format!("{log_name}.recherche")),
         );
-        ui.add(
-            design::switch(order)
-                .slot(SortOrder::Newest, "Plus récent en premier")
-                .icon(design::DsIcon::ArrowUp)
-                .slot(SortOrder::Oldest, "Plus ancien en premier")
-                .icon(design::DsIcon::ArrowDown)
-                .width(SORT_SWITCH_WIDTH)
-                .log_name(format!("{log_name}.tri")),
-        );
+        ui.add(sort);
     });
     ui.add_space(8.0);
 }
@@ -346,6 +348,27 @@ pub fn paint_compact_item(
         text::label_font(ui.ctx(), dims.font_size),
         Color32::WHITE,
     );
+}
+
+/// La ligne d'en-tête d'une entrée repliable (échange, extraction) : survol et clic sur toute la
+/// ligne, chevron au bout comme les combats. Rend `true` au clic — à appeler AVANT de peindre
+/// l'horloge, dont l'infobulle doit rester au-dessus.
+pub fn entry_toggle(ui: &Ui, header: Rect, open: bool, id: egui::Id) -> bool {
+    let response = ui
+        .interact(header, id, Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(header.expand(3.0), 4.0, Color32::from_white_alpha(8));
+    }
+    super::paint_caret(
+        ui,
+        ui.painter(),
+        egui::pos2(header.right() - 6.0, header.center().y),
+        open,
+        tokens::TEXT_GOLD,
+    );
+    response.clicked()
 }
 
 /// L'horloge d'une entrée, avec la date et l'heure complètes au survol (`formatDateTime`).

@@ -42,7 +42,11 @@ pub fn matches(pact: &PactRow, query: &str, catalog: &CatalogIndex) -> bool {
             .any(|line| normalize_wakfu_name(&items::item_name(line, catalog)).contains(query))
 }
 
-fn entry_height(pact: &PactRow) -> f32 {
+/// Hauteur d'une extraction ; repliée, sa seule ligne d'en-tête.
+fn entry_height(pact: &PactRow, open: bool) -> f32 {
+    if !open {
+        return PAD_Y * 2.0 + HEADER_HEIGHT;
+    }
     let rows = pact.items.len() as f32;
     PAD_Y * 2.0
         + HEADER_HEIGHT
@@ -80,6 +84,9 @@ pub fn show(
     );
     let pager = &mut state.pager;
     let collapsed_days = &mut state.collapsed;
+    let collapsed_entries = &mut state.collapsed_entries;
+    let footer = pager.footer(ui, zones, &times, shown, "historique.pactes");
+    let zones = footer.as_ref().unwrap_or(zones);
     zones.scroll_area(ui, "historique-pactes", |ui, width| {
         if groups.is_empty() {
             ui.add(
@@ -102,25 +109,33 @@ pub fn show(
                 continue;
             }
             for (index, pact) in pacts.iter().enumerate() {
-                pact_entry(ui, width, pact, index, ctx, textures);
+                let open = !collapsed_entries.contains(&pact.id);
+                if pact_entry(ui, width, pact, index, open, ctx, textures)
+                    && !collapsed_entries.remove(&pact.id)
+                {
+                    collapsed_entries.insert(pact.id);
+                }
             }
             ui.add_space(6.0);
         }
-        pager.footer(ui, width, &times, shown, "historique.pactes");
     });
 }
 
+/// Une extraction ; rend `true` quand sa ligne d'en-tête est cliquée (replier / déplier).
+#[allow(clippy::too_many_arguments)]
 fn pact_entry(
     ui: &mut Ui,
     width: f32,
     pact: &PactRow,
     index: usize,
+    open: bool,
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
-) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, entry_height(pact)), Sense::hover());
+) -> bool {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(width, entry_height(pact, open)), Sense::hover());
     if !ui.is_rect_visible(rect) {
-        return;
+        return false;
     }
     let painter = ui.painter_at(rect);
     if index % 2 == 1 {
@@ -133,6 +148,12 @@ fn pact_entry(
     );
     let inner = rect.shrink2(egui::vec2(PAD_X, PAD_Y));
     let header_center = inner.top() + HEADER_HEIGHT / 2.0;
+    let clicked = items::entry_toggle(
+        ui,
+        Rect::from_min_size(inner.min, egui::vec2(inner.width(), HEADER_HEIGHT)),
+        open,
+        ui.id().with(("pacte-repli", pact.id)),
+    );
     items::entry_clock(
         ui,
         egui::pos2(inner.left() + 8.0, header_center),
@@ -146,6 +167,9 @@ fn pact_entry(
         text::label_strong_font(ui.ctx(), 12.0),
         tokens::OVERLAY_TEXT_MUTED,
     );
+    if !open {
+        return clicked;
+    }
     let mut row_top = inner.top() + HEADER_HEIGHT + HEADER_GAP;
     for line in &pact.items {
         let row = Rect::from_min_size(
@@ -155,6 +179,7 @@ fn pact_entry(
         items::paint_compact_item(ui, &painter, row, line, ITEM_ROW, ctx, textures);
         row_top += ITEM_ROW.height + ITEM_GAP;
     }
+    clicked
 }
 
 #[cfg(test)]
@@ -179,8 +204,9 @@ mod tests {
         assert!(matches(&pact, &normalize_wakfu_name("27 nov."), &catalog));
         assert!(!matches(&pact, &normalize_wakfu_name("laine"), &catalog));
         assert_eq!(
-            entry_height(&pact),
+            entry_height(&pact, true),
             PAD_Y * 2.0 + HEADER_HEIGHT + HEADER_GAP + ITEM_ROW.height
         );
+        assert_eq!(entry_height(&pact, false), PAD_Y * 2.0 + HEADER_HEIGHT);
     }
 }

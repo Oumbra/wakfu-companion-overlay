@@ -10,7 +10,9 @@
 //! se déplie sur ses totaux, ses donjons (mode Type), l'XP par personnage et son butin.
 //!
 //! **Écarts** : pas de granularité « session » (le récap de la session en cours vit sur le jeu,
-//! dans l'overlay), pas de sélecteur calendrier, pas d'illustration dédiée aux brèches.
+//! dans l'overlay), pas d'illustration dédiée aux brèches. **Ajout** : chaque section (expérience,
+//! butin, pacte, donjons) se replie — la fenêtre n'a pas la hauteur bornée du site, une longue
+//! liste d'expérience y repoussait tout le reste.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -417,6 +419,10 @@ pub struct RecapState {
     cache: Option<(Granularity, NaiveDate, bool, PeriodStats)>,
     /// La classe de chaque personnage (portraits des lignes d'expérience).
     classes: Option<HashMap<String, String>>,
+    /// Le calendrier ouvert, sur cette page ; `None` : fermé.
+    picker: Option<NaiveDate>,
+    /// Sections repliées (`portée/section` : `cumul/xp`, `<ligne>/butin`…).
+    collapsed: HashSet<String>,
 }
 
 impl RecapState {
@@ -427,9 +433,10 @@ impl RecapState {
     }
 }
 
-const NAV_WIDTH: f32 = 36.0;
-const GRANULARITY_WIDTH: f32 = 270.0;
-const MODE_WIDTH: f32 = 168.0;
+const NAV_WIDTH: f32 = super::CONTROL_HEIGHT;
+/// La période entre précédent et suivant : place fixe, le libellé le plus long (« septembre 2026 »)
+/// compris — le sélecteur ne s'étire pas sur la ligne.
+const PERIOD_LABEL_WIDTH: f32 = 170.0;
 const GROUP_ROW: f32 = 36.0;
 const BAND_HEIGHT: f32 = 64.0;
 /// Côté des médaillons d'en-tête de section.
@@ -460,23 +467,28 @@ pub fn show(
         .map_or(current, |start| period_start(state.granularity, start));
     let before = (state.granularity, start, state.mode);
 
-    // Granularité, précédent / libellé / suivant, puis l'affichage du détail en pictogrammes.
+    // Le menu Jour / Mois / Année surplombe tout le reste : c'est lui qui décide de ce que montre
+    // la suite (retour utilisateur du 2026-11-27). Un menu, donc des onglets, comme la barre du
+    // haut de la fenêtre.
+    let previous = state.granularity;
+    design::tabs(&mut state.granularity)
+        .entry(Granularity::Day, "Jour")
+        .entry(Granularity::Month, "Mois")
+        .entry(Granularity::Year, "Année")
+        .log_name("historique.recap.granularite")
+        .show(ui);
+    if state.granularity != previous {
+        // Une nouvelle granularité repart de la période en cours (`setGranularity`).
+        start = period_start(state.granularity, ctx.today);
+        state.picker = None;
+    }
+    ui.add_space(8.0);
+
+    // À gauche, précédent / période / suivant puis le calendrier (`recap-period-nav-date`) ; à
+    // droite, l'affichage du détail en switch (`recap-group-switch`).
+    let floor = period_start(state.granularity, tracking_start());
+    let mut calendar_rect = None;
     ui.horizontal(|ui| {
-        let previous = state.granularity;
-        ui.add(
-            design::switch(&mut state.granularity)
-                .slot(Granularity::Day, "Jour")
-                .slot(Granularity::Month, "Mois")
-                .slot(Granularity::Year, "Année")
-                .width(GRANULARITY_WIDTH)
-                .log_name("historique.recap.granularite"),
-        );
-        if state.granularity != previous {
-            // Une nouvelle granularité repart de la période en cours (`setGranularity`).
-            start = period_start(state.granularity, ctx.today);
-        }
-        ui.add_space(16.0);
-        let floor = period_start(state.granularity, tracking_start());
         let previous_enabled = start > floor;
         if ui
             .add(
@@ -491,14 +503,13 @@ pub fn show(
         {
             start = shift(state.granularity, start, -1);
         }
-        let label_width =
-            zones.inner.width() - GRANULARITY_WIDTH - MODE_WIDTH - 2.0 * NAV_WIDTH - 84.0;
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(label_width, NAV_WIDTH), Sense::hover());
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(PERIOD_LABEL_WIDTH, NAV_WIDTH), Sense::hover());
         ui.painter().text(
             rect.center(),
             Align2::CENTER_CENTER,
             label(state.granularity, start, ctx.today),
-            text::label_strong_font(ui.ctx(), items::FONT_SIZE + 2.0),
+            text::label_strong_font(ui.ctx(), items::FONT_SIZE + 1.0),
             tokens::TEXT_GOLD,
         );
         // Pas de période future.
@@ -517,19 +528,60 @@ pub fn show(
         {
             start = shift(state.granularity, start, 1);
         }
-        ui.add_space(16.0);
-        ui.add(
-            design::switch(&mut state.mode)
-                .slot(DetailMode::Cumulative, "Cumulé")
-                .icon(DsIcon::Lines)
-                .slot(DetailMode::ByGroup, "Donjon & Famille")
-                .icon(DsIcon::Dungeon)
-                .slot(DetailMode::ByType, "Type")
-                .icon(DsIcon::CrossedSwords)
-                .width(MODE_WIDTH)
-                .log_name("historique.recap.detail"),
+        let calendar = ui.add(
+            design::icon_button(DsIcon::Calendar)
+                .size(NAV_WIDTH)
+                .tooltip("Choisir une date")
+                .log_name("historique.recap.calendrier"),
         );
+        if calendar.clicked() {
+            state.picker = match state.picker {
+                Some(_) => None,
+                None => Some(start),
+            };
+        }
+        calendar_rect = Some(calendar.rect);
+        let mode_switch = super::switch(&mut state.mode)
+            .slot(DetailMode::Cumulative, "Cumulé")
+            .icon(DsIcon::Lines)
+            .slot(DetailMode::ByGroup, "Donjon & Famille")
+            .icon(DsIcon::Dungeon)
+            .slot(DetailMode::ByType, "Type")
+            .icon(DsIcon::CrossedSwords)
+            .log_name("historique.recap.detail");
+        let mode_width = mode_switch.desired_size().x;
+        ui.add_space((ui.available_width() - mode_width).max(0.0));
+        ui.add(mode_switch);
     });
+    // Le calendrier, ouvert sous son bouton.
+    if let (Some(page), Some(anchor)) = (state.picker.as_mut(), calendar_rect) {
+        let mut close = false;
+        let picked = super::calendar::show(
+            ui,
+            anchor,
+            state.granularity,
+            page,
+            &super::calendar::Bounds {
+                selected: start,
+                floor,
+                current,
+            },
+            &mut close,
+        );
+        if let Some(picked) = picked {
+            tracing::info!(">>> clic historique.recap.calendrier {picked}");
+            start = picked;
+        }
+        // Le clic qui vient d'ouvrir le calendrier tombe « à côté » : il ne le referme pas.
+        let opening = ui.input(|i| i.pointer.any_click())
+            && calendar_rect.is_some_and(|rect| {
+                ui.input(|i| i.pointer.interact_pos())
+                    .is_some_and(|pos| rect.contains(pos))
+            });
+        if close && !opening {
+            state.picker = None;
+        }
+    }
     ui.add_space(8.0);
     // Changer de granularité, de période ou d'affichage referme l'accordéon : les lignes d'ici
     // n'ont pas de raison d'exister là-bas (`setGranularity`, `onOffsetChange`, `setDetailMode`).
@@ -573,6 +625,7 @@ pub fn show(
         pacts,
         cache,
         classes,
+        collapsed,
         ..
     } = state;
     let Some((_, _, _, stats)) = cache else {
@@ -597,12 +650,21 @@ pub fn show(
                 );
             }
             for group in &groups {
-                group_block(ui, width, group, expanded, loot, classes, ctx, textures);
+                group_block(
+                    ui, width, group, expanded, collapsed, loot, classes, ctx, textures,
+                );
             }
             return;
         }
         // Le bandeau porte déjà Kamas et Combats : l'expérience, le butin, puis le pacte.
-        xp_section(ui, width, &stats.xp_by_character, classes, ctx);
+        xp_section(
+            ui,
+            width,
+            &stats.xp_by_character,
+            classes,
+            ctx,
+            Fold::new(collapsed, "cumul/xp"),
+        );
         ui.add_space(12.0);
         loot_block(
             ui,
@@ -614,6 +676,7 @@ pub fn show(
                 stone: None,
                 log_name: "historique.recap.butin",
             },
+            Fold::new(collapsed, "cumul/butin"),
             loot,
             ctx,
             textures,
@@ -631,6 +694,7 @@ pub fn show(
                     stone: None,
                     log_name: "historique.recap.pacte",
                 },
+                Fold::new(collapsed, "cumul/pacte"),
                 pacts,
                 ctx,
                 textures,
@@ -824,10 +888,52 @@ fn band_cells(ui: &mut Ui, width: f32, cells: &[Cell<'_>]) {
     }
 }
 
-/// Un en-tête de section (`recap-section-header` du site) : médaillon, titre, puis `tail`.
-fn section_header(ui: &mut Ui, width: f32, icon: DsIcon, tint: Color32, title: &str, tail: &str) {
-    let (row, _) = ui.allocate_exact_size(egui::vec2(width, 28.0), Sense::hover());
+/// Une section repliable : l'ensemble des sections repliées de la vue, et la clé de celle-ci
+/// (`portée/section`).
+struct Fold<'a> {
+    collapsed: &'a mut HashSet<String>,
+    key: String,
+}
+
+impl<'a> Fold<'a> {
+    fn new(collapsed: &'a mut HashSet<String>, key: impl Into<String>) -> Self {
+        Self {
+            collapsed,
+            key: key.into(),
+        }
+    }
+}
+
+/// Un en-tête de section (`recap-section-header` du site) : médaillon, titre, puis `tail`, et le
+/// chevron au bout — toute la ligne replie ou déplie la section. Rend `true` si elle est dépliée.
+#[allow(clippy::too_many_arguments)]
+fn section_header(
+    ui: &mut Ui,
+    width: f32,
+    icon: DsIcon,
+    tint: Color32,
+    title: &str,
+    tail: &str,
+    fold: Fold<'_>,
+) -> bool {
+    let (row, response) = ui.allocate_exact_size(egui::vec2(width, 28.0), Sense::click());
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if response.clicked() {
+        let open = fold.collapsed.contains(&fold.key);
+        tracing::info!(
+            ">>> clic historique.recap.section {} ({})",
+            fold.key,
+            if open { "dépliée" } else { "repliée" }
+        );
+        if !fold.collapsed.remove(&fold.key) {
+            fold.collapsed.insert(fold.key.clone());
+        }
+    }
+    let open = !fold.collapsed.contains(&fold.key);
     let painter = ui.painter_at(row);
+    if response.hovered() {
+        painter.rect_filled(row, 4.0, Color32::from_white_alpha(8));
+    }
     super::paint_icon(
         ui,
         &painter,
@@ -850,6 +956,14 @@ fn section_header(ui: &mut Ui, width: f32, icon: DsIcon, tint: Color32, title: &
         text::label_font(ui.ctx(), 13.0),
         tokens::OVERLAY_TEXT_MUTED,
     );
+    super::paint_caret(
+        ui,
+        &painter,
+        egui::pos2(row.right() - 14.0, row.center().y),
+        open,
+        tokens::TEXT_GOLD,
+    );
+    open
 }
 
 /// Un message grisé sous un en-tête de section.
@@ -872,17 +986,26 @@ fn xp_section(
     xp: &[XpTotal],
     classes: &HashMap<String, String>,
     ctx: &HistoryContext<'_>,
+    fold: Fold<'_>,
 ) {
-    section_header(
+    // Un personnage présent sans XP gagnée n'apprend rien.
+    let rows: Vec<&XpTotal> = xp.iter().filter(|xp| xp.amount > 0).collect();
+    let count = if rows.is_empty() {
+        String::new()
+    } else {
+        format!("{} personnage(s)", rows.len())
+    };
+    if !section_header(
         ui,
         width,
         DsIcon::HeaderXp,
         Color32::WHITE,
         "Expérience",
-        "",
-    );
-    // Un personnage présent sans XP gagnée n'apprend rien.
-    let rows: Vec<&XpTotal> = xp.iter().filter(|xp| xp.amount > 0).collect();
+        &count,
+        fold,
+    ) {
+        return;
+    }
     if rows.is_empty() {
         empty_line(ui, width, "Aucune XP enregistrée pour le moment.");
         return;
@@ -950,10 +1073,12 @@ struct LootBlock<'a> {
 
 /// Un bloc de butin (`loot-section` du site) : en-tête et nombre d'objets, recherche et tri dès
 /// deux objets, puis la liste — « Aucun butin ramassé. » s'il n'y a rien.
+#[allow(clippy::too_many_arguments)]
 fn loot_block(
     ui: &mut Ui,
     width: f32,
     block: LootBlock<'_>,
+    fold: Fold<'_>,
     filter: &mut LootFilter,
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
@@ -963,7 +1088,17 @@ fn loot_block(
     } else {
         format!("{} objet(s)", format::thousands(block.list.len() as i64))
     };
-    section_header(ui, width, block.icon, Color32::WHITE, block.title, &count);
+    if !section_header(
+        ui,
+        width,
+        block.icon,
+        Color32::WHITE,
+        block.title,
+        &count,
+        fold,
+    ) {
+        return;
+    }
     if block.list.len() > 1 {
         loot_controls(ui, 0.0, width, filter, block.log_name, ctx, textures);
         ui.add_space(6.0);
@@ -1031,6 +1166,7 @@ fn group_block(
     width: f32,
     group: &RecapGroup<'_>,
     expanded: &mut HashSet<String>,
+    collapsed: &mut HashSet<String>,
     loot: &mut LootFilter,
     classes: &HashMap<String, String>,
     ctx: &HistoryContext<'_>,
@@ -1162,18 +1298,27 @@ fn group_block(
     );
     if !group.tiles.is_empty() {
         ui.add_space(8.0);
-        section_header(
+        if section_header(
             ui,
             width,
             DsIcon::Dungeon,
             tokens::OVERLAY_TEXT_MUTED,
             "Donjons",
             "",
-        );
-        tiles(ui, width, &group.tiles, ctx, textures);
+            Fold::new(collapsed, format!("{}/donjons", group.key)),
+        ) {
+            tiles(ui, width, &group.tiles, ctx, textures);
+        }
     }
     ui.add_space(8.0);
-    xp_section(ui, width, &totals.xp_by_character, classes, ctx);
+    xp_section(
+        ui,
+        width,
+        &totals.xp_by_character,
+        classes,
+        ctx,
+        Fold::new(collapsed, format!("{}/xp", group.key)),
+    );
     ui.add_space(8.0);
     loot_block(
         ui,
@@ -1185,6 +1330,7 @@ fn group_block(
             stone: group.stone,
             log_name: "historique.recap.groupe.butin",
         },
+        Fold::new(collapsed, format!("{}/butin", group.key)),
         loot,
         ctx,
         textures,

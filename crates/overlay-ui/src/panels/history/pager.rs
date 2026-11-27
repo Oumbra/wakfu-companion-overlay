@@ -10,10 +10,10 @@
 //! Les achats se chargent **par jour complet** (`loadMorePurchasesUntilDayComplete`) : le dernier
 //! jour montré n'est jamais coupé, sans quoi son total serait faux.
 
-use egui::Ui;
+use egui::{Rect, Sense, Ui};
 
 use super::format;
-use crate::design;
+use crate::design::{self, text, tokens, DsIcon};
 
 /// Entrées ajoutées par « Charger plus » (`PAGE_SIZE` du site).
 pub const PAGE_SIZE: usize = 50;
@@ -54,16 +54,11 @@ impl LoadSpan {
 pub struct Pager {
     /// Au moins ce nombre d'entrées (avant complétion du dernier jour).
     target: usize,
-    /// Le choix du menu, remis à `None` aussitôt appliqué.
-    span_choice: Option<LoadSpan>,
 }
 
 impl Default for Pager {
     fn default() -> Self {
-        Self {
-            target: PAGE_SIZE,
-            span_choice: None,
-        }
+        Self { target: PAGE_SIZE }
     }
 }
 
@@ -95,62 +90,162 @@ impl Pager {
         self.target = self.target.max((covered + 1).min(times.len()));
     }
 
-    /// Le pied de liste — « Charger plus » et le menu des portées —, seulement s'il reste des
-    /// entrées à montrer. Rend `true` si ce qui est montré a changé.
+    /// Le pied de liste (`history-load-more` du site), **épinglé en bas du panneau**, hors de la
+    /// zone défilable — retour utilisateur du 2026-11-27 : il ne suit pas les résultats, il reste au
+    /// pied. Seulement s'il reste des entrées à montrer : rend alors les zones réduites au-dessus
+    /// du pied, où l'appelant pose sa zone défilable.
     pub fn footer(
         &mut self,
         ui: &mut Ui,
-        width: f32,
+        zones: &design::PanelZones,
         times: &[i64],
         shown: usize,
         log_name: &str,
-    ) -> bool {
+    ) -> Option<design::PanelZones> {
         if shown >= times.len() {
-            return false;
+            return None;
         }
-        const SPAN_WIDTH: f32 = 160.0;
-        const GAP: f32 = 8.0;
-        let mut changed = false;
-        ui.add_space(8.0);
-        ui.allocate_ui_with_layout(
-            egui::vec2(width, 36.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                let button_width = 150.0;
-                ui.add_space(((width - button_width - GAP - SPAN_WIDTH) / 2.0).max(0.0));
-                if ui
-                    .add(
-                        design::button("Charger plus")
-                            .size(design::ButtonSize::Compact)
-                            .width(button_width)
-                            .log_name(format!("{log_name}.charger-plus")),
-                    )
-                    .clicked()
-                {
-                    self.load_more(shown);
-                    changed = true;
-                }
-                ui.add_space(GAP);
-                let mut choice = self.span_choice;
-                let mut select = design::select(&mut choice)
-                    .placeholder("Période…")
-                    .width(SPAN_WIDTH)
-                    .log_name(format!("{log_name}.portee"));
-                for span in LoadSpan::ALL {
-                    select = select.option(Some(span), span.label());
-                }
-                ui.add(select)
-                    .on_hover_text("Choisir la portée du chargement");
-                if let Some(span) = choice {
-                    let now_ms = chrono::Utc::now().timestamp_millis();
-                    self.load_span(span, times, now_ms);
-                    changed = true;
-                }
-                self.span_choice = None;
-            },
+        let (reduced, band) = zones.footer(FOOTER_HEIGHT, FOOTER_MARGIN);
+        // Filet haut (`border-top` du site), puis le contrôle scindé au centre.
+        ui.painter()
+            .with_clip_rect(band.expand(FOOTER_MARGIN))
+            .hline(
+                band.x_range(),
+                band.top() - FOOTER_MARGIN / 2.0,
+                egui::Stroke::new(1.0, egui::Color32::from_white_alpha(14)),
+            );
+        let total = LOAD_WIDTH + CARET_WIDTH;
+        let main = Rect::from_min_size(
+            egui::pos2(band.center().x - total / 2.0, band.top()),
+            egui::vec2(LOAD_WIDTH, band.height()),
         );
-        changed
+        let caret = Rect::from_min_size(
+            egui::pos2(main.right(), band.top()),
+            egui::vec2(CARET_WIDTH, band.height()),
+        );
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(band));
+        child.set_clip_rect(band.expand(2.0));
+        if child
+            .put(
+                main,
+                design::button("Charger plus")
+                    .size(design::ButtonSize::Height(band.height()))
+                    .width(LOAD_WIDTH)
+                    .log_name(format!("{log_name}.charger-plus")),
+            )
+            .clicked()
+        {
+            self.load_more(shown);
+        }
+        let caret_response = child
+            .put(
+                caret,
+                design::button("")
+                    .size(design::ButtonSize::Height(band.height()))
+                    .width(CARET_WIDTH)
+                    .log_name(format!("{log_name}.portee")),
+            )
+            .on_hover_text("Choisir la portée du chargement");
+        super::paint_icon(
+            &child,
+            child.painter(),
+            caret.center(),
+            DsIcon::ChevronDown,
+            11.0,
+            tokens::TEXT_GOLD,
+        );
+        if let Some(span) = span_menu(&child, &caret_response, log_name) {
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            self.load_span(span, times, now_ms);
+        }
+        Some(reduced)
     }
+}
+
+/// Hauteur du pied de liste et sa marge au bord du panneau.
+const FOOTER_HEIGHT: f32 = 32.0;
+const FOOTER_MARGIN: f32 = 8.0;
+/// La partie « Charger plus » du contrôle scindé, et celle du chevron accolée à sa droite.
+const LOAD_WIDTH: f32 = 150.0;
+const CARET_WIDTH: f32 = 30.0;
+/// Largeur du menu des portées.
+const MENU_WIDTH: f32 = 140.0;
+
+/// Le menu des portées (`load-more-scope-menu` du site), ouvert au-dessus du chevron : rend la
+/// portée choisie à la frame du clic.
+fn span_menu(ui: &Ui, caret: &egui::Response, log_name: &str) -> Option<LoadSpan> {
+    let open_id = caret.id.with("portee-ouverte");
+    let mut open = ui.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
+    if caret.clicked() {
+        open = !open;
+    }
+    let mut chosen = None;
+    if open {
+        let height = tokens::SELECT_ROW_HEIGHT * LoadSpan::ALL.len() as f32;
+        let menu = Rect::from_min_size(
+            egui::pos2(
+                caret.rect.right() - MENU_WIDTH,
+                caret.rect.top() - 4.0 - height,
+            ),
+            egui::vec2(MENU_WIDTH, height),
+        );
+        let area = egui::Area::new(open_id.with("menu"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(menu.min)
+            .constrain(false)
+            .show(ui.ctx(), |ui| {
+                ui.set_min_size(menu.size());
+                ui.painter()
+                    .rect_filled(menu, 4.0, tokens::SELECT_LIST_FILL);
+                let font = text::label_font(ui.ctx(), 14.0);
+                let mut picked = None;
+                for (index, span) in LoadSpan::ALL.into_iter().enumerate() {
+                    let row = Rect::from_min_size(
+                        egui::pos2(
+                            menu.left(),
+                            menu.top() + index as f32 * tokens::SELECT_ROW_HEIGHT,
+                        ),
+                        egui::vec2(MENU_WIDTH, tokens::SELECT_ROW_HEIGHT),
+                    );
+                    let response = ui
+                        .interact(row, open_id.with(("portee", index)), Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if response.hovered() {
+                        ui.painter()
+                            .rect_filled(row, 4.0, tokens::SELECT_ROW_HIGHLIGHT);
+                    }
+                    ui.painter().text(
+                        egui::pos2(row.left() + tokens::SELECT_ROW_PADDING_X, row.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        span.label(),
+                        font.clone(),
+                        tokens::SELECT_TEXT,
+                    );
+                    if response.clicked() {
+                        picked = Some(span);
+                    }
+                }
+                ui.painter().rect_stroke(
+                    menu,
+                    4.0,
+                    egui::Stroke::new(2.0, tokens::SELECT_LIST_BORDER),
+                    egui::StrokeKind::Inside,
+                );
+                picked
+            });
+        if let Some(span) = area.inner {
+            tracing::info!(">>> clic {log_name}.portee {}", span.label());
+            chosen = Some(span);
+            open = false;
+        } else if area.response.clicked_elsewhere() && caret.clicked_elsewhere() {
+            open = false;
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            open = false;
+        }
+    }
+    ui.data_mut(|d| d.insert_temp(open_id, open));
+    chosen
 }
 
 #[cfg(test)]

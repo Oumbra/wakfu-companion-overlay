@@ -82,8 +82,11 @@ fn sections(trade: &TradeRow) -> Vec<(&'static str, Color32, &[ItemLine])> {
     .collect()
 }
 
-/// Hauteur d'une carte d'échange à cette largeur.
-fn entry_height(trade: &TradeRow, width: f32) -> f32 {
+/// Hauteur d'une carte d'échange à cette largeur ; repliée, sa seule ligne d'en-tête.
+fn entry_height(trade: &TradeRow, width: f32, open: bool) -> f32 {
+    if !open {
+        return PAD_Y * 2.0 + HEADER_HEIGHT;
+    }
     let mut height = PAD_Y * 2.0 + HEADER_HEIGHT + BLOCK_GAP;
     if trade.kamas_acquired > 0 || trade.kamas_given > 0 {
         height += KAMAS_HEIGHT + BLOCK_GAP;
@@ -129,6 +132,9 @@ pub fn show(
     );
     let pager = &mut state.pager;
     let collapsed_days = &mut state.collapsed;
+    let collapsed_entries = &mut state.collapsed_entries;
+    let footer = pager.footer(ui, zones, &times, shown, "historique.echanges");
+    let zones = footer.as_ref().unwrap_or(zones);
     zones.scroll_area(ui, "historique-echanges", |ui, width| {
         if groups.is_empty() {
             ui.add(design::label("Aucun échange enregistré.").color(tokens::TEXT_DISABLED));
@@ -148,11 +154,15 @@ pub fn show(
                 continue;
             }
             for (index, trade) in trades.iter().enumerate() {
-                trade_entry(ui, width, trade, index, ctx, textures);
+                let open = !collapsed_entries.contains(&trade.id);
+                if trade_entry(ui, width, trade, index, open, ctx, textures)
+                    && !collapsed_entries.remove(&trade.id)
+                {
+                    collapsed_entries.insert(trade.id);
+                }
             }
             ui.add_space(6.0);
         }
-        pager.footer(ui, width, &times, shown, "historique.echanges");
     });
 }
 
@@ -170,20 +180,23 @@ fn paint_swap_arrows(painter: &egui::Painter, center: egui::Pos2, color: Color32
     }
 }
 
+/// Une carte d'échange ; rend `true` quand sa ligne d'en-tête est cliquée (replier / déplier).
+#[allow(clippy::too_many_arguments)]
 fn trade_entry(
     ui: &mut Ui,
     width: f32,
     trade: &TradeRow,
     index: usize,
+    open: bool,
     ctx: &HistoryContext<'_>,
     textures: &mut RemoteIconTextures,
-) {
+) -> bool {
     let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(width, entry_height(trade, width)),
+        egui::vec2(width, entry_height(trade, width, open)),
         Sense::hover(),
     );
     if !ui.is_rect_visible(rect) {
-        return;
+        return false;
     }
     let painter = ui.painter_at(rect);
     if index % 2 == 1 {
@@ -197,8 +210,17 @@ fn trade_entry(
     let inner = rect.shrink2(egui::vec2(PAD_X, PAD_Y));
     let mut y = inner.top();
 
-    // En-tête : horloge (date et heure au survol), « moi ⇄ lui ».
+    // En-tête : horloge (date et heure au survol), « moi ⇄ lui », chevron au bout.
     let header_center = y + HEADER_HEIGHT / 2.0;
+    let clicked = items::entry_toggle(
+        ui,
+        Rect::from_min_size(
+            egui::pos2(inner.left(), y),
+            egui::vec2(inner.width(), HEADER_HEIGHT),
+        ),
+        open,
+        ui.id().with(("echange-repli", trade.id)),
+    );
     items::entry_clock(
         ui,
         egui::pos2(inner.left() + 8.0, header_center),
@@ -207,7 +229,7 @@ fn trade_entry(
     );
     let names_rect = Rect::from_min_max(
         egui::pos2(inner.left() + 26.0, y),
-        egui::pos2(inner.right(), y + HEADER_HEIGHT),
+        egui::pos2(inner.right() - 20.0, y + HEADER_HEIGHT),
     );
     // « moi ⇄ lui » : la police du design system n'a pas la flèche, elle est dessinée.
     let names = painter.with_clip_rect(names_rect);
@@ -228,6 +250,9 @@ fn trade_entry(
         name_font,
         Color32::WHITE,
     );
+    if !open {
+        return clicked;
+    }
     y += HEADER_HEIGHT + BLOCK_GAP;
 
     // Kamas : « KAMAS  +12 345 ₭  -678 ₭ ».
@@ -269,7 +294,7 @@ fn trade_entry(
     // Objets acquis et cédés, côte à côte (empilés si la fenêtre est étroite).
     let sections = sections(trade);
     if sections.is_empty() {
-        return;
+        return clicked;
     }
     let stacked = width < STACK_BELOW;
     let columns = if stacked { 1 } else { sections.len() };
@@ -302,6 +327,7 @@ fn trade_entry(
             x += column_width + COLUMN_GAP;
         }
     }
+    clicked
 }
 
 #[cfg(test)]
@@ -345,10 +371,10 @@ mod tests {
     fn une_carte_grandit_avec_sa_plus_longue_colonne() {
         let empty = trade(Vec::new(), Vec::new(), 0);
         let bare = PAD_Y * 2.0 + HEADER_HEIGHT + BLOCK_GAP;
-        assert_eq!(entry_height(&empty, 800.0), bare);
+        assert_eq!(entry_height(&empty, 800.0, true), bare);
         let with_kamas = trade(Vec::new(), Vec::new(), 500);
         assert_eq!(
-            entry_height(&with_kamas, 800.0),
+            entry_height(&with_kamas, 800.0, true),
             bare + KAMAS_HEIGHT + BLOCK_GAP
         );
         let full = trade(
@@ -357,9 +383,17 @@ mod tests {
             0,
         );
         let three = section_height(&full.acquired);
-        assert_eq!(entry_height(&full, 800.0), bare + three);
+        assert_eq!(entry_height(&full, 800.0, true), bare + three);
+        // Repliée : la ligne d'en-tête seule.
+        assert_eq!(
+            entry_height(&full, 800.0, false),
+            PAD_Y * 2.0 + HEADER_HEIGHT
+        );
         // Étroite : les colonnes s'empilent.
         let one = section_height(&full.given);
-        assert_eq!(entry_height(&full, 400.0), bare + three + COLUMN_GAP + one);
+        assert_eq!(
+            entry_height(&full, 400.0, true),
+            bare + three + COLUMN_GAP + one
+        );
     }
 }
