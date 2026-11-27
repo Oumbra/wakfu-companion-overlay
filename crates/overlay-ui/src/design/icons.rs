@@ -506,4 +506,12 @@ ds_icons! {
         /// Patte (`icons/icon-paw.png`, 18 × 14) — vignette de repli d'une ligne « famille » du
         /// Récap (tracé du site, rastérisé à 24 px, trait 1,7).
         Paw => "icon-paw", libre;
+
+        /// Flèche vers le haut (`icons/icon-arrow-up.png`, 12 × 12) — tri « plus récent en
+        /// premier » des listes d'historique (`history-list-header` du site, trait 1,9).
+        ArrowUp => "icon-arrow-up", libre;
+
+        /// Flèche vers le bas (`icons/icon-arrow-down.png`, 12 × 12) — tri « plus ancien en
+        /// premier ».
+        ArrowDown => "icon-arrow-down", libre;
 }

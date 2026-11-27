@@ -17,7 +17,7 @@ use crate::remote_icons::RemoteIconTextures;
 
 /// Taille de police des lignes de liste.
 pub(crate) const FONT_SIZE: f32 = 14.0;
-const SORT_SWITCH_WIDTH: f32 = 180.0;
+const SORT_SWITCH_WIDTH: f32 = 72.0;
 pub(super) const DAY_HEADER_HEIGHT: f32 = 30.0;
 
 /// `--btn-active-green` du site : kamas et objets acquis.
@@ -98,7 +98,8 @@ impl<T> ListState<T> {
     }
 }
 
-/// La barre au-dessus d'une liste : champ de recherche et bascule Récent / Ancien.
+/// La barre au-dessus d'une liste (`history-list-header` du site) : champ de recherche à loupe, puis
+/// la bascule de tri en deux flèches (haut = plus récent en premier, bas = plus ancien).
 pub fn list_header(
     ui: &mut Ui,
     zones: &design::PanelZones,
@@ -111,14 +112,16 @@ pub fn list_header(
         ui.add(
             design::input(query)
                 .placeholder(placeholder)
-                .clearable(true)
+                .leading_icon(design::DsIcon::Search)
                 .width(zones.inner.width() - SORT_SWITCH_WIDTH - 12.0)
                 .log_name(format!("{log_name}.recherche")),
         );
         ui.add(
             design::switch(order)
-                .slot(SortOrder::Newest, "Récent")
-                .slot(SortOrder::Oldest, "Ancien")
+                .slot(SortOrder::Newest, "Plus récent en premier")
+                .icon(design::DsIcon::ArrowUp)
+                .slot(SortOrder::Oldest, "Plus ancien en premier")
+                .icon(design::DsIcon::ArrowDown)
                 .width(SORT_SWITCH_WIDTH)
                 .log_name(format!("{log_name}.tri")),
         );
