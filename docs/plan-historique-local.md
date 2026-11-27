@@ -300,6 +300,16 @@ avec les seules images absentes de wakassets, converties en PNG (350 fichiers, 2
   4. ventes HDV et achats séparés par la sentinelle `__hdv_kamas_sale__`.
 - La granularité « session » reste calculée en mémoire par le moteur, comme aujourd'hui.
 
+**Fait (phase 3, 2026-11-27) — `HistoryStore::period_stats`** (`overlay-history/src/stats.rs`) :
+combats lus avec leurs ennemis et agrégés en Rust, le référentiel embarqué tenant lieu de la table
+`monsters` du serveur ; achats, échanges, pactes en SQL. 78 ms sur tout l'historique réel
+(1 112 combats). **Comparé au site** (`GET /api/v1/history/stats`, trois périodes : tout, un mois,
+un jour) avec l'outil `cargo run -p overlay-history --example stats-periode -- <début> <fin>` :
+combats, défis, kamas, XP par personnage, butin, pactes et regroupement par donjon identiques ;
+regroupement par famille identique sauf le butin de deux familles, sur des combats où tous les
+ennemis ont 0 dégât et appartiennent à deux familles — Postgres (`DISTINCT ON`) départage au
+hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart accepté.
+
 ## 7. Fenêtre application
 
 - Fenêtre winit **normale** : niveau normal, icône dans la barre des tâches, redimensionnable,
