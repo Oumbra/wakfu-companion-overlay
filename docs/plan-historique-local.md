@@ -354,25 +354,33 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
   jours repliables avec leur nombre d'entrées, cartes « moi ⇄ partenaire » avec kamas et colonnes
   Acquis / Cédés (empilées sous 480 px), extractions avec leurs objets ; « Charger plus ». Les
   briques communes aux trois listes (barre de recherche et tri, en-tête de jour, ligne d'objet avec
-  icône et rareté) sont dans `panels/history/items.rs`.
+  icône et rareté) sont dans `panels/history/items.rs`. Barre identique à `history-list-header` du
+  site : champ à loupe sans croix, tri en deux flèches (haut = plus récent en premier).
 - **Combats** : lecture des combats avec combattants et butin (`HistoryStore::fights`, sans le JSON
   des sorts). Recherche sur les combattants et le butin, groupes par jour ou « Donjons & familles »
   (sections par type de donjon dans l'ordre du site, puis familles nommées par le référentiel),
   « Tout replier », runs de donjon réunis par leur clé de run, résumé (illustration : boss >
   archimonstre > dominant > plus gros dégâts ; Victoire / Défaite ; tours et durée) et détail
   déplié : alliés (portrait de classe) et ennemis (icône du monstre) en dégâts, armure ou soins avec
-  barres proportionnelles, chaque combattant dépliable sur ses sorts (lus à la demande,
-  `HistoryStore::participant_spells`, part par élément en couleur), butin filtrable et trié (nom,
-  quantité, rareté), XP. **Écarts voulus** : le détail est propre à la fenêtre, pas celui du
-  panneau Combat (taillé pour une colonne étroite posée sur le jeu) ; pas de vue par tour (la base
-  ne garde pas les dégâts tour par tour) ; un reclic sur le tri actif n'inverse pas le sens.
+  barres proportionnelles, chaque combattant dépliable sur ses sorts (icône du sort, part par
+  élément en couleur), butin filtrable et trié (Az / Nb / rareté, reclic = sens inversé), XP.
+  Revu le 2026-11-27 pour coller au site : bloc « Informations de combat » repliable, switch
+  Cumulé / Tour avec le pas-à-pas du tour (le moteur enregistre désormais les sorts tour par tour ;
+  un combat ancien affiche « Le détail par tour n'a pas été enregistré »), switch Dégâts / Armure /
+  Soins de l'overlay, statut KO / A fui en icône, homonymes numérotés `#2`, vignettes de donjon et
+  de famille (`bossIllustrations/`, `monstersfamily/` de wakassets) sur les groupes et les runs.
+  **Écarts** : pas d'état « Interrompu » (la base impose `won` non nul) ; pas de badge de pierre sur
+  l'illustration ; « Charger plus » sans menu de plage.
 - **Récap** : jour, mois ou année dans le calendrier local, précédent / suivant, bande kamas nets /
   XP / combats / challenges (dessinée pour la fenêtre, pas celle du bandeau Récap), puis trois
   affichages : Cumulé (détail des kamas, XP par personnage, butin et pacte), Donjon & Famille (une
   ligne par donjon sous son type, puis les familles) et Type (types de donjon fusionnés, vides
   grisés, puis « Autres »), chaque ligne dépliable sur ses totaux, ses donjons, son XP et son butin
-  (`HistoryStore::period_stats`). **Écarts** : pas de granularité « session » (le récap de session
-  vit dans l'overlay, sur le jeu), pas de pierre de donjon épinglée en tête d'un type.
+  (`HistoryStore::period_stats`). Revu le 2026-11-27 : médaillons du site dans les titres, détail
+  des kamas en infobulle, portraits de classe sur l'XP, butin filtrable, pierre de donjon épinglée
+  en tête d'un type, vignettes de donjons empilées au-delà de 5, période bornée au 2026-08-01.
+  **Écarts** : pas de granularité « session » (le récap de session vit dans l'overlay, sur le jeu),
+  pas de sélecteur calendrier.
 - **Hôte Linux** : mode `--historique` et entrée « Historique » du menu de notification dans le
   binaire X11 (vérifié par clippy seulement, pas à l'écran). Une seconde ouverture n'y ramène pas
   la première au premier plan.
@@ -383,7 +391,9 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
 - Le symbole ₭ manque dans la police du design system : un montant est toujours suivi de l'icône
   Kamas (`paint_amount`, `paint_amount_left`).
 - Reste :
-  - Récap : sélecteur calendrier ;
+  - Récap : sélecteur calendrier ; illustrations des brèches ;
+  - Combats : menu de plage de « Charger plus », badge de pierre ;
+  - corrections au clic droit (renommer, déplacer une entrée) des listes du site ;
   - **images des objets de pacte** : la plupart (costumes, équipements de boutique) n'ont ni id en
     base ni entrée dans le référentiel — la source `repository/items.json` du site ne les contient
     pas, le site ne les illustrait donc pas non plus. Il faudrait élargir la source du référentiel
