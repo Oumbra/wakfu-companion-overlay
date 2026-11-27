@@ -406,99 +406,7 @@ pub fn show(
     // **Tout l'onglet défile** : voir la doc de module. La largeur utile vient de la zone
     // défilable, réserve de barre déjà déduite (voir `design::PanelZones::scroll_area`).
     panel.scroll_area(ui, "options-a-propos", |ui, inner_width| {
-        // **Les trois sections d'information** (voir la doc de module et [`SECTIONS`]), avant
-        // « Mise à jour » (demande utilisateur) : ce qu'est le programme se lit avant ce qu'il
-        // devient. Même grammaire que les sections de « Paramètres » — un titre, des blocs
-        // d'information, puis les contrôles sur l'axe des contrôles.
-        for (index, section) in SECTIONS.iter().enumerate() {
-            if index > 0 {
-                ui.add_space(SECTION_GAP);
-            }
-            ui.add(design::heading(section.title));
-            for (block_index, block) in section.blocks.iter().enumerate() {
-                if block_index > 0 {
-                    ui.add_space(INFO_GAP);
-                }
-                ui.add(
-                    design::info_text(block.text)
-                        .tone(block.tone)
-                        .width(inner_width)
-                        .log_name(format!("a-propos-{}-{}", index + 1, block_index + 1)),
-                );
-            }
-            // **Mention de droits d'auteur** (licence des données Wakfu, 2026-09-21) : sous les
-            // blocs de « Wakfu Companion », en ton `Info` comme eux — c'est une information due,
-            // pas un avertissement. Calculée ici et non dans `SECTIONS` parce qu'elle porte
-            // l'année en cours (voir `copyright_year`).
-            if section.title == WAKFU_COMPANION_TITLE {
-                ui.add_space(INFO_GAP);
-                ui.add(
-                    design::info_text(copyright_notice(copyright_year()))
-                        .tone(InfoTone::Info)
-                        .width(inner_width)
-                        .log_name("a-propos-droits-ankama"),
-                );
-            }
-            // **Origine d'API surchargée** (constat C16 de `docs/analyse-rgpd.md`, 2026-09-19) :
-            // quand `WAKFU_COMPANION_API_URL` est posée, « wakfu-companion.com » dans le bloc
-            // ci-dessus n'est plus vrai — l'utilisateur doit voir où partent ses données, pas
-            // seulement le journal. Bloc d'alerte sous la section « Vos données », jamais ailleurs.
-            if section.title == VOS_DONNEES_TITLE {
-                if let Some(text) = api_override_notice(ctx.api_override.as_deref()) {
-                    ui.add_space(INFO_GAP);
-                    ui.add(
-                        design::info_text(text)
-                            .tone(InfoTone::Alert)
-                            .width(inner_width)
-                            .log_name("a-propos-api-surchargee"),
-                    );
-                }
-            }
-            ui.add_space(INFO_GAP);
-            if let Some(url) = link_row(ui, inner_width, section.links) {
-                action = AProposTabAction::OpenUrl(url);
-            }
-            // **« Supprimer les données locales »**, sous les liens de « Vos données » — voir
-            // [`PURGE_INFO`] pour le pourquoi de la place. Le bloc d'information est en ton
-            // `Alert` comme l'avertissement CGU : c'est l'autre phrase de l'onglet dont l'ignorance
-            // a un prix.
-            //
-            // **Actif même sans compte lié** : c'est exactement l'état où le droit à l'effacement
-            // s'exerce — après s'être déconnecté ; et une fois la fenêtre de connexion seule à
-            // l'écran, elle porte le même geste (`panels::login`).
-            //
-            // Rouge et centré comme « Fermer l'overlay », plus bas, et pour la même raison en plus
-            // forte : c'est la seule action de toute la fenêtre qui ne laisse RIEN derrière elle.
-            // La confirmation, chez l'appelant, nomme les deux conséquences dans l'ordre.
-            if section.title == VOS_DONNEES_TITLE {
-                ui.add_space(INFO_GAP);
-                ui.add(
-                    design::info_text(PURGE_INFO)
-                        .tone(InfoTone::Alert)
-                        .width(inner_width)
-                        .log_name("options-compte-effacement"),
-                );
-                ui.add_space(INFO_GAP);
-                let purge = design::button("Supprimer les données locales")
-                    .variant(ButtonVariant::Danger)
-                    .size(ButtonSize::Height(ROW_HEIGHT))
-                    .tooltip(
-                        "Effacer de cet ordinateur tout ce que l'overlay y a écrit, puis fermer",
-                    )
-                    .log_name("options-effacer-donnees");
-                let purge_size = purge.desired_size(ui);
-                let purge_row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
-                if ui
-                    .put(
-                        egui::Rect::from_center_size(purge_row.center(), purge_size),
-                        purge,
-                    )
-                    .clicked()
-                {
-                    action = AProposTabAction::PurgeLocalData;
-                }
-            }
-        }
+        action = show_sections(ui, inner_width, ctx.api_override.as_deref(), true);
 
         // **Section « Mise à jour »** (2026-09-15, `docs/plan-mise-a-jour.md` §8.2, décisions du
         // mainteneur) : une ligne d'information (dernière vérification, version disponible et son
@@ -634,6 +542,111 @@ pub fn show(
         }
     });
 
+    action
+}
+
+/// **Les sections d'information** (« Wakfu Companion », « Vos données », « Ankama »), avec leurs
+/// liens — partagées par l'onglet « À propos » des Options et celui de la fenêtre d'historique.
+/// `with_purge` : le bouton « Supprimer les données locales » sous « Vos données » (Options
+/// seulement : effacer ferme l'overlay, ce que la fenêtre d'historique ne sait pas faire).
+pub fn show_sections(
+    ui: &mut egui::Ui,
+    inner_width: f32,
+    api_override: Option<&str>,
+    with_purge: bool,
+) -> AProposTabAction {
+    let mut action = AProposTabAction::None;
+    // **Les trois sections d'information** (voir la doc de module et [`SECTIONS`]), avant
+    // « Mise à jour » (demande utilisateur) : ce qu'est le programme se lit avant ce qu'il
+    // devient. Même grammaire que les sections de « Paramètres » — un titre, des blocs
+    // d'information, puis les contrôles sur l'axe des contrôles.
+    for (index, section) in SECTIONS.iter().enumerate() {
+        if index > 0 {
+            ui.add_space(SECTION_GAP);
+        }
+        ui.add(design::heading(section.title));
+        for (block_index, block) in section.blocks.iter().enumerate() {
+            if block_index > 0 {
+                ui.add_space(INFO_GAP);
+            }
+            ui.add(
+                design::info_text(block.text)
+                    .tone(block.tone)
+                    .width(inner_width)
+                    .log_name(format!("a-propos-{}-{}", index + 1, block_index + 1)),
+            );
+        }
+        // **Mention de droits d'auteur** (licence des données Wakfu, 2026-09-21) : sous les
+        // blocs de « Wakfu Companion », en ton `Info` comme eux — c'est une information due,
+        // pas un avertissement. Calculée ici et non dans `SECTIONS` parce qu'elle porte
+        // l'année en cours (voir `copyright_year`).
+        if section.title == WAKFU_COMPANION_TITLE {
+            ui.add_space(INFO_GAP);
+            ui.add(
+                design::info_text(copyright_notice(copyright_year()))
+                    .tone(InfoTone::Info)
+                    .width(inner_width)
+                    .log_name("a-propos-droits-ankama"),
+            );
+        }
+        // **Origine d'API surchargée** (constat C16 de `docs/analyse-rgpd.md`, 2026-09-19) :
+        // quand `WAKFU_COMPANION_API_URL` est posée, « wakfu-companion.com » dans le bloc
+        // ci-dessus n'est plus vrai — l'utilisateur doit voir où partent ses données, pas
+        // seulement le journal. Bloc d'alerte sous la section « Vos données », jamais ailleurs.
+        if section.title == VOS_DONNEES_TITLE {
+            if let Some(text) = api_override_notice(api_override) {
+                ui.add_space(INFO_GAP);
+                ui.add(
+                    design::info_text(text)
+                        .tone(InfoTone::Alert)
+                        .width(inner_width)
+                        .log_name("a-propos-api-surchargee"),
+                );
+            }
+        }
+        ui.add_space(INFO_GAP);
+        if let Some(url) = link_row(ui, inner_width, section.links) {
+            action = AProposTabAction::OpenUrl(url);
+        }
+        // **« Supprimer les données locales »**, sous les liens de « Vos données » — voir
+        // [`PURGE_INFO`] pour le pourquoi de la place. Le bloc d'information est en ton
+        // `Alert` comme l'avertissement CGU : c'est l'autre phrase de l'onglet dont l'ignorance
+        // a un prix.
+        //
+        // **Actif même sans compte lié** : c'est exactement l'état où le droit à l'effacement
+        // s'exerce — après s'être déconnecté ; et une fois la fenêtre de connexion seule à
+        // l'écran, elle porte le même geste (`panels::login`).
+        //
+        // Rouge et centré comme « Fermer l'overlay », plus bas, et pour la même raison en plus
+        // forte : c'est la seule action de toute la fenêtre qui ne laisse RIEN derrière elle.
+        // La confirmation, chez l'appelant, nomme les deux conséquences dans l'ordre.
+        if with_purge && section.title == VOS_DONNEES_TITLE {
+            ui.add_space(INFO_GAP);
+            ui.add(
+                design::info_text(PURGE_INFO)
+                    .tone(InfoTone::Alert)
+                    .width(inner_width)
+                    .log_name("options-compte-effacement"),
+            );
+            ui.add_space(INFO_GAP);
+            let purge = design::button("Supprimer les données locales")
+                .variant(ButtonVariant::Danger)
+                .size(ButtonSize::Height(ROW_HEIGHT))
+                .tooltip("Effacer de cet ordinateur tout ce que l'overlay y a écrit, puis fermer")
+                .log_name("options-effacer-donnees");
+            let purge_size = purge.desired_size(ui);
+            let purge_row = ui.allocate_space(egui::vec2(inner_width, ROW_HEIGHT)).1;
+            if ui
+                .put(
+                    egui::Rect::from_center_size(purge_row.center(), purge_size),
+                    purge,
+                )
+                .clicked()
+            {
+                action = AProposTabAction::PurgeLocalData;
+            }
+        }
+    }
     action
 }
 

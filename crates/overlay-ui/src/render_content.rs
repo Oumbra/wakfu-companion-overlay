@@ -1010,6 +1010,9 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                             remote_icon_textures,
                         );
                         outcome.close_history = history_outcome.close;
+                        if history_outcome.open_url.is_some() {
+                            outcome.open_url = history_outcome.open_url;
+                        }
                         outcome.drag_window = history_outcome.drag_window;
                         outcome.resize_window = history_outcome.resize;
                     }
