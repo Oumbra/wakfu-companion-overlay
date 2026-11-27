@@ -161,6 +161,10 @@ s'affiche pas** dans son client, contrairement à l'aperçu visuel qu'en a Claud
 visuelle doit donc être publiée comme **artefact** (page HTML, image(s) intégrée(s) en base64),
 jamais seulement montrée inline — sans quoi le résultat reste invisible pour lui.
 
+Un essai sur le poste de l'utilisateur ne met **jamais** une fenêtre au premier plan et ne touche
+**jamais** à sa souris ni à son clavier : passer par l'essai automatique invisible
+(`--autotest=<dossier>`, détail dans `.claude/rules/captures.md`).
+
 # Où est documenté quoi (règles chargées à la demande)
 
 Les retours d'expérience détaillés (incidents réels, décisions datées, pièges) vivent dans

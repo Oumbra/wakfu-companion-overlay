@@ -62,3 +62,19 @@ sur le même commit, et c'est lui qui conditionne la fusion. `ci.yml` filtre don
 `pull_request: branches-ignore: [main]` (filtre sur la branche **cible**). Ne pas le retirer pour
 « avoir un CI sur la PR de release » : le verdict de la release est le run `Release PR`. Les PR de
 Dependabot visent `dev` et gardent leur CI.
+
+## Vérifier Linux depuis le poste Windows : WSL (2026-11-27)
+
+Le poste de l'utilisateur a WSL (`Ubuntu-22.04`, disque sous `E:\WSL`) avec Rust, `gcc`,
+`pkg-config`, `libasound2-dev`, `libx11-dev`, `libxkbcommon-dev`. La compilation croisée
+`--target x86_64-unknown-linux-gnu` depuis Windows échoue (pas de `x86_64-linux-gnu-gcc` pour les
+crates C) : passer par WSL, avec une cible dans le home Linux (`/mnt/e` est lent) :
+
+```
+wsl.exe -d Ubuntu-22.04 -- bash -lc 'cd /mnt/e/Data/Documents/Workspace/wakfu-companion-overlay   && CARGO_TARGET_DIR=$HOME/target-overlay cargo clippy -p overlay-ui --lib      --bin wakfu-companion-overlay-x11 -- -D warnings'
+```
+
+C'est le moyen de vérifier l'hôte X11 (`bin/wakfu-companion-overlay-x11.rs`) avant de pousser —
+un `match` non exhaustif sur `OverlayKind` n'y est vu par aucune commande Windows.
+`cargo clippy -p overlay-ui --all-targets` y échoue sur des lints anciens des tests de la lib
+(non joués par le CI) : s'en tenir aux commandes de `ci-local.sh`.
