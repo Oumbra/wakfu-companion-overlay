@@ -9,11 +9,14 @@ pub mod achats;
 pub mod format;
 
 use chrono::NaiveDate;
-use egui::Ui;
+use egui::{Sense, Ui};
 use overlay_engine::CatalogIndex;
 use overlay_history::HistoryStore;
 
 use crate::design::{self, DsIcon};
+
+/// Fond opaque sous le décor — le ton sombre de la texture du corps.
+const WINDOW_UNDERLAY: egui::Color32 = egui::Color32::from_rgb(0x15, 0x17, 0x1C);
 
 /// Côté de l'icône Kamas qui suit un montant.
 const KAMAS_ICON_SIZE: f32 = 14.0;
@@ -139,18 +142,128 @@ pub struct HistoryContext<'a> {
     pub today: NaiveDate,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum HistoryAction {
-    #[default]
-    None,
-    Close,
+/// Ce que la fenêtre demande à son hôte après une frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HistoryOutcome {
+    /// La croix de la bannière.
+    pub close: bool,
+    /// Bouton pressé sur la bannière : l'hôte lance `Window::drag_window` (pas de décorations
+    /// système, comme la fenêtre de connexion).
+    pub drag_window: bool,
+    /// Bouton pressé sur un bord : l'hôte lance `Window::drag_resize_window` dans ce sens.
+    pub resize: Option<egui::ResizeDirection>,
+}
+
+/// Ce que l'hôte garde pour la fenêtre ouverte : son état et la base, ouverte avec elle et
+/// refermée avec elle (un fichier SQLite ouvert ne peut pas être supprimé sous Windows).
+pub struct HistoryHost {
+    pub state: HistoryWindowState,
+    pub store: Option<HistoryStore>,
+}
+
+impl HistoryHost {
+    /// Ouvre la base de l'overlay (`HistoryStore::default_path`) ; une base absente ou illisible
+    /// laisse la fenêtre s'ouvrir, vide.
+    pub fn open(tab: HistoryTab) -> Self {
+        let store = HistoryStore::default_path()
+            .and_then(|path| HistoryStore::open(&path))
+            .map_err(|err| tracing::warn!(%err, "historique : base inaccessible"))
+            .ok();
+        Self {
+            state: HistoryWindowState::new(tab),
+            store,
+        }
+    }
+}
+
+/// Épaisseur de la bande de redimensionnement le long des bords.
+const RESIZE_BAND: f32 = 6.0;
+
+/// Bords et coins de redimensionnement — la fenêtre n'a pas de décorations système.
+fn resize_edges(ui: &mut Ui, outcome: &mut HistoryOutcome) {
+    use egui::{CursorIcon, ResizeDirection as Dir};
+    let rect = ui.max_rect();
+    let band = RESIZE_BAND;
+    let corner = band * 2.0;
+    let zones = [
+        (
+            Dir::NorthWest,
+            egui::Rect::from_min_size(rect.min, egui::vec2(corner, corner)),
+            CursorIcon::ResizeNorthWest,
+        ),
+        (
+            Dir::NorthEast,
+            egui::Rect::from_min_size(
+                egui::pos2(rect.right() - corner, rect.top()),
+                egui::vec2(corner, corner),
+            ),
+            CursorIcon::ResizeNorthEast,
+        ),
+        (
+            Dir::SouthWest,
+            egui::Rect::from_min_size(
+                egui::pos2(rect.left(), rect.bottom() - corner),
+                egui::vec2(corner, corner),
+            ),
+            CursorIcon::ResizeSouthWest,
+        ),
+        (
+            Dir::SouthEast,
+            egui::Rect::from_min_size(
+                rect.max - egui::vec2(corner, corner),
+                egui::vec2(corner, corner),
+            ),
+            CursorIcon::ResizeSouthEast,
+        ),
+        (
+            Dir::North,
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.top() + band)),
+            CursorIcon::ResizeVertical,
+        ),
+        (
+            Dir::South,
+            egui::Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - band), rect.max),
+            CursorIcon::ResizeVertical,
+        ),
+        (
+            Dir::West,
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.left() + band, rect.bottom())),
+            CursorIcon::ResizeHorizontal,
+        ),
+        (
+            Dir::East,
+            egui::Rect::from_min_max(egui::pos2(rect.right() - band, rect.top()), rect.max),
+            CursorIcon::ResizeHorizontal,
+        ),
+    ];
+    for (index, (direction, zone, cursor)) in zones.into_iter().enumerate() {
+        let response = ui.interact(
+            zone,
+            ui.id().with(("historique-bord", index)),
+            Sense::drag(),
+        );
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(cursor);
+        }
+        if response.drag_started() && outcome.resize.is_none() {
+            outcome.resize = Some(direction);
+        }
+    }
 }
 
 pub fn show(
     ui: &mut Ui,
     state: &mut HistoryWindowState,
     ctx: &HistoryContext<'_>,
-) -> HistoryAction {
+) -> HistoryOutcome {
+    let mut outcome = HistoryOutcome::default();
+    let window_rect = ui.max_rect();
+    // Fenêtre application, pas modale posée sur le jeu : le corps du design system est teinté à
+    // 92 % d'opacité (`WINDOW_BODY_TINT`), et le bureau transparaissait dessous — texte du
+    // terminal lisible entre les onglets (constat sur la vraie fenêtre, 2026-11-27). Un fond
+    // opaque, aux coins de la fenêtre, le bouche.
+    ui.painter()
+        .rect_filled(window_rect, design::tokens::WINDOW_RADIUS, WINDOW_UNDERLAY);
     let chrome = design::window("Historique")
         .close_button(true)
         .version(true)
@@ -177,9 +290,23 @@ pub fn show(
             );
         }
     });
-    if chrome.close {
-        HistoryAction::Close
-    } else {
-        HistoryAction::None
+    outcome.close = chrome.close;
+    // Poignée de déplacement : la bannière, croix exceptée (elle garde ses clics).
+    let close_reserve =
+        design::tokens::WINDOW_CLOSE_SIZE + 2.0 * design::tokens::WINDOW_CLOSE_MARGIN;
+    let banner = egui::Rect::from_min_max(
+        window_rect.min,
+        egui::pos2(
+            window_rect.right() - close_reserve,
+            window_rect.top() + design::tokens::WINDOW_BANNER_HEIGHT,
+        ),
+    );
+    if ui
+        .interact(banner, ui.id().with("historique-banniere"), Sense::drag())
+        .drag_started()
+    {
+        outcome.drag_window = true;
     }
+    resize_edges(ui, &mut outcome);
+    outcome
 }

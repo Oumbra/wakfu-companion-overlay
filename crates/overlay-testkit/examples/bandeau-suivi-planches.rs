@@ -408,6 +408,7 @@ fn harnais(p: Planche) -> Harness<'static> {
                     veiled: false,
                     login: None,
                     card_settings: None,
+                    history: None,
                 },
             );
 

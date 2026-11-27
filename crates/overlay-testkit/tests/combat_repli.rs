@@ -180,6 +180,7 @@ fn harness_scaled(hote: Rc<Hote>, on_right: bool, scale: i64) -> Harness<'static
                 veiled: false,
                 login: None,
                 card_settings: None,
+                history: None,
             },
         );
         hote.metric.set(combat_metric);

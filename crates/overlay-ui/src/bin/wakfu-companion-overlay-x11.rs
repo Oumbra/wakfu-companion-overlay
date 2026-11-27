@@ -1428,7 +1428,7 @@ mod linux_main {
                 // `main.rs::App::anchor_position`. Détachée, ce bras n'est pas lu.
                 OverlayKind::Options => PhysicalPosition::new(rect.left, rect.top),
                 // Jamais créée par ce binaire (voir la doc de module) — exhaustivité seulement.
-                OverlayKind::Login => PhysicalPosition::new(0, 0),
+                OverlayKind::Login | OverlayKind::History => PhysicalPosition::new(0, 0),
             }
         }
 
@@ -1488,6 +1488,8 @@ mod linux_main {
                     panels::login::WINDOW_WIDTH as f64,
                     panels::login::INITIAL_HEIGHT as f64,
                 ),
+                // Fenêtre d'historique : pas encore câblée sous Linux — exhaustivité seulement.
+                OverlayKind::History => (1100.0, 820.0),
                 // Exactement le bouton et son fond de section — voir `main.rs`, même raison.
                 OverlayKind::ClickThrough => (
                     click_through::SECTION_SIZE.x as f64,
@@ -1510,6 +1512,7 @@ mod linux_main {
                 OverlayKind::ResetConfirm(_) => "Confirmation",
                 OverlayKind::Options => "Options",
                 OverlayKind::Login => "Connexion",
+                OverlayKind::History => "Historique",
                 OverlayKind::ClickThrough => "Bascule",
             };
             let attrs = WindowAttributes::default()
@@ -3349,7 +3352,10 @@ mod linux_main {
                     // elle-même traversable si l'utilisateur avait basculé ce mode juste avant.
                     let interactive = matches!(
                         overlay.kind,
-                        OverlayKind::Options | OverlayKind::Login | OverlayKind::ResetConfirm(_)
+                        OverlayKind::Options
+                            | OverlayKind::Login
+                            | OverlayKind::History
+                            | OverlayKind::ResetConfirm(_)
                     ) || self.interactive;
                     let this_game_rect = overlay.game_rect;
                     let this_game_window = overlay.game_window;
@@ -3531,6 +3537,7 @@ mod linux_main {
                             veiled,
                             login: overlay.login_state.as_mut(),
                             card_settings: card_settings.as_mut(),
+                            history: None,
                         },
                     );
                     // Bloc Récap : retaillé à la hauteur qu'il vient de mesurer — voir

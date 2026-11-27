@@ -96,7 +96,7 @@ fn main() {
             .with_size(egui::vec2(width, height))
             .build_ui(|ui| {
                 overlay_ui::style::apply(ui.ctx());
-                history::show(ui, &mut state, &ctx);
+                let _ = history::show(ui, &mut state, &ctx);
             });
         harness.run();
         let image = harness.render().expect("rendu de la fenêtre");

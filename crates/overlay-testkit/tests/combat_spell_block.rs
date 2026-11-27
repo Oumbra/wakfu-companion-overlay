@@ -351,6 +351,7 @@ fn bloc_de_sorts_selection_par_le_cadre() {
                 veiled: false,
                 login: None,
                 card_settings: None,
+                history: None,
             },
         );
     });
@@ -539,6 +540,7 @@ fn bloc_de_sorts_coupe_par_les_options() {
                 veiled: false,
                 login: None,
                 card_settings: None,
+                history: None,
             },
         );
     });

@@ -235,6 +235,7 @@ fn harness_for(combat_on_right: bool) -> Harness<'static> {
                 veiled: false,
                 login: None,
                 card_settings: None,
+                history: None,
             },
         );
     })

@@ -941,6 +941,11 @@ struct App {
     /// Un démarrage sur un jeton déjà enregistré ne passe jamais par l'appairage : la Carte y
     /// cède toujours la place aux overlays sans rien demander.
     pairing_seen: bool,
+    /// La fenêtre d'historique ouverte (`panels::history`) : son état et la base. `None` tant
+    /// qu'elle est fermée — la base n'est ouverte que le temps de la fenêtre.
+    history: Option<panels::history::HistoryHost>,
+    /// `--historique[=onglet]` : à ouvrir dès que la boucle tourne, puis oublié.
+    history_on_start: Option<String>,
 }
 
 /// L'icône de zone de notification (`tray-icon`, même auteurs que `global-hotkey`) et les quatre
@@ -962,6 +967,7 @@ struct TrayMenu {
     /// Gardée en vie : l'icône disparaît de la zone de notification à la destruction.
     _icon: TrayIcon,
     options: MenuItem,
+    history: MenuItem,
     update: MenuItem,
     disconnect: MenuItem,
     quit: MenuItem,
@@ -1194,6 +1200,8 @@ impl App {
             login_dismissed: false,
             account_card: false,
             pairing_seen: false,
+            history: None,
+            history_on_start: None,
         }
     }
 
@@ -1276,7 +1284,9 @@ impl App {
                 .values()
                 .any(|w| w.kind == OverlayKind::Options);
             let before = self.windows.len();
-            self.windows.retain(|_, w| w.kind == OverlayKind::Login);
+            // La fenêtre d'historique ne dépend pas du compte : elle reste.
+            self.windows
+                .retain(|_, w| matches!(w.kind, OverlayKind::Login | OverlayKind::History));
             if self.windows.len() != before {
                 if had_options {
                     let _ = self.hotkeys.resume();
@@ -1459,11 +1469,13 @@ impl App {
         // Toutes les entrées naissent actives ; celle du compte dit « Se connecter » tant
         // qu'aucun compte n'est lié (voir `sync_tray_menu`).
         let options = MenuItem::new("Paramètres", true, None);
+        let history = MenuItem::new("Historique", true, None);
         let update = MenuItem::new("Mise à jour", true, None);
         let disconnect = MenuItem::new("Se connecter", true, None);
         let quit = MenuItem::new("Quitter", true, None);
         if let Err(err) = menu.append_items(&[
             &options,
+            &history,
             &update,
             &PredefinedMenuItem::separator(),
             &disconnect,
@@ -1494,6 +1506,7 @@ impl App {
                 self.tray = Some(TrayMenu {
                     _icon: tray,
                     options,
+                    history,
                     update,
                     disconnect,
                     quit,
@@ -1540,6 +1553,114 @@ impl App {
     /// false }`) : il l'ignore s'il travaille déjà, ou à moins de trente secondes de la
     /// vérification précédente — l'écran montre alors tout de suite le verdict qu'il connaît
     /// déjà, ce qui est exactement ce qu'on vient lui demander.
+    /// Ouvre la fenêtre d'historique (`panels::history`, 2026-11-27) — ou la ramène au premier
+    /// plan si elle l'est déjà —, sur l'onglet `tab` s'il est donné. Une fenêtre application
+    /// comme la Carte : barre des tâches, z-order normal, sans décorations système (la bannière
+    /// la déplace, ses bords la retaillent).
+    fn open_history_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        tab: Option<panels::history::HistoryTab>,
+    ) {
+        if let Some(overlay) = self
+            .windows
+            .values_mut()
+            .find(|w| w.kind == OverlayKind::History)
+        {
+            if let (Some(tab), Some(host)) = (tab, self.history.as_mut()) {
+                host.state.tab = tab;
+            }
+            overlay.window.focus_window();
+            overlay.next_redraw_at = Some(std::time::Instant::now());
+            return;
+        }
+        let (rgba, width, height) = ui_icons::app_logo_rgba();
+        let icon = Icon::from_rgba(rgba, width, height).ok();
+        let attrs = WindowAttributes::default()
+            .with_title("Wakfu Companion — Historique")
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                HISTORY_WINDOW_SIZE.0,
+                HISTORY_WINDOW_SIZE.1,
+            ))
+            .with_min_inner_size(winit::dpi::LogicalSize::new(
+                HISTORY_WINDOW_MIN_SIZE.0,
+                HISTORY_WINDOW_MIN_SIZE.1,
+            ))
+            .with_transparent(true)
+            .with_decorations(false)
+            .with_window_level(WindowLevel::Normal)
+            .with_resizable(true)
+            .with_visible(true)
+            .with_window_icon(icon.clone());
+        #[cfg(target_os = "windows")]
+        let attrs = attrs
+            .with_taskbar_icon(icon)
+            .with_no_redirection_bitmap(true);
+        let window = match event_loop.create_window(attrs) {
+            Ok(window) => Arc::new(window),
+            Err(err) => {
+                tracing::warn!("[historique] fenêtre refusée : {err}");
+                return;
+            }
+        };
+        if let Err(err) = window.set_cursor_hittest(true) {
+            tracing::warn!("set_cursor_hittest a échoué à la création : {err}");
+        }
+        let gpu = pollster::block_on(init_gpu(Arc::clone(&window)));
+        let portraits = PortraitAtlas::load(&gpu.egui_ctx);
+        let combat_frame = CombatFrame::load(&gpu.egui_ctx);
+        let icons = UiIcons::load(&gpu.egui_ctx);
+        Self::center_on_primary_monitor(event_loop, &window);
+        window.focus_window();
+        self.history = Some(panels::history::HistoryHost::open(tab.unwrap_or_default()));
+        let overlay = OverlayWindow {
+            window,
+            gpu,
+            kind: OverlayKind::History,
+            avatars: None,
+            portraits,
+            combat_frame,
+            icons,
+            remote_icon_textures: RemoteIconTextures::default(),
+            combat_side: CombatSide::default(),
+            combat_metric: CombatMetric::default(),
+            options_state: None,
+            login_state: None,
+            last_login_height: None,
+            game_hwnd: HWND::default(),
+            game_rect: GameRect {
+                left: 0,
+                top: 0,
+                width: 0,
+                height: 0,
+                client_top: 0,
+            },
+            character_name: "Historique".to_string(),
+            active_character: "Historique".to_string(),
+            last_position: None,
+            last_watchlist_width: None,
+            last_watchlist_height: None,
+            watchlist_state: None,
+            watchlist_plan: None,
+            click_through_hovered: false,
+            last_recap_height: None,
+            visible: true,
+            is_topmost: false,
+            last_topmost_reassert: None,
+            pending_demote_since: None,
+            next_redraw_at: Some(std::time::Instant::now()),
+        };
+        tracing::info!("[historique] fenêtre ouverte.");
+        self.windows.insert(overlay.window.id(), overlay);
+    }
+
+    /// Ferme la fenêtre d'historique, et la base qu'elle tenait ouverte.
+    fn close_history_window(&mut self) {
+        self.windows.retain(|_, w| w.kind != OverlayKind::History);
+        self.history = None;
+        tracing::info!("[historique] fenêtre fermée.");
+    }
+
     fn open_manual_update_window(&mut self, event_loop: &ActiveEventLoop) {
         tracing::info!(">>> Recherche de mise à jour (zone de notification).");
         self.manual_update = true;
@@ -1648,6 +1769,8 @@ impl App {
             };
             if event.id == *tray.options.id() {
                 self.open_settings_card(event_loop);
+            } else if event.id == *tray.history.id() {
+                self.open_history_window(event_loop, None);
             } else if event.id == *tray.update.id() {
                 self.open_manual_update_window(event_loop);
             } else if event.id == *tray.disconnect.id() {
@@ -1684,7 +1807,7 @@ impl App {
         let snapshot = self.snapshot.load();
 
         self.windows.retain(|_, overlay| {
-            if overlay.kind == OverlayKind::Login || overlay.is_detached() {
+            if overlay.kind.is_application_window() || overlay.is_detached() {
                 return true; // n'appartient à aucune fenêtre de jeu
             }
             let still_here = found.iter().any(|(_, info)| info.hwnd == overlay.game_hwnd);
@@ -2078,7 +2201,7 @@ impl App {
             // Jamais ancrée sur le jeu — centrée sur l'écran par `center_on_primary_monitor`,
             // et jamais repositionnée ensuite (`reposition` ne la voit pas, `sync_windows`
             // l'ignore). Ce bras n'est là que pour l'exhaustivité.
-            OverlayKind::Login => PhysicalPosition::new(0, 0),
+            OverlayKind::Login | OverlayKind::History => PhysicalPosition::new(0, 0),
         }
     }
 
@@ -2150,6 +2273,8 @@ impl App {
             OverlayKind::ResetConfirm(_) => (rect.width as f64, rect.height as f64),
             // Créée par `create_login_window`, jamais par ici — voir sa doc.
             OverlayKind::Login => (login::WINDOW_WIDTH as f64, login::INITIAL_HEIGHT as f64),
+            // Créée par `open_history_window`, jamais par ici.
+            OverlayKind::History => HISTORY_WINDOW_SIZE,
             // Exactement le bouton et son fond de section : cette fenêtre capte toujours les clics,
             // le moindre pixel de plus en volerait au jeu (voir `panels::click_through`). Elle ne
             // s'étend que le temps du survol, pour l'infobulle (`click_through_window`).
@@ -2177,6 +2302,7 @@ impl App {
             OverlayKind::ResetConfirm(_) => "Confirmation",
             OverlayKind::Options => "Options",
             OverlayKind::Login => "Connexion",
+            OverlayKind::History => "Historique",
             OverlayKind::ClickThrough => "Bascule",
         };
         let attrs = WindowAttributes::default()
@@ -2527,7 +2653,7 @@ impl App {
         self.interactive = !self.interactive;
         for overlay in self.windows.values_mut() {
             // La fenêtre de connexion n'est pas un overlay : toujours interactive.
-            if overlay.kind == OverlayKind::Login {
+            if overlay.kind.is_application_window() {
                 continue;
             }
             // Les fenêtres de jeu règlent leur `set_cursor_hittest` sur ce qu'elles ont peint
@@ -2584,7 +2710,7 @@ impl App {
         self.sync_windows(event_loop);
         for overlay in self.windows.values_mut() {
             // La fenêtre de connexion n'est ni topmost ni « outil » : rien à réaffirmer.
-            if overlay.kind == OverlayKind::Login {
+            if overlay.kind.is_application_window() {
                 overlay.next_redraw_at = Some(std::time::Instant::now());
                 continue;
             }
@@ -2958,7 +3084,7 @@ impl App {
         // fenêtres au plus).
         let mut groups: Vec<(HWND, Vec<HWND>)> = Vec::new();
         for overlay in self.windows.values() {
-            if overlay.kind == OverlayKind::Login || overlay.is_detached() {
+            if overlay.kind.is_application_window() || overlay.is_detached() {
                 continue;
             }
             let hwnd = Self::hwnd_of(&overlay.window);
@@ -2979,7 +3105,7 @@ impl App {
             // **La fenêtre de connexion n'y participe jamais** (2026-09-14) : c'est une fenêtre
             // logicielle ordinaire, en z-order normal — elle passe derrière ce que l'utilisateur
             // active, et revient par la barre des tâches, comme n'importe quelle application.
-            if overlay.kind == OverlayKind::Login {
+            if overlay.kind.is_application_window() {
                 continue;
             }
             // **La modale Options participe à ce calcul comme les autres depuis le 2026-09-12.**
@@ -4599,6 +4725,27 @@ impl App {
     }
 }
 
+/// Taille d'ouverture de la fenêtre d'historique (points logiques) — celle des pages du site.
+const HISTORY_WINDOW_SIZE: (f64, f64) = (1100.0, 820.0);
+/// En deçà, les tableaux des vues ne tiennent plus.
+const HISTORY_WINDOW_MIN_SIZE: (f64, f64) = (720.0, 480.0);
+
+/// `egui::ResizeDirection` (demandé par un bord de la fenêtre d'historique) vers winit.
+fn winit_resize_direction(direction: egui::ResizeDirection) -> winit::window::ResizeDirection {
+    use egui::ResizeDirection as E;
+    use winit::window::ResizeDirection as W;
+    match direction {
+        E::North => W::North,
+        E::South => W::South,
+        E::East => W::East,
+        E::West => W::West,
+        E::NorthEast => W::NorthEast,
+        E::NorthWest => W::NorthWest,
+        E::SouthEast => W::SouthEast,
+        E::SouthWest => W::SouthWest,
+    }
+}
+
 enum PostRedraw {
     None,
     /// Fenêtre de jeu **depuis laquelle** la modale est demandée — son `HWND` et son
@@ -4669,6 +4816,8 @@ enum PostRedraw {
     StartManualUpdate,
     /// « Fermer » / « Plus tard » de l'écran de mise à jour manuelle.
     CloseManualUpdate,
+    /// La croix (ou Alt+F4) de la fenêtre d'historique.
+    CloseHistory,
     /// **Ouvrir l'écran de mise à jour de la Carte** et y lancer une recherche (2026-09-22) — le
     /// lien « Mise à jour » du pied, et « Rechercher à nouveau » de cet écran même. Le même geste
     /// que l'entrée « Mise à jour » du menu de la zone de notification, dont il partage le code.
@@ -4855,7 +5004,10 @@ impl App {
         // traversable si l'utilisateur avait basculé ce mode juste avant.
         let interactive = matches!(
             overlay.kind,
-            OverlayKind::Options | OverlayKind::Login | OverlayKind::ResetConfirm(_)
+            OverlayKind::Options
+                | OverlayKind::Login
+                | OverlayKind::History
+                | OverlayKind::ResetConfirm(_)
         ) || self.interactive;
         let this_game_rect = overlay.game_rect;
         let this_game_hwnd = overlay.game_hwnd;
@@ -4996,6 +5148,11 @@ impl App {
                 click_through_tip,
                 login: overlay.login_state.as_mut(),
                 card_settings: card_settings.as_mut(),
+                history: if overlay.kind == OverlayKind::History {
+                    self.history.as_mut()
+                } else {
+                    None
+                },
             },
         );
         // Bloc Récap : retaillé à la hauteur qu'il vient de mesurer — même mécanique et même
@@ -5333,6 +5490,26 @@ impl App {
         // état a la sienne), en gardant son centre — `request_inner_size` est synchrone sous
         // Windows, d'où `reconfigure_surface` ici même (voir sa doc). Et déplacée à la souris
         // sur demande de sa bannière : sans décorations OS, c'est le seul moyen.
+        // Fenêtre d'historique : déplacée par sa bannière, retaillée par ses bords — sans
+        // décorations OS, ce sont les seuls moyens —, fermée par sa croix.
+        if overlay.kind == OverlayKind::History {
+            if outcome.drag_window {
+                if let Err(err) = overlay.window.drag_window() {
+                    tracing::warn!("[historique] déplacement refusé : {err}");
+                }
+            }
+            if let Some(direction) = outcome.resize_window {
+                if let Err(err) = overlay
+                    .window
+                    .drag_resize_window(winit_resize_direction(direction))
+                {
+                    tracing::warn!("[historique] redimensionnement refusé : {err}");
+                }
+            }
+            if outcome.close_history {
+                post_redraw = PostRedraw::CloseHistory;
+            }
+        }
         if overlay.kind == OverlayKind::Login {
             if let Some(height) = outcome.login_height {
                 if overlay.last_login_height != Some(height) {
@@ -5653,6 +5830,7 @@ impl App {
                 let _ = self.update_command_tx.send(UpdateCommand::Download);
             }
             PostRedraw::CloseManualUpdate => self.close_manual_update_window(event_loop),
+            PostRedraw::CloseHistory => self.close_history_window(),
             PostRedraw::OpenManualUpdate => self.open_manual_update_window(event_loop),
             PostRedraw::ApplyCardSettings(settings) => self.apply_card_settings(&settings),
             PostRedraw::TestCardSound(sound) => match sound {
@@ -5676,6 +5854,9 @@ impl App {
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.install_tray();
+        if let Some(tab) = self.history_on_start.take() {
+            self.open_history_window(event_loop, panels::history::HistoryTab::parse(&tab));
+        }
         self.sync_session_windows(event_loop);
         self.sync_windows(event_loop);
         if !self.banner_printed {
@@ -5771,6 +5952,9 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         _ => post_redraw = PostRedraw::CloseOptions,
                     }
+                } else if overlay.kind == OverlayKind::History {
+                    // Alt+F4 sur la fenêtre d'historique : elle seule se ferme.
+                    post_redraw = PostRedraw::CloseHistory;
                 } else if let OverlayKind::ResetConfirm(target) = overlay.kind {
                     // Fermer la question, c'est répondre « Non ».
                     post_redraw = PostRedraw::AnswerResetConfirm(target, false);
@@ -6403,5 +6587,6 @@ fn main() {
         verbose_log: saved_config.verbose_log,
         settings_tx,
     });
+    app.history_on_start = cli.history_tab;
     event_loop.run_app(&mut app).expect("boucle d'événements");
 }

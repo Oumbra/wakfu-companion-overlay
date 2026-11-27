@@ -199,6 +199,19 @@ pub enum OverlayKind {
     /// n'est pas lié et la retire dès qu'il l'est ; aucun `Combat`/`Watchlist` n'existe pendant
     /// qu'elle est affichée. Il n'y a pas de mode invité : un compte est obligatoire.
     Login,
+    /// **Fenêtre d'historique** (2026-11-27, `docs/plan-historique-local.md` §7) — voir
+    /// `panels::history`. Une fenêtre application comme `Login` (barre des tâches, focus, jamais
+    /// ancrée sur le jeu), mais redimensionnable, et indépendante du compte : elle reste ouverte
+    /// quelle que soit la connexion.
+    History,
+}
+
+impl OverlayKind {
+    /// Fenêtre application (connexion, historique) : ni overlay, ni ancrée sur un client de jeu,
+    /// ni topmost, toujours interactive.
+    pub fn is_application_window(self) -> bool {
+        matches!(self, OverlayKind::Login | OverlayKind::History)
+    }
 }
 
 /// **Ce qu'une confirmation remet à son état d'origine** (2026-09-17) — voir
@@ -482,6 +495,8 @@ pub struct RenderContent<'a> {
     /// à partir de `config::OverlayConfig` avant la frame et les relit quand
     /// `RenderOutcome::settings_changed` le lui dit : il n'y a rien à valider.
     pub card_settings: Option<&'a mut panels::login::CardSettings>,
+    /// La fenêtre d'historique (2026-11-27) — `Some` uniquement pour `kind == History`.
+    pub history: Option<&'a mut panels::history::HistoryHost>,
 }
 
 /// Ce qu'une frame de rendu a produit, au-delà de l'affichage lui-même — étend l'ancien simple
@@ -538,6 +553,11 @@ pub struct RenderOutcome {
     /// La fenêtre de connexion demande à être déplacée à la souris (appui sur sa bannière, voir
     /// `panels::login`) — sans décorations OS, c'est l'hôte qui appelle `Window::drag_window`.
     pub drag_window: bool,
+    /// Redimensionnement à la souris d'une fenêtre sans décorations (fenêtre d'historique) —
+    /// l'hôte appelle `Window::drag_resize_window`.
+    pub resize_window: Option<egui::ResizeDirection>,
+    /// La croix de la fenêtre d'historique.
+    pub close_history: bool,
     /// « Réessayer » de l'écran « Mise à jour requise » de la fenêtre de connexion — l'hôte
     /// relance la vérification avec installation (voir `panels::login::LoginOutcome`).
     pub retry_update: bool,
@@ -732,6 +752,7 @@ pub fn build_ui(
                 combat_chrome: content.combat_chrome,
                 login: content.login.as_deref_mut(),
                 card_settings: content.card_settings.as_deref_mut(),
+                history: content.history.as_deref_mut(),
             },
         );
         // Tout est peint, infobulles comprises : c'est le dernier moment où les couches sont
@@ -787,6 +808,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         click_through_tip,
         login,
         card_settings,
+        history,
     } = content;
 
     let mut outcome = RenderOutcome::default();
@@ -857,7 +879,7 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
         },
         // La fenêtre de connexion peint sa carte jusqu'aux bords de sa fenêtre OS (fond
         // translucide, anneau animé sur le pourtour) — voir `panels::login`.
-        OverlayKind::Login => egui::Margin::ZERO,
+        OverlayKind::Login | OverlayKind::History => egui::Margin::ZERO,
         // Le bouton œil remplit sa fenêtre, taillée à sa mesure (`panels::click_through`).
         OverlayKind::ClickThrough => egui::Margin::ZERO,
     };
@@ -974,6 +996,22 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // rendu. Fenêtre de connexion (2026-09-14) — voir `panels::login`. `login` est
                 // `Some` uniquement pour ce `kind` (même règle et même repli silencieux que
                 // `options`).
+                OverlayKind::History => {
+                    if let Some(host) = history {
+                        let history_outcome = panels::history::show(
+                            ui,
+                            &mut host.state,
+                            &panels::history::HistoryContext {
+                                store: host.store.as_ref(),
+                                catalog,
+                                today: chrono::Local::now().date_naive(),
+                            },
+                        );
+                        outcome.close_history = history_outcome.close;
+                        outcome.drag_window = history_outcome.drag_window;
+                        outcome.resize_window = history_outcome.resize;
+                    }
+                }
                 OverlayKind::Login => {
                     if let Some(state) = login {
                         // Les réglages sont facultatifs pour la même raison que l'état : un

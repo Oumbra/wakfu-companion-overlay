@@ -160,6 +160,7 @@ fn harness_with(fight: FightSnapshot, side: CombatSide, metric: CombatMetric) ->
                 veiled: false,
                 login: None,
                 card_settings: None,
+                history: None,
             },
         );
     })
@@ -276,6 +277,7 @@ fn grandeur_sans_valeur_affiche_son_message() {
                 veiled: false,
                 login: None,
                 card_settings: None,
+                history: None,
             },
         );
     });

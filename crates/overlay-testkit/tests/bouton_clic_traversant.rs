@@ -184,6 +184,7 @@ fn harness_complet(
                     veiled: false,
                     login: None,
                     card_settings: None,
+                    history: None,
                 },
             );
             if outcome.toggle_interactive {

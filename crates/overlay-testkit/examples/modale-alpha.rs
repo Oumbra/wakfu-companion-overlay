@@ -134,6 +134,7 @@ fn rendu_sur(fond: egui::Color32) -> image::RgbaImage {
                 veiled: false,
                 login: None,
                 card_settings: None,
+                history: None,
             },
         );
     });

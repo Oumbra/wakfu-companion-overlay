@@ -121,6 +121,13 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> ParsedArgs {
     while let Some(arg) = it.next() {
         if arg == UPDATED_FROM_FLAG {
             parsed.updated_from = it.next();
+        } else if arg == HISTORY_FLAG {
+            parsed.history_tab = Some(String::new());
+        } else if let Some(tab) = arg
+            .strip_prefix(HISTORY_FLAG)
+            .and_then(|rest| rest.strip_prefix('='))
+        {
+            parsed.history_tab = Some(tab.to_string());
         } else if parsed.log_path.is_none() {
             parsed.log_path = Some(PathBuf::from(arg));
         }
@@ -132,7 +139,13 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> ParsedArgs {
 pub struct ParsedArgs {
     pub log_path: Option<PathBuf>,
     pub updated_from: Option<String>,
+    /// `--historique[=onglet]` : ouvrir la fenêtre d'historique au démarrage, sur cet onglet
+    /// (vide : l'onglet par défaut) — raccourci de bureau, et vérifications automatiques.
+    pub history_tab: Option<String>,
 }
+
+/// Voir [`ParsedArgs::history_tab`].
+pub const HISTORY_FLAG: &str = "--historique";
 
 fn exe_suffix() -> &'static str {
     if cfg!(windows) {
@@ -186,23 +199,36 @@ mod tests {
             p(&["C:\\logs\\wakfu.log"]),
             ParsedArgs {
                 log_path: Some(PathBuf::from("C:\\logs\\wakfu.log")),
-                updated_from: None
+                updated_from: None,
+                history_tab: None
             }
         );
         assert_eq!(
             p(&["--updated-from", "0.20.4"]),
             ParsedArgs {
                 log_path: None,
-                updated_from: Some("0.20.4".into())
+                updated_from: Some("0.20.4".into()),
+                history_tab: None
             }
         );
         assert_eq!(
             p(&["--updated-from", "0.20.4", "/tmp/wakfu.log"]),
             ParsedArgs {
                 log_path: Some(PathBuf::from("/tmp/wakfu.log")),
-                updated_from: Some("0.20.4".into())
+                updated_from: Some("0.20.4".into()),
+                history_tab: None
             }
         );
+    }
+
+    #[test]
+    fn drapeau_historique() {
+        let p = |a: &[&str]| parse_args(a.iter().map(|s| s.to_string()));
+        assert_eq!(p(&["--historique"]).history_tab.as_deref(), Some(""));
+        let parsed = p(&["--historique=achats", "/tmp/wakfu.log"]);
+        assert_eq!(parsed.history_tab.as_deref(), Some("achats"));
+        assert_eq!(parsed.log_path, Some(PathBuf::from("/tmp/wakfu.log")));
+        assert_eq!(p(&["--historiques"]).history_tab, None);
     }
 
     #[test]
