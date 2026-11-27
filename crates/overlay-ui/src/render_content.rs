@@ -998,6 +998,9 @@ pub fn paint_content(ui: &mut egui::Ui, content: RenderContent<'_>) -> RenderOut
                 // `options`).
                 OverlayKind::History => {
                     if let Some(host) = history {
+                        host.refresh_if_changed();
+                        ui.ctx()
+                            .request_repaint_after(panels::history::REFRESH_INTERVAL);
                         let dungeons = host.dungeons.load();
                         let history_outcome = panels::history::show(
                             ui,

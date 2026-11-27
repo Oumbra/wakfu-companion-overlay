@@ -237,7 +237,13 @@ pub struct HistoryHost {
     pub store: Option<HistoryStore>,
     /// Référentiel des donjons (noms des runs), publié par le thread Référentiel.
     pub dungeons: std::sync::Arc<arc_swap::ArcSwap<DungeonIndex>>,
+    /// Dernier `data_version` vu, et quand : voir [`Self::refresh_if_changed`].
+    seen_version: Option<i64>,
+    checked_at: Option<std::time::Instant>,
 }
+
+/// Délai entre deux regards sur la base, fenêtre ouverte.
+pub const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl HistoryHost {
     /// Ouvre la base de l'overlay (`HistoryStore::default_path`) ; une base absente ou illisible
@@ -260,11 +266,42 @@ impl HistoryHost {
             .and_then(|path| HistoryStore::open(&path))
             .map_err(|err| tracing::warn!(%err, "historique : base inaccessible"))
             .ok();
+        let seen_version = store.as_ref().and_then(|store| store.data_version().ok());
         Self {
             state: HistoryWindowState::new(tab),
             store,
             dungeons,
+            seen_version,
+            checked_at: None,
         }
+    }
+
+    /// **Rafraîchissement** : l'overlay continue d'écrire dans la base pendant que la fenêtre est
+    /// ouverte (un combat qui se termine, un achat). Au plus toutes les [`REFRESH_INTERVAL`], la
+    /// fenêtre regarde `data_version` ; s'il a bougé, chaque vue relit ses données — la recherche,
+    /// les groupes repliés et le nombre de jours chargés sont conservés. Vrai si elle a relu.
+    pub fn refresh_if_changed(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        if self
+            .checked_at
+            .is_some_and(|at| now.duration_since(at) < REFRESH_INTERVAL)
+        {
+            return false;
+        }
+        self.checked_at = Some(now);
+        let Some(version) = self
+            .store
+            .as_ref()
+            .and_then(|store| store.data_version().ok())
+        else {
+            return false;
+        };
+        if self.seen_version.replace(version) == Some(version) {
+            return false;
+        }
+        tracing::info!("[historique] la base a changé : les vues relisent leurs données.");
+        self.state.invalidate();
+        true
     }
 }
 

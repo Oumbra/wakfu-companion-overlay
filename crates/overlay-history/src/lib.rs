@@ -202,6 +202,15 @@ impl HistoryStore {
         })
     }
 
+    /// Compteur de `PRAGMA data_version` : il change dès qu'une **autre** connexion (l'overlay qui
+    /// enregistre un combat pendant que la fenêtre d'historique est ouverte) a validé une écriture.
+    /// Les écritures de cette connexion-ci ne le font pas bouger.
+    pub fn data_version(&self) -> Result<i64, HistoryError> {
+        Ok(self
+            .conn
+            .query_row("PRAGMA data_version", [], |row| row.get(0))?)
+    }
+
     /// Accès SQL brut, en lecture — tests et diagnostic, en attendant les requêtes de la fenêtre
     /// d'historique.
     pub fn connection(&self) -> &Connection {

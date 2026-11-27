@@ -363,3 +363,21 @@ fn un_combat_relu_porte_ses_combattants_et_son_butin() {
     );
     assert_eq!(fight.loot.len(), 1);
 }
+
+#[test]
+fn data_version_bouge_quand_une_autre_connexion_ecrit() {
+    let dir = std::env::temp_dir().join(format!(
+        "overlay-history-data-version-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join(FILE_NAME);
+    let mut overlay = HistoryStore::open(&path).unwrap();
+    let window = HistoryStore::open(&path).unwrap();
+    let before = window.data_version().unwrap();
+    assert_eq!(window.data_version().unwrap(), before, "rien n'a changé");
+    record(&mut overlay, &[fight("f1", 1, &[("Bouftou", 1)])]);
+    assert_ne!(window.data_version().unwrap(), before);
+    drop((overlay, window));
+    let _ = std::fs::remove_dir_all(&dir);
+}
