@@ -511,7 +511,7 @@ fn period_cells(stats: &PeriodStats) -> [Cell<'static>; 4] {
     let c = &stats.combats;
     let net = net_kamas(stats);
     let xp: i64 = stats.xp_by_character.iter().map(|xp| xp.amount).sum();
-    let cells = [
+    [
         Cell {
             icon: DsIcon::Kamas,
             label: "Kamas",
@@ -547,8 +547,7 @@ fn period_cells(stats: &PeriodStats) -> [Cell<'static>; 4] {
                 (format::thousands(c.challenges_failed), items::LOSS),
             ],
         },
-    ];
-    cells
+    ]
 }
 
 /// La bande d'indicateurs : une case par entrée, séparées d'un filet.
