@@ -478,6 +478,31 @@ pub fn fetch_account_id(token: &str) -> Result<String, SyncError> {
         .ok_or_else(|| SyncError::Json("champ user.id absent de /api/v1/auth/me".into()))
 }
 
+/// Une page d'historique du compte — `GET <path>?limit=<limit>[&before=<curseur>]`, `path` étant
+/// l'une des quatre routes `/api/v1/history/{fights,purchases,trades,pacts}` (voir
+/// `overlay_history::import`, qui interprète la réponse). Sert à **l'import** de l'historique en
+/// ligne dans la base locale (2026-11-27, `docs/plan-historique-local.md` §8), avant l'arrêt du
+/// serveur. Le curseur (`nextBefore` de la page précédente) est rendu tel quel au serveur.
+pub fn fetch_history_page(
+    token: &str,
+    path: &str,
+    limit: u32,
+    before: Option<&str>,
+) -> Result<Value, SyncError> {
+    let url = format!("{}{path}", base_url());
+    let mut request = agent()
+        .get(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .query("limit", limit.to_string());
+    if let Some(before) = before {
+        request = request.query("before", before);
+    }
+    let response = request
+        .call()
+        .map_err(|err| SyncError::Network(err.to_string()))?;
+    parse_json_body(path, response)
+}
+
 /// Ce que `POST /api/v1/auth/native/session` rend — voir [`rotate_native_session`]. Les dates sont
 /// laissées telles que le serveur les écrit (ISO 8601) : elles ne servent qu'au journal, l'âge du
 /// jeton se mesure à la date de sauvegarde (`token_store::token_age`).

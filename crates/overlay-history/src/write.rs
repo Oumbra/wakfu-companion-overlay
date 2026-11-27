@@ -19,6 +19,8 @@ use overlay_engine::log_time::parse_iso_utc_ms;
 use overlay_engine::SyncEvent;
 use rusqlite::{params, OptionalExtension, Transaction};
 
+use crate::account::{adopt_imported, client_key};
+
 /// Ce qu'un lot a changé — compté pour le journal et les tests.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RecordReport {
@@ -35,32 +37,36 @@ pub struct RecordReport {
 
 /// Écrit un lot et rend les ids des combats touchés (nouveaux comme déjà connus) : ce sont eux
 /// dont le rattachement de donjon et le type sont recalculés ensuite.
+///
+/// `uid` : le compte du site, s'il est connu (`account`) — chaque ligne reçoit alors sa
+/// `client_key`, et une ligne importée équivalente est adoptée plutôt que doublée.
 pub(crate) fn record_events(
     tx: &Transaction<'_>,
     events: &[SyncEvent],
+    uid: Option<&str>,
     report: &mut RecordReport,
 ) -> rusqlite::Result<Vec<i64>> {
     let mut touched_fights = Vec::new();
     for event in events {
         match &event.payload {
             HistoryPayload::Fight(fight) => {
-                match write_fight(tx, &event.signature, fight, report)? {
+                match write_fight(tx, &event.signature, fight, uid, report)? {
                     Some(id) => touched_fights.push(id),
                     None => report.skipped += 1,
                 }
             }
             HistoryPayload::Purchase(purchase) => {
-                if !write_purchase(tx, &event.signature, purchase, report)? {
+                if !write_purchase(tx, &event.signature, purchase, uid, report)? {
                     report.skipped += 1;
                 }
             }
             HistoryPayload::Trade(trade) => {
-                if !write_trade(tx, &event.signature, trade, report)? {
+                if !write_trade(tx, &event.signature, trade, uid, report)? {
                     report.skipped += 1;
                 }
             }
             HistoryPayload::PactExtraction(pact) => {
-                if !write_pact(tx, &event.signature, pact, report)? {
+                if !write_pact(tx, &event.signature, pact, uid, report)? {
                     report.skipped += 1;
                 }
             }
@@ -69,6 +75,20 @@ pub(crate) fn record_events(
     touched_fights.sort_unstable();
     touched_fights.dedup();
     Ok(touched_fights)
+}
+
+/// La `client_key` de l'événement, après adoption d'une éventuelle ligne importée équivalente.
+fn account_key(
+    tx: &Transaction<'_>,
+    uid: Option<&str>,
+    table: &str,
+    kind: &str,
+    signature: &str,
+) -> rusqlite::Result<Option<String>> {
+    match uid {
+        Some(uid) => adopt_imported(tx, table, &client_key(uid, kind, signature), signature),
+        None => Ok(None),
+    }
 }
 
 fn timestamp(raw: &str) -> Option<i64> {
@@ -83,11 +103,13 @@ fn write_fight(
     tx: &Transaction<'_>,
     signature: &str,
     fight: &FightPayload,
+    uid: Option<&str>,
     report: &mut RecordReport,
 ) -> rusqlite::Result<Option<i64>> {
     let Some(started_at) = timestamp(&fight.started_at) else {
         return Ok(None);
     };
+    let key = account_key(tx, uid, "fights", "fight", signature)?;
     let existing: Option<i64> = tx
         .query_row(
             "SELECT id FROM fights WHERE signature = ?1",
@@ -100,9 +122,10 @@ fn write_fight(
             tx.execute(
                 "UPDATE fights
                  SET dungeon_id = COALESCE(?2, dungeon_id),
-                     dungeon_run_key = COALESCE(?3, dungeon_run_key)
+                     dungeon_run_key = COALESCE(?3, dungeon_run_key),
+                     client_key = COALESCE(client_key, ?4)
                  WHERE id = ?1",
-                params![id, fight.dungeon_id, fight.dungeon_run_signature],
+                params![id, fight.dungeon_id, fight.dungeon_run_signature, key],
             )?;
             id
         }
@@ -110,8 +133,8 @@ fn write_fight(
             tx.execute(
                 "INSERT INTO fights (signature, fight_log_id, started_at, duration_ms, won, turns,
                     total_damage, xp_gained, kamas_gained, game_server, dungeon_id,
-                    dungeon_run_key, challenges_passed, challenges_failed)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    dungeon_run_key, challenges_passed, challenges_failed, client_key)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     signature,
                     fight.fight_id,
@@ -127,6 +150,7 @@ fn write_fight(
                     fight.dungeon_run_signature,
                     fight.challenges_passed,
                     fight.challenges_failed,
+                    key,
                 ],
             )?;
             report.fights_inserted += 1;
@@ -197,20 +221,24 @@ fn write_purchase(
     tx: &Transaction<'_>,
     signature: &str,
     purchase: &PurchasePayload,
+    uid: Option<&str>,
     report: &mut RecordReport,
 ) -> rusqlite::Result<bool> {
     let Some(occurred_at) = timestamp(&purchase.occurred_at) else {
         return Ok(false);
     };
+    let key = account_key(tx, uid, "purchases", "purchase", signature)?;
     let updated = tx.execute(
-        "UPDATE purchases SET item_id = ?2, item_name = ?3 WHERE signature = ?1",
-        params![signature, purchase.item_id, purchase.item_name],
+        "UPDATE purchases SET item_id = ?2, item_name = ?3,
+            client_key = COALESCE(client_key, ?4)
+         WHERE signature = ?1",
+        params![signature, purchase.item_id, purchase.item_name, key],
     )?;
     if updated == 0 {
         tx.execute(
             "INSERT INTO purchases (signature, item_id, item_name, quantity, total_cost,
-                occurred_at, game_server)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                occurred_at, game_server, client_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 signature,
                 purchase.item_id,
@@ -219,6 +247,7 @@ fn write_purchase(
                 purchase.total_cost,
                 occurred_at,
                 purchase.game_server,
+                key,
             ],
         )?;
         report.purchases_inserted += 1;
@@ -230,15 +259,17 @@ fn write_trade(
     tx: &Transaction<'_>,
     signature: &str,
     trade: &TradePayload,
+    uid: Option<&str>,
     report: &mut RecordReport,
 ) -> rusqlite::Result<bool> {
     let Some(occurred_at) = timestamp(&trade.occurred_at) else {
         return Ok(false);
     };
+    let key = account_key(tx, uid, "trades", "trade", signature)?;
     let inserted = tx.execute(
         "INSERT INTO trades (signature, peer_name, self_name, occurred_at, kamas_acquired,
-            kamas_given, game_server)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            kamas_given, game_server, client_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT (signature) DO NOTHING",
         params![
             signature,
@@ -248,6 +279,7 @@ fn write_trade(
             trade.kamas_acquired,
             trade.kamas_given,
             trade.game_server,
+            key,
         ],
     )?;
     report.trades_inserted += inserted;
@@ -285,16 +317,18 @@ fn write_pact(
     tx: &Transaction<'_>,
     signature: &str,
     pact: &PactExtractionPayload,
+    uid: Option<&str>,
     report: &mut RecordReport,
 ) -> rusqlite::Result<bool> {
     let Some(occurred_at) = timestamp(&pact.occurred_at) else {
         return Ok(false);
     };
+    let key = account_key(tx, uid, "pact_extractions", "pact", signature)?;
     let inserted = tx.execute(
-        "INSERT INTO pact_extractions (signature, occurred_at, game_server)
-         VALUES (?1, ?2, ?3)
+        "INSERT INTO pact_extractions (signature, occurred_at, game_server, client_key)
+         VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT (signature) DO NOTHING",
-        params![signature, occurred_at, pact.game_server],
+        params![signature, occurred_at, pact.game_server, key],
     )?;
     report.pacts_inserted += inserted;
     let extraction_id: i64 = tx.query_row(

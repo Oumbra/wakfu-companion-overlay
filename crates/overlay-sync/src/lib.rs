@@ -12,8 +12,9 @@ pub mod token_store;
 pub mod update;
 
 pub use client::{
-    fetch_account_id, fetch_settings, patch_chat_filters, patch_json_authenticated, patch_roster,
-    patch_watchlist, post_json, post_json_authenticated, AccountSettings,
+    fetch_account_id, fetch_history_page, fetch_settings, patch_chat_filters,
+    patch_json_authenticated, patch_roster, patch_watchlist, post_json, post_json_authenticated,
+    AccountSettings,
 };
 pub use pairing::{pair_and_wait, PairingHandle};
 pub use queue::{client_key, FlushOutcome, SyncQueue, MAX_PENDING_AGE};

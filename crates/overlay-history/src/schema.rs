@@ -2,7 +2,7 @@
 //!
 //! Calqué sur les tables d'historique du site (`wakfu-companion/server/db/schema.ts`), sans
 //! `user_id` (une base par poste) et avec la **signature de contenu** du moteur
-//! (`overlay_engine::history`) à la place de `client_key` : c'est elle qui rend l'écriture
+//! (`overlay_engine::history`) comme clé d'unicité : c'est elle qui rend l'écriture
 //! idempotente — relire dix fois le même `wakfu.log` n'écrit chaque événement qu'une fois.
 //!
 //! Les horodatages sont des **millisecondes UTC** (`INTEGER`), pas du texte : tri, bornes de période
@@ -16,7 +16,7 @@ use rusqlite::Connection;
 use crate::HistoryError;
 
 /// Une migration par version : l'entrée `i` fait passer la base de la version `i` à `i + 1`.
-const MIGRATIONS: &[&str] = &[
+pub(crate) const MIGRATIONS: &[&str] = &[
     // Version 1 (2026-11-27) — les quatre historiques du site.
     "
     CREATE TABLE fights (
@@ -127,6 +127,27 @@ const MIGRATIONS: &[&str] = &[
         item_name TEXT,
         quantity INTEGER NOT NULL,
         PRIMARY KEY (extraction_id, line_index)
+    );
+    ",
+    // Version 2 (2026-11-27, plan §8) — import de l'historique en ligne. `client_key` est la clé
+    // du site (`sha256(uid|type|signature)`, `overlay_sync::client_key`) : une ligne importée la
+    // porte, une ligne écrite depuis le log la reçoit dès que le compte est connu (`account`).
+    // C'est elle qui fait se reconnaître un combat importé et le même combat relu dans le log.
+    // Plusieurs `NULL` restent permis par l'index unique (SQLite).
+    "
+    ALTER TABLE fights ADD COLUMN client_key TEXT;
+    CREATE UNIQUE INDEX fights_client_key_idx ON fights (client_key);
+    ALTER TABLE purchases ADD COLUMN client_key TEXT;
+    CREATE UNIQUE INDEX purchases_client_key_idx ON purchases (client_key);
+    ALTER TABLE trades ADD COLUMN client_key TEXT;
+    CREATE UNIQUE INDEX trades_client_key_idx ON trades (client_key);
+    ALTER TABLE pact_extractions ADD COLUMN client_key TEXT;
+    CREATE UNIQUE INDEX pact_extractions_client_key_idx ON pact_extractions (client_key);
+
+    -- Petites valeurs de la base : identifiant du compte, imports terminés.
+    CREATE TABLE meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
     );
     ",
 ];

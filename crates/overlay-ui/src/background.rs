@@ -874,6 +874,7 @@ fn attempt_connect(
 fn activate_sync_queue(token: &str, sync_tx: &mpsc::Sender<SyncCommand>) {
     match overlay_sync::client::fetch_account_id(token) {
         Ok(uid) => {
+            spawn_history_import(uid.clone(), token.to_string());
             let _ = sync_tx.send(SyncCommand::Activate {
                 uid,
                 token: token.to_string(),
@@ -885,6 +886,137 @@ fn activate_sync_queue(token: &str, sync_tx: &mpsc::Sender<SyncCommand>) {
                 "[compte] identifiant introuvable (/api/v1/auth/me) — historique non synchronisé cette session."
             );
         }
+    }
+}
+
+/// Un seul import à la fois : une reconnexion pendant un import en cours n'en relance pas un second.
+static HISTORY_IMPORT_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Essais par page avant d'abandonner l'import (le suivant reprendra à la prochaine connexion).
+const HISTORY_IMPORT_ATTEMPTS: u32 = 3;
+
+/// Import de l'historique en ligne (2026-11-27, `docs/plan-historique-local.md` §8) : dès que le
+/// compte est connu, tout ce que le site a reçu (`GET /api/v1/history/*`) est recopié dans la base
+/// locale, **une fois par compte** — l'historique doit survivre à l'arrêt du serveur.
+///
+/// 1. `set_account_uid` d'abord : les lignes déjà écrites depuis le log reçoivent leur clé du site,
+///    l'import les reconnaît au lieu de les doubler (`overlay_history::account`).
+/// 2. Les quatre historiques, page par page ; la base n'est ouverte que le temps d'écrire une page
+///    (même règle que [`spawn_history_thread`]), et le thread Historique peut écrire entre deux.
+/// 3. Import complet : noté dans la base (`mark_import_done`), jamais refait pour ce compte. Un
+///    échec (réseau, serveur) n'est pas noté : la prochaine connexion recommence, sans doublon.
+///
+/// Thread jetable, best-effort comme ses voisins : journalisé, jamais bloquant.
+fn spawn_history_import(uid: String, token: String) {
+    use std::sync::atomic::Ordering;
+    if HISTORY_IMPORT_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let spawned = thread::Builder::new()
+        .name("overlay-history-import".into())
+        .spawn(move || {
+            run_history_import(&uid, &token);
+            HISTORY_IMPORT_RUNNING.store(false, Ordering::Release);
+        });
+    if spawned.is_err() {
+        HISTORY_IMPORT_RUNNING.store(false, Ordering::Release);
+    }
+}
+
+fn run_history_import(uid: &str, token: &str) {
+    use overlay_history::{HistoryStore, ImportKind};
+    let path = match HistoryStore::default_path() {
+        Ok(path) => path,
+        Err(err) => {
+            tracing::warn!(%err, "[import] historique local indisponible");
+            return;
+        }
+    };
+    let prepared = HistoryStore::open(&path).and_then(|mut store| {
+        let account = store.set_account_uid(uid)?;
+        Ok((account, store.import_done(uid)?))
+    });
+    match prepared {
+        Ok((account, true)) => {
+            tracing::debug!(
+                cles = account.keyed,
+                fondus = account.merged,
+                "[import] déjà fait pour ce compte"
+            );
+            return;
+        }
+        Ok((account, false)) => {
+            tracing::info!(
+                cles = account.keyed,
+                fondus = account.merged,
+                "[import] historique en ligne : début"
+            );
+        }
+        Err(err) => {
+            tracing::warn!(%err, "[import] base d'historique inaccessible");
+            return;
+        }
+    }
+    let started = Instant::now();
+    let fetch = |kind: ImportKind, before: Option<&str>| {
+        let mut attempt = 1;
+        loop {
+            match overlay_sync::fetch_history_page(
+                token,
+                kind.path(),
+                overlay_history::import::PAGE_SIZE,
+                before,
+            ) {
+                Ok(body) => return Ok(body),
+                // Un refus (jeton révoqué, route absente) ne passera pas mieux au deuxième essai.
+                Err(err @ overlay_sync::SyncError::Http { status, .. })
+                    if status != 429 && status < 500 =>
+                {
+                    return Err(err)
+                }
+                Err(err) if attempt >= HISTORY_IMPORT_ATTEMPTS => return Err(err),
+                Err(err) => {
+                    tracing::debug!(%err, attempt, "[import] page en échec, nouvel essai");
+                    thread::sleep(std::time::Duration::from_secs(2 * u64::from(attempt)));
+                    attempt += 1;
+                }
+            }
+        }
+    };
+    let result = overlay_history::import_all(
+        || HistoryStore::open(&path),
+        fetch,
+        |progress| {
+            tracing::debug!(
+                type_ = progress.kind.label(),
+                pages = progress.pages,
+                ajoutes = progress.report.inserted,
+                deja_la = progress.report.present,
+                "[import] page écrite"
+            );
+        },
+    );
+    match result {
+        Ok(total) => {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_millis() as i64)
+                .unwrap_or(0);
+            if let Err(err) =
+                HistoryStore::open(&path).and_then(|mut store| store.mark_import_done(uid, now_ms))
+            {
+                tracing::warn!(%err, "[import] fin d'import non notée (sera refait, sans doublon)");
+            }
+            tracing::info!(
+                ajoutes = total.inserted,
+                deja_la = total.present,
+                ecartes = total.skipped,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "[import] historique en ligne recopié dans la base locale"
+            );
+        }
+        Err(err) => tracing::warn!(%err, "[import] interrompu — repris à la prochaine connexion"),
     }
 }
 

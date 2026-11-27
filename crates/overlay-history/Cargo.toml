@@ -11,10 +11,14 @@ overlay-engine = { path = "../overlay-engine" }
 # Même version et même `bundled` qu'`overlay-sync` (file d'envoi) : une seule copie de SQLite
 # compilée dans le binaire, aucune bibliothèque système requise.
 rusqlite = { version = "0.32", features = ["bundled"] }
-serde = "1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Clé du site (`account::client_key`), même calcul qu'`overlay-sync`.
+sha2 = "0.10"
 thiserror = "2"
 tracing = "0.1"
 
 [dev-dependencies]
 overlay-ingest = { path = "../overlay-ingest" }
+# Vérifie que `client_key` calcule la même clé que la file d'envoi.
+overlay-sync = { path = "../overlay-sync" }
