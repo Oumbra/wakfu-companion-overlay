@@ -140,31 +140,52 @@ homonymes (à reconsidérer plus tard si le besoin réapparaît), internationali
 
 ## 4. Données de référence embarquées
 
-- Un `xtask` génère, depuis `wakfu-companion/repository/*.json`, un catalogue **français seul** :
-  objets (id, nom, gfxId, rareté, catégorie, recette, `wakassets_available`), monstres (id, nom,
-  gfxId, famille, boss / archi / dominant, `wakassets_available`), donjons, familles, catégories.
-  Il remplace `catalog-index.json.gz` et est embarqué par `include_bytes!` (≲ 1,5 Mo gzip).
-- **Plus aucun appel** à `/api/v1/catalog/*`, `/dungeons`, `/monster-families`, `/items/{id}` : le
-  catalogue suit les releases. `catalog_cache.rs`, `reference_data_cache.rs` et le bandeau
-  « catalogue daté » disparaissent.
-- `CatalogIndex` perd les colonnes en/es/pt et leur indexation (`catalog.rs`).
-- Les serveurs de jeu (`/api/v1/game-servers`) deviennent une liste embarquée.
+**Fait (phase 0, 2026-11-27).**
+
+- L'outil du mainteneur `tools/referentiel` (son propre workspace, jamais compilé par le CI ni par
+  la release) génère `assets/referentiel.json` depuis `wakfu-companion/repository/*.json`, en
+  reprenant les règles d'`import-catalog.ts` / `compact-index.ts` (exclusion des anciennes raretés,
+  catégorie large déduite de la sous-catégorie, dédoublonnage nom + rareté + gfxId). Contenu,
+  **français seul** : objets `[id, nom, gfxId, rareté, a_recette, catégorie]`, monstres
+  `[id, nom, gfxId, famille, boss, archi, dominant]`, recettes `[id, [[ingrédient, quantité]…]]`,
+  donjons, familles. ~1 Mo de JSON, une entrée par ligne (diffs lisibles), embarqué par
+  `include_str!` (`overlay_engine::referentiel`) ; il remplace `catalog-index.json.gz`.
+  Commande : `referentiel catalogue --repository ../wakfu-companion/repository --sortie
+  assets/referentiel.json`, à relancer quand le dépôt web met son référentiel à jour.
+- **Plus aucun appel** à `/api/v1/catalog/*`, `/dungeons`, `/monster-families`, `/items/{id}`,
+  `/game-servers`, `/icons/*` : le référentiel suit les releases. `catalog_cache.rs`,
+  `reference_data_cache.rs`, `session.rs`, le binaire `gen-catalog-fallback` et l'indicateur
+  « catalogue daté » ont disparu ; les quatre anciens fichiers de cache sont supprimés au
+  démarrage (`local_data::remove_obsolete_caches`).
+- Un seul thread de fond (`background::spawn_referentiel_thread`) construit catalogue et donjons au
+  lancement. Les recettes se résolvent localement (`recipe::resolve_recipe(id, &catalog)`).
+- `CatalogIndex`, `DungeonIndex` et `MonsterFamilyIndex` ont perdu les colonnes en/es/pt.
+- Les serveurs de jeu sont une liste embarquée (`GameServers::embedded` : Pandora, Rubilax,
+  Ogrest — mêmes codes que la table `game_servers` du site, pour l'import).
 
 ## 5. Images du jeu
 
 ### 5.1 Ordre de résolution
 
-1. Cache disque (`data/icons/{dossier}/{gfxId}.png`, mécanisme actuel d'`icon_cache.rs`).
-2. Images embarquées dans l'exe : petits dossiers (`rarities`, `itemTypes`, `monstersfamily`,
-   `icons`, `aptitudes`, ~2 Mo) et assets d'interface repris du site (~300 Ko).
-3. Si l'entrée du catalogue porte `wakassets_available = false` : **CDN de l'overlay**.
-4. Sinon : **wakassets**, au commit épinglé
-   (`https://raw.githubusercontent.com/Vertylo/wakassets/9159bb1/{dossier}/{gfxId}.png`).
+**Fait (phase 0, 2026-11-27)**, plus simple que prévu : pas de drapeau de disponibilité dans le
+référentiel.
 
-Le drapeau du catalogue évite les allers-retours en 404. `remote_icons.rs` garde sa mécanique
-(4 téléchargements parallèles, cache de textures par fenêtre) ; seules les URL changent et le
-jeton disparaît. Un joueur ne télécharge en pratique que ce qu'il voit : quelques Mo à quelques
-dizaines de Mo, pas les 161 Mo.
+1. Cache disque (`data/icons/…`, `icon_cache.rs`, inchangé — les icônes déjà reçues de l'API
+   restent valables, ce sont les mêmes fichiers).
+2. **wakassets** (`https://vertylo.github.io/wakassets/{dossier}/{gfxId}.png`), tous les chemins
+   candidats de l'icône (`IconRef::image_paths`).
+3. **CDN de l'overlay** (`https://oumbra.github.io/wakfu-companion-overlay/…`), mêmes chemins.
+
+`overlay_sync::client::icon_urls` construit cette liste ; `remote_icons.rs` garde sa mécanique
+(téléchargements parallèles, cache de textures par fenêtre) et s'arrête à la première réponse. Un
+404 sur wakassets ne coûte qu'aux ~350 images que seul le CDN porte, une fois par poste. Les petits
+dossiers (`rarities`, `itemTypes`…) passent par le même chemin ; les embarquer reste possible si un
+démarrage hors ligne sans cache le demande un jour.
+
+Conséquence pour la politique de confidentialité (§10) : l'adresse IP du joueur et la liste des
+icônes qu'il affiche partent désormais vers GitHub Pages (wakassets et le CDN de l'overlay), et non
+plus vers l'API du site qui les relayait (constat C10 de `docs/analyse-rgpd.md`). La page
+« Confidentialité » réécrite doit le dire.
 
 ### 5.2 CDN de l'overlay (GitHub Pages)
 
@@ -213,6 +234,12 @@ manquantes sont mises à disposition par le **CDN de l'overlay** (§5.2). Leur r
 **en amont, dans le projet** (outil lancé à la main sur le poste du mainteneur, à chaque patch du
 jeu), et le résultat — des PNG — est commité dans `cdn/`. Elle n'a lieu **ni pendant la
 compilation** (aucun `build.rs`, aucune étape de CI), **ni pendant l'exécution** de l'overlay.
+
+Commande (poste du mainteneur, après un patch du jeu ou une mise à jour du référentiel) :
+`referentiel images --repository ../wakfu-companion/repository --wakassets ../wakassets
+--gui-jar "<installation Wakfu>/contents/gui_jar/gui.jar" --sortie cdn`. L'outil réécrit `cdn/`
+avec les seules images absentes de wakassets, converties en PNG (350 fichiers, 2,3 Mo au
+2026-11-27), et liste celles qu'il n'a trouvées nulle part.
 
 ## 6. Stockage local
 
@@ -333,7 +360,7 @@ compilation** (aucun `build.rs`, aucune étape de CI), **ni pendant l'exécution
 
 | Phase | Contenu | Critère de sortie |
 | --- | --- | --- |
-| **0 — Données** | `xtask` catalogue français embarqué ; petites images embarquées ; dossier `cdn/` + `pages.yml` ; nouvelle résolution d'icônes | L'overlay démarre et résout noms et icônes sans jeton ni API |
+| **0 — Données** ✅ | Référentiel français embarqué (`tools/referentiel`) ; dossier `cdn/` + `pages.yml` ; résolution d'icônes wakassets puis CDN | L'overlay démarre et résout noms et icônes sans jeton ni API |
 | **1 — Stockage** | `history.sqlite3`, écriture depuis le moteur, recalcul runs de donjon et type de combat | Rejeu 10× du même log : aucun doublon ; totaux identiques au site sur un même log |
 | **2 — Import** | Version de transition avec import de l'historique en ligne | Historique d'un compte réel importé, volume mesuré, totaux identiques au site |
 | **3 — Fenêtre** | Fenêtre application, 5 composants, vues Combats / Récap / Achats / Échanges / Pactes / À propos, Windows et X11 | Parité fonctionnelle avec le site sur le périmètre §3.1 ; captures de référence |
