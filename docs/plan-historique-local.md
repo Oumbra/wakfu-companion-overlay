@@ -407,14 +407,16 @@ hasard, l'overlay de façon stable (premier ennemi dans l'ordre du log). Écart 
   la relecture du log ne l'écrase pas, et une ligne de butin vidée reste en base à quantité nulle.
 - Le symbole ₭ manque dans la police du design system : un montant est toujours suivi de l'icône
   Kamas (`paint_amount`, `paint_amount_left`).
+- **Retours du 2026-11-28 (suite)** : badge de pierre de donjon (16 px, coin haut droit de
+  l'illustration) sur un combat ou un run dont le butin contient la pierre du type de donjon —
+  pour un run, le butin de la dernière tentative de boss, comme `dungeonRunStoneItemId` du site ;
+  correction d'un objet d'échange dans son sens (acquis ou cédé, migration 4,
+  `HistoryStore::reassign_trade_item`), même menu que le butin. Le mode « Origine » du site
+  (session ou compte) n'a pas d'objet en local. Les objets de pacte sans image sont des objets
+  antérieurs au référentiel : pas un écart à combler.
 - Reste :
-  - Combats : badge de pierre ;
-  - autres corrections au clic droit du site : l'objet d'un échange, la classe d'un personnage
-    (ligne d'XP), un sort à un autre combattant ; suivre un objet ou un ennemi ;
-  - **images des objets de pacte** : la plupart (costumes, équipements de boutique) n'ont ni id en
-    base ni entrée dans le référentiel — la source `repository/items.json` du site ne les contient
-    pas, le site ne les illustrait donc pas non plus. Il faudrait élargir la source du référentiel
-    (outil `tools/referentiel`, en amont) ;
+  - autres corrections au clic droit du site : la classe d'un personnage (ligne d'XP), un sort à
+    un autre combattant ; suivre un objet ou un ennemi ;
   - Linux : ramener une fenêtre déjà ouverte au premier plan ; essai à l'écran.
 
 ## 8. Import de l'historique en ligne
