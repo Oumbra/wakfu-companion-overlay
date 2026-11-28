@@ -336,6 +336,15 @@ pub fn fight_count(count: usize) -> String {
     }
 }
 
+/// `1 tour`, `N tours`.
+fn turn_count(count: i64) -> String {
+    if count == 1 {
+        "1 tour".to_string()
+    } else {
+        format!("{count} tours")
+    }
+}
+
 /// La grandeur mesurée dans le détail d'un combat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Metric {
@@ -1022,7 +1031,7 @@ fn paint_caret(ui: &Ui, painter: &egui::Painter, rect: Rect, open: bool) {
     );
 }
 
-/// Résumé d'un combat : heure, illustration, Victoire / Défaite, `N tours (durée)`. Rend `true`
+/// Résumé d'un combat : heure, illustration, Victoire / Défaite, `N tours - durée` en pastille. Rend `true`
 /// au clic.
 fn fight_summary(
     ui: &mut Ui,
@@ -1073,16 +1082,16 @@ fn fight_summary(
         egui::StrokeKind::Inside,
     );
     painter.galley(badge.center() - galley.size() / 2.0, galley, color);
-    painter.text(
-        egui::pos2(badge.right() + 12.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        format!(
-            "{} tours ({})",
-            fight.turns,
+    // `N tours - durée` en pastille avant le chevron, comme la durée d'un run.
+    super::paint_pill(
+        ui,
+        &painter,
+        egui::pos2(rect.right() - 32.0, rect.center().y),
+        &format!(
+            "{} - {}",
+            turn_count(fight.turns),
             duration(fight.duration_ms.unwrap_or(0))
         ),
-        text::label_font(ui.ctx(), items::FONT_SIZE),
-        tokens::OVERLAY_TEXT_MUTED,
     );
     paint_caret(ui, &painter, rect, open);
     response.clicked()
