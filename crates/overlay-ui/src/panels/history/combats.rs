@@ -943,6 +943,7 @@ fn summary_frame(
     indent: f32,
     started_at: i64,
     icon: Option<IconRef>,
+    stone: Option<i64>,
     tooltip: Option<String>,
     id: egui::Id,
     ctx: &HistoryContext<'_>,
@@ -976,7 +977,39 @@ fn summary_frame(
                 .on_hover_text(tooltip);
         }
     }
+    // La pierre du donjon, obtenue : en badge sur le coin haut droit de l'illustration
+    // (`.dungeon-stone-badge` du site : 16 px, décalé de 4 px vers le haut et la droite, ombre).
+    if let Some(stone) = stone.and_then(|id| ctx.catalog.find_item_icon("", Some(id))) {
+        let badge = Rect::from_min_size(
+            egui::pos2(image.right() + 4.0 - STONE_BADGE, image.top() - 4.0),
+            egui::vec2(STONE_BADGE, STONE_BADGE),
+        );
+        painter.circle_filled(
+            badge.center() + egui::vec2(0.0, 1.0),
+            STONE_BADGE / 2.0,
+            Color32::from_black_alpha(110),
+        );
+        super::paint_remote_icon(ui, &painter, badge, &stone, ctx.remote_icons, textures);
+    }
     (rect, image.right(), response)
+}
+
+/// Côté du badge de pierre.
+const STONE_BADGE: f32 = 16.0;
+
+/// La pierre du donjon de `fight` si elle est dans son butin (`fightStoneItemId` du site).
+fn stone_in_loot(
+    fight: &FightRow,
+    dungeon_id: Option<i64>,
+    ctx: &HistoryContext<'_>,
+) -> Option<i64> {
+    let dungeon = ctx.dungeons.find_by_id(dungeon_id?)?;
+    let stone = super::recap::stone_for_type(dungeon.dungeon_type)?;
+    fight
+        .loot
+        .iter()
+        .any(|line| line.item_id == Some(stone))
+        .then_some(stone)
 }
 
 fn paint_caret(ui: &Ui, painter: &egui::Painter, rect: Rect, open: bool) {
@@ -1002,12 +1035,19 @@ fn fight_summary(
 ) -> bool {
     let face = illustration(fight, ctx.catalog, ctx.dungeons);
     let icon = face.and_then(|p| ctx.catalog.find_monster_icon(&p.name, p.monster_id));
+    // Le combat de boss d'un run déplié ne porte pas le badge : l'en-tête du run l'a déjà.
+    let stone = if in_run && fight.dungeon_id.is_some() {
+        None
+    } else {
+        stone_in_loot(fight, fight.dungeon_id, ctx)
+    };
     let (rect, image_right, response) = summary_frame(
         ui,
         width,
         if in_run { RUN_INDENT } else { 0.0 },
         fight.started_at,
         icon,
+        stone,
         face.map(|p| p.name.clone()),
         ui.id().with(("combat-horloge", fight.id)),
         ctx,
@@ -1070,12 +1110,22 @@ fn run_summary(
         illustration(boss, ctx.catalog, ctx.dungeons)
             .and_then(|p| ctx.catalog.find_monster_icon(&p.name, p.monster_id))
     });
+    // La pierre du run s'apprécie sur le butin de la dernière tentative de boss
+    // (`dungeonRunStoneItemId` : `entry.representative`).
+    let last_boss = fights
+        .iter()
+        .filter(|fight| fight.dungeon_id.is_some())
+        .max_by_key(|fight| fight.started_at)
+        .copied()
+        .unwrap_or(representative);
+    let stone = stone_in_loot(last_boss, dungeon_id, ctx);
     let (rect, image_right, response) = summary_frame(
         ui,
         width,
         0.0,
         representative.started_at,
         icon,
+        stone,
         dungeon.map(|d| d.fr.clone()),
         ui.id().with(("run-horloge", representative.id)),
         ctx,

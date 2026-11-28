@@ -224,6 +224,19 @@ pub fn history_scenario() -> Vec<Step> {
                 },
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("combats-tour"),
+                // Clic droit sur l'Anneau Sanglant du butin (deux objets de ce nom) : le menu de
+                // correction, refermé par un clic à côté.
+                Step::RightClick {
+                    x: 400.0,
+                    y: 741.0,
+                    label: "anneau sanglant",
+                },
+                Step::Capture("combats-correction"),
+                Step::Click {
+                    x: 150.0,
+                    y: 400.0,
+                    label: "hors du menu",
+                },
                 Step::Click {
                     x: 920.0,
                     y: 165.0,
@@ -238,6 +251,26 @@ pub fn history_scenario() -> Vec<Step> {
                 },
                 Step::Pause(Duration::from_secs(1)),
                 Step::Capture("combats-types-replies"),
+                // Un an chargé, puis la recherche « Pierre d'entourage » : les combats qui l'ont
+                // rapportée portent le badge de pierre sur leur illustration.
+                Step::Click {
+                    x: 624.0,
+                    y: 784.0,
+                    label: "portée",
+                },
+                Step::Click {
+                    x: 530.0,
+                    y: 750.0,
+                    label: "1 an",
+                },
+                Step::Click {
+                    x: 360.0,
+                    y: 165.0,
+                    label: "recherche",
+                },
+                Step::Type("Pierre d'entourage"),
+                Step::Pause(Duration::from_secs(1)),
+                Step::Capture("combats-pierre"),
             ]);
         }
         if name == "recap" {
@@ -314,6 +347,18 @@ pub fn history_scenario() -> Vec<Step> {
                     x: 550.0,
                     y: 241.0,
                     label: "premier échange",
+                },
+                // Clic droit sur l'Amulamoogrr acquise : même menu de correction.
+                Step::RightClick {
+                    x: 400.0,
+                    y: 776.0,
+                    label: "amulamoogrr",
+                },
+                Step::Capture("echanges-correction"),
+                Step::Click {
+                    x: 150.0,
+                    y: 400.0,
+                    label: "hors du menu",
                 },
             ]);
             // Plus bas dans la liste : kamas et objets cédés.
@@ -612,7 +657,7 @@ mod tests {
                 .iter()
                 .filter(|s| matches!(s, Step::Capture(_)))
                 .count(),
-            25
+            28
         );
     }
 
