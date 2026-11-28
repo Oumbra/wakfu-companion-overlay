@@ -334,6 +334,7 @@ impl HistoryStore {
             .collect();
         let mut stmt = self.conn.prepare_cached(
             "SELECT trade_id, direction, item_id, item_name, quantity FROM trade_items
+             WHERE quantity > 0
              ORDER BY trade_id, direction, line_index",
         )?;
         let mut rows = stmt.query(params![])?;

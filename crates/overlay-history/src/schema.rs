@@ -156,6 +156,10 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     ALTER TABLE fight_loot ADD COLUMN corrected INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE purchases ADD COLUMN corrected INTEGER NOT NULL DEFAULT 0;
     ",
+    // Version 4 (2026-11-28) — même chose pour les objets d'un échange.
+    "
+    ALTER TABLE trade_items ADD COLUMN corrected INTEGER NOT NULL DEFAULT 0;
+    ",
 ];
 
 /// La version de schéma que ce binaire sait lire et écrire.

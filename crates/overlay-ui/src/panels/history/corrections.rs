@@ -3,10 +3,11 @@
 //!
 //! Quand le référentiel porte plusieurs objets du même nom (raretés différentes, « Larme
 //! d'Ogrest »…), la résolution par nom seul ne sait pas lequel le log désignait. Une ligne de
-//! butin ou d'achat concernée porte une petite clé plate ; un clic sur elle, ou un clic droit sur
-//! la ligne, ouvre le menu : choisir l'objet juste parmi les homonymes, pour tout ou partie du lot
-//! (butin) ou pour les achats cochés (achats). L'écriture passe par
-//! `HistoryStore::reassign_fight_loot` / `reassign_purchases`, et les vues relisent la base.
+//! butin, d'échange ou d'achat concernée porte une petite clé plate ; un clic sur elle, ou un clic
+//! droit sur la ligne, ouvre le menu : choisir l'objet juste parmi les homonymes, pour tout ou
+//! partie du lot (butin, échange) ou pour les achats cochés (achats). L'écriture passe par
+//! `HistoryStore::reassign_fight_loot` / `reassign_trade_item` / `reassign_purchases`, et les vues
+//! relisent la base.
 //!
 //! Les vues **demandent** l'ouverture ([`open`]) ; la fenêtre peint le menu par-dessus tout
 //! ([`show`]), une fois par frame, et dit si la base a changé.
@@ -42,6 +43,13 @@ pub enum Target {
     },
     /// Les achats d'une ligne de la vue Achats (cumul d'un objet sur un jour).
     Purchases(Vec<PurchaseRecord>),
+    /// Un objet d'un échange, dans son sens — même menu que le butin.
+    TradeItem {
+        trade_id: i64,
+        side: overlay_history::TradeSide,
+        item_name: Option<String>,
+        quantity: i64,
+    },
 }
 
 /// Une demande d'ouverture du menu.
@@ -135,12 +143,14 @@ pub fn show(
         request
     }) {
         let quantity = match &request.target {
-            Target::FightLoot { quantity, .. } => (*quantity).max(1),
+            Target::FightLoot { quantity, .. } | Target::TradeItem { quantity, .. } => {
+                (*quantity).max(1)
+            }
             Target::Purchases(_) => 1,
         };
         let selected = match &request.target {
             Target::Purchases(records) => records.iter().map(|record| record.id).collect(),
-            Target::FightLoot { .. } => HashSet::new(),
+            Target::FightLoot { .. } | Target::TradeItem { .. } => HashSet::new(),
         };
         state.open = Some(Open {
             request,
@@ -199,7 +209,7 @@ pub fn show(
                 return;
             }
             match &open.request.target {
-                Target::FightLoot { quantity, .. } => {
+                Target::FightLoot { quantity, .. } | Target::TradeItem { quantity, .. } => {
                     quantity_row(ui, &mut open.quantity, (*quantity).max(1));
                 }
                 Target::Purchases(records) => {
@@ -207,7 +217,7 @@ pub fn show(
                 }
             }
             let has_selection = match &open.request.target {
-                Target::FightLoot { .. } => true,
+                Target::FightLoot { .. } | Target::TradeItem { .. } => true,
                 Target::Purchases(_) => !open.selected.is_empty(),
             };
             for &id in &candidates {
@@ -234,6 +244,21 @@ pub fn show(
             } => store
                 .reassign_fight_loot(
                     *fight_id,
+                    open.request.current_id,
+                    item_name.as_deref(),
+                    open.quantity,
+                    new_id,
+                )
+                .map(|moved| moved > 0),
+            Target::TradeItem {
+                trade_id,
+                side,
+                item_name,
+                ..
+            } => store
+                .reassign_trade_item(
+                    *trade_id,
+                    *side,
                     open.request.current_id,
                     item_name.as_deref(),
                     open.quantity,

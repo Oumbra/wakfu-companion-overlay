@@ -8,10 +8,10 @@ use egui::{Align2, Color32, Rect, Sense, Ui};
 use overlay_engine::roster::normalize_wakfu_name;
 use overlay_engine::CatalogIndex;
 use overlay_history::read::{ItemLine, TradeRow};
-use overlay_history::HistoryStore;
+use overlay_history::{HistoryStore, TradeSide};
 
 use super::items::{self, CompactRow, DayTail, ListState};
-use super::{format, HistoryContext};
+use super::{corrections, format, HistoryContext};
 use crate::design::{self, text, tokens};
 use crate::remote_icons::RemoteIconTextures;
 
@@ -72,13 +72,23 @@ fn section_height(lines: &[ItemLine]) -> f32 {
 }
 
 /// Les colonnes d'objets non vides : (libellé, couleur, lignes).
-fn sections(trade: &TradeRow) -> Vec<(&'static str, Color32, &[ItemLine])> {
+fn sections(trade: &TradeRow) -> Vec<(&'static str, Color32, TradeSide, &[ItemLine])> {
     [
-        ("ACQUIS", items::GAIN, trade.acquired.as_slice()),
-        ("CÉDÉS", items::LOSS, trade.given.as_slice()),
+        (
+            "ACQUIS",
+            items::GAIN,
+            TradeSide::Acquired,
+            trade.acquired.as_slice(),
+        ),
+        (
+            "CÉDÉS",
+            items::LOSS,
+            TradeSide::Given,
+            trade.given.as_slice(),
+        ),
     ]
     .into_iter()
-    .filter(|(_, _, lines)| !lines.is_empty())
+    .filter(|(_, _, _, lines)| !lines.is_empty())
     .collect()
 }
 
@@ -93,7 +103,9 @@ fn entry_height(trade: &TradeRow, width: f32, open: bool) -> f32 {
     }
     let sections = sections(trade);
     if !sections.is_empty() {
-        let heights = sections.iter().map(|(_, _, lines)| section_height(lines));
+        let heights = sections
+            .iter()
+            .map(|(_, _, _, lines)| section_height(lines));
         if width < STACK_BELOW {
             height += heights.clone().sum::<f32>() + COLUMN_GAP * (sections.len() - 1) as f32;
         } else {
@@ -300,7 +312,7 @@ fn trade_entry(
     let columns = if stacked { 1 } else { sections.len() };
     let column_width = (inner.width() - COLUMN_GAP * (columns - 1) as f32) / columns as f32;
     let mut x = inner.left();
-    for (label, color, lines) in sections {
+    for (label, color, side, lines) in sections {
         let height = section_height(lines);
         let section = Rect::from_min_size(egui::pos2(x, y), egui::vec2(column_width, height));
         painter.rect_filled(section, 6.0, WELL);
@@ -313,12 +325,42 @@ fn trade_entry(
             color,
         );
         let mut row_top = content.top() + SECTION_LABEL + SECTION_LABEL_GAP;
-        for line in lines {
+        for (line_index, line) in lines.iter().enumerate() {
             let row = Rect::from_min_size(
                 egui::pos2(content.left(), row_top),
                 egui::vec2(content.width(), ITEM_ROW.height),
             );
-            items::paint_compact_item(ui, &painter, row, line, ITEM_ROW, ctx, textures);
+            // Un objet aux homonymes se corrige, comme le butin d'un combat.
+            let name = items::item_name(line, ctx.catalog);
+            let fixable = corrections::correctable(ctx, &name);
+            let fix = items::paint_compact_item_with_fix(
+                ui, &painter, row, line, ITEM_ROW, fixable, ctx, textures,
+            );
+            let trigger = fix.and_then(|fix| {
+                corrections::row_trigger(
+                    ui,
+                    row,
+                    fix,
+                    ui.id()
+                        .with(("echange-correction", trade.id, label, line_index)),
+                )
+            });
+            if let Some(pos) = trigger {
+                corrections::open(
+                    ui.ctx(),
+                    corrections::Request {
+                        name,
+                        current_id: line.item_id,
+                        pos,
+                        target: corrections::Target::TradeItem {
+                            trade_id: trade.id,
+                            side,
+                            item_name: line.item_name.clone(),
+                            quantity: line.quantity,
+                        },
+                    },
+                );
+            }
             row_top += ITEM_ROW.height + ITEM_GAP;
         }
         if stacked {

@@ -18,6 +18,7 @@
 
 mod account;
 mod correct;
+pub use correct::TradeSide;
 mod derive;
 pub mod import;
 pub mod read;

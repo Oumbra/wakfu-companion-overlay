@@ -295,7 +295,8 @@ fn write_trade(
         "INSERT INTO trade_items (trade_id, direction, line_index, item_id, item_name, quantity)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT (trade_id, direction, line_index) DO UPDATE SET
-            item_id = excluded.item_id, item_name = excluded.item_name",
+            item_id = excluded.item_id, item_name = excluded.item_name
+         WHERE trade_items.corrected = 0",
     )?;
     let (mut acquired, mut given) = (0i64, 0i64);
     for row in &trade.items {

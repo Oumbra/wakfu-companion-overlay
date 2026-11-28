@@ -90,3 +90,49 @@ fn corriger_un_achat_resiste_a_la_relecture() {
     record(&mut store, &[purchase]);
     assert_eq!(store.purchases().unwrap()[0].item_id, Some(11));
 }
+
+#[test]
+fn corriger_un_objet_d_echange_dans_son_sens() {
+    let mut store = store();
+    let item = |direction, quantity| TradeItemPayload {
+        direction,
+        item_id: Some(10),
+        item_name: None,
+        quantity,
+    };
+    let trade = SyncEvent {
+        kind: HistoryEventKind::Trade,
+        signature: "t1".to_string(),
+        payload: HistoryPayload::Trade(TradePayload {
+            peer_name: "Anonyme-42".to_string(),
+            self_name: "Anonyme-Iop1".to_string(),
+            occurred_at: "2026-11-27T12:00:00.000Z".to_string(),
+            kamas_acquired: 0,
+            kamas_given: 0,
+            game_server: None,
+            items: vec![
+                item(TradeDirection::Acquired, 3),
+                item(TradeDirection::Given, 1),
+            ],
+        }),
+    };
+    record(&mut store, std::slice::from_ref(&trade));
+    let id = store.trades().unwrap()[0].id;
+    let moved = store
+        .reassign_trade_item(id, TradeSide::Acquired, Some(10), None, 2, 11)
+        .unwrap();
+    assert_eq!(moved, 2);
+    record(&mut store, &[trade]);
+    let trade = &store.trades().unwrap()[0];
+    let lines = |list: &[read::ItemLine]| -> Vec<(Option<i64>, i64)> {
+        list.iter()
+            .map(|line| (line.item_id, line.quantity))
+            .collect()
+    };
+    assert_eq!(lines(&trade.acquired), vec![(Some(10), 1), (Some(11), 2)]);
+    assert_eq!(
+        lines(&trade.given),
+        vec![(Some(10), 1)],
+        "l'autre sens n'a pas bougé"
+    );
+}
